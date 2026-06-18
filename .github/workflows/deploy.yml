@@ -1,0 +1,100 @@
+name: Deploy CelTuc
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: celtuc-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  DEPLOY_HOST: 38.105.209.147
+  DEPLOY_USER: root
+  DEPLOY_PATH: /var/www/celtuc
+  DEPLOY_URL: https://celtuc.scripthouse.com.ar
+
+jobs:
+  deploy:
+    name: Deploy production
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://celtuc.scripthouse.com.ar
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${{ secrets.CONTABO_SSH_PRIVATE_KEY }}" > ~/.ssh/contabo-deploy
+          chmod 600 ~/.ssh/contabo-deploy
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Preflight server
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/contabo-deploy "$DEPLOY_USER@$DEPLOY_HOST" \
+            "test -d '$DEPLOY_PATH' && docker compose version"
+
+      - name: Sync project files
+        shell: bash
+        run: |
+          set -euo pipefail
+          rsync -az --delete \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='.vscode/' \
+            --exclude='frontend/node_modules/' \
+            --exclude='frontend/dist/' \
+            --exclude='frontend/*.tsbuildinfo' \
+            --exclude='*.log' \
+            -e "ssh -i ~/.ssh/contabo-deploy" \
+            ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+
+      - name: Build and restart
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/contabo-deploy "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd '$DEPLOY_PATH' && chmod +x deploy.sh && ./deploy.sh"
+
+      - name: Verify container
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/contabo-deploy "$DEPLOY_USER@$DEPLOY_HOST" \
+            "for i in \$(seq 1 24); do
+              status=\$(docker inspect -f '{{.State.Health.Status}}' celtuc 2>/dev/null || true)
+              docker ps --filter name=celtuc --format 'table {{.Names}}\t{{.Status}}'
+              if [ \"\$status\" = healthy ]; then exit 0; fi
+              sleep 5
+            done
+            docker logs --tail=120 celtuc
+            exit 1"
+
+      - name: Verify public URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$DEPLOY_URL/" || true)
+            if [ "$code" = "200" ]; then
+              echo "OK ($code): $DEPLOY_URL"
+              exit 0
+            fi
+            echo "intento $i/20: $DEPLOY_URL devolvio '$code'; reintento en 5s..."
+            sleep 5
+          done
+          echo "ERROR: $DEPLOY_URL no devolvio 200 tras 20 intentos."
+          exit 1
