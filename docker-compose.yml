@@ -1,0 +1,28 @@
+services:
+  celtuc:
+    build:
+      context: .
+    image: celtuc:latest
+    container_name: celtuc
+    restart: unless-stopped
+    networks:
+      - web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=web"
+      # HTTPS
+      - "traefik.http.routers.celtuc.rule=Host(`celtuc.scripthouse.com.ar`)"
+      - "traefik.http.routers.celtuc.entrypoints=websecure"
+      - "traefik.http.routers.celtuc.tls=true"
+      - "traefik.http.routers.celtuc.tls.certresolver=letsencrypt"
+      # HTTP -> redirección a HTTPS
+      - "traefik.http.routers.celtuc-http.rule=Host(`celtuc.scripthouse.com.ar`)"
+      - "traefik.http.routers.celtuc-http.entrypoints=web"
+      - "traefik.http.routers.celtuc-http.middlewares=celtuc-https-redirect"
+      - "traefik.http.middlewares.celtuc-https-redirect.redirectscheme.scheme=https"
+      # Puerto interno del contenedor (nginx)
+      - "traefik.http.services.celtuc.loadbalancer.server.port=80"
+
+networks:
+  web:
+    external: true
