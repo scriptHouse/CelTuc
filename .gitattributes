@@ -1,0 +1,6 @@
+# El proyecto se compila y corre en Linux: forzar LF en todo el texto evita que
+# Windows introduzca CRLF y rompa scripts (deploy.sh) o el build en el server.
+* text=auto eol=lf
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.conf text eol=lf
