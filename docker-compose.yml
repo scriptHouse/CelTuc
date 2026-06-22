@@ -5,6 +5,10 @@ services:
     image: celtuc:latest
     container_name: celtuc
     restart: unless-stopped
+    # Variables reales (SECRET_KEY, DATABASE_URL, etc.). El archivo .env vive
+    # solo en el servidor (gitignored); en el repo está .env.example.
+    env_file:
+      - .env
     networks:
       - web
     labels:

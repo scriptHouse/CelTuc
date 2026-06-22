@@ -1,0 +1,12 @@
+# Entorno virtual y secretos
+.venv/
+.env
+
+# Base de datos local y estaticos compilados
+db.sqlite3
+staticfiles/
+media/
+
+# Cache de Python
+__pycache__/
+*.py[cod]

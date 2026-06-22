@@ -44,17 +44,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # El .env (secretos + DATABASE_URL) vive solo en el servidor. Si falta,
+          # cortamos antes de desplegar un backend que no podria arrancar.
           ssh -i ~/.ssh/contabo-deploy "$DEPLOY_USER@$DEPLOY_HOST" \
-            "test -d '$DEPLOY_PATH' && docker compose version"
+            "test -d '$DEPLOY_PATH' && test -f '$DEPLOY_PATH/.env' && docker compose version"
 
       - name: Sync project files
         shell: bash
         run: |
           set -euo pipefail
+          # --delete mantiene el server igual al repo, pero excluimos lo que solo
+          # vive en el servidor (.env) o se genera en runtime, para no borrarlo.
           rsync -az --delete \
             --exclude='.git/' \
             --exclude='.github/' \
             --exclude='.vscode/' \
+            --exclude='.env' \
+            --exclude='backend/.env' \
+            --exclude='backend/.venv/' \
+            --exclude='backend/db.sqlite3' \
+            --exclude='backend/staticfiles/' \
             --exclude='frontend/node_modules/' \
             --exclude='frontend/dist/' \
             --exclude='frontend/*.tsbuildinfo' \
@@ -67,7 +76,7 @@ jobs:
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/contabo-deploy "$DEPLOY_USER@$DEPLOY_HOST" \
-            "cd '$DEPLOY_PATH' && chmod +x deploy.sh && ./deploy.sh"
+            "cd '$DEPLOY_PATH' && chmod +x deploy.sh deploy/entrypoint.sh && ./deploy.sh"
 
       - name: Verify container
         shell: bash
@@ -77,7 +86,10 @@ jobs:
             "for i in \$(seq 1 24); do
               status=\$(docker inspect -f '{{.State.Health.Status}}' celtuc 2>/dev/null || true)
               docker ps --filter name=celtuc --format 'table {{.Names}}\t{{.Status}}'
-              if [ \"\$status\" = healthy ]; then exit 0; fi
+              if [ \"\$status\" = healthy ]; then
+                docker exec celtuc curl -fsS http://127.0.0.1/api/health/
+                exit 0
+              fi
               sleep 5
             done
             docker logs --tail=120 celtuc
@@ -87,14 +99,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Tras reiniciar, Traefik tarda unos segundos en registrar el backend.
+          # Reintentamos /api/health/ (backend) en vez de fallar al primer intento.
           for i in $(seq 1 20); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$DEPLOY_URL/" || true)
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$DEPLOY_URL/api/health/" || true)
             if [ "$code" = "200" ]; then
-              echo "OK ($code): $DEPLOY_URL"
+              echo "OK ($code): $DEPLOY_URL/api/health/"
               exit 0
             fi
-            echo "intento $i/20: $DEPLOY_URL devolvio '$code'; reintento en 5s..."
+            echo "intento $i/20: $DEPLOY_URL/api/health/ devolvio '$code'; reintento en 5s..."
             sleep 5
           done
-          echo "ERROR: $DEPLOY_URL no devolvio 200 tras 20 intentos."
+          echo "ERROR: $DEPLOY_URL/api/health/ no devolvio 200 tras 20 intentos."
           exit 1

@@ -1,9 +1,15 @@
 # CelTuc · Software de gestión
 
 Aplicación web de gestión para **CelTuc** (tienda de celulares y accesorios, Tucumán).
-Por ahora es **solo frontend**: los datos viven en el navegador (localStorage) y los
-servicios devuelven promesas, así que cuando exista un backend solo cambia la carpeta
+
+El **frontend** (React + Vite) todavía guarda los datos en el navegador (localStorage) y
+sus servicios devuelven promesas, así que migrarlo al backend será cambiar la carpeta
 `services/` sin tocar las pantallas.
+
+El **backend** (Django + DRF, en `backend/`) ya está iniciado con lo mínimo: las tablas
+propias de Django y una tabla de **usuarios** (login por email, JWT). Misma arquitectura
+que GLUNOT: un solo contenedor donde **nginx** sirve el frontend y hace de proxy del
+**gunicorn/Django** en `/api/` y `/admin/`.
 
 ## Stack
 
@@ -72,3 +78,55 @@ frontend/src
 ├── types/             # tipos del dominio
 └── index.css          # tokens (@theme) + animaciones ct-*
 ```
+
+## Backend (Django + DRF)
+
+Vive en `backend/`. Stack: **Django 6**, **Django REST Framework**, **JWT** (PyJWT),
+**Postgres** en producción (SQLite en local), admin con **django-unfold**.
+
+```
+backend/
+├── celtuc/            # proyecto Django (settings, urls, wsgi/asgi)
+├── usuarios/          # app de usuarios: modelo Usuario, auth JWT, admin
+│   ├── models.py      # Usuario (tabla `usuarios`)
+│   ├── managers.py    # alta por email (sin username)
+│   ├── tokens.py      # emisión/validación de JWT
+│   ├── authentication.py / serializers.py / views.py / urls.py
+│   └── migrations/
+├── manage.py
+└── requirements.txt
+```
+
+Por ahora solo hay **dos grupos de tablas**: las que necesita Django (auth, sesiones,
+permisos, migraciones, log del admin) y la tabla **`usuarios`**. El usuario se identifica
+por **email** y tiene: nombre, apellido, documento (DNI), teléfono, rol
+(administrador / encargado / vendedor), estado (activo, acceso al panel, superusuario) y
+fechas de alta/actualización. Las cuentas las crea un administrador (no hay autoregistro).
+
+### Endpoints
+
+- `POST /api/auth/login/` → `{ access, refresh, user }`
+- `POST /api/auth/refresh/` → renueva los tokens
+- `GET/PATCH /api/auth/me/` → datos del usuario autenticado
+- `GET /api/health/` → estado del contenedor
+- `/admin/` → panel de administración (gestión de usuarios)
+
+### Correr el backend en local
+
+```bash
+cd backend
+py -3.13 -m venv .venv
+.venv\Scripts\activate          # PowerShell: .venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+copy .env.example .env           # opcional; sin DATABASE_URL usa SQLite
+python manage.py migrate
+python manage.py createsuperuser
+python manage.py runserver       # API en http://127.0.0.1:8000
+```
+
+### Despliegue
+
+Igual que el frontend: `git push` a `main` dispara GitHub Actions → `deploy.sh` en el VPS.
+Antes del **primer** deploy con backend hay que crear la base `celtuc` en el Postgres
+central y dejar el `.env` (con `DATABASE_URL`) en `/var/www/celtuc/` del servidor. El
+`entrypoint.sh` corre `migrate` y `collectstatic` solo en cada arranque.
