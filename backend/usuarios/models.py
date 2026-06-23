@@ -14,6 +14,65 @@ username_validator = RegexValidator(
 )
 
 
+class Permiso(models.Model):
+    """Permiso atomico del sistema.
+
+    Hoy cada permiso representa el acceso a un modulo del panel (un item del
+    sidebar). El catalogo se siembra por migracion y se puede ampliar agregando
+    filas, sin tocar codigo: cada `codigo` se mapea a un modulo en el frontend.
+    """
+
+    codigo = models.SlugField('codigo', max_length=50, unique=True)
+    nombre = models.CharField('nombre', max_length=80)
+    descripcion = models.CharField('descripcion', max_length=200, blank=True)
+    orden = models.PositiveSmallIntegerField('orden', default=0)
+
+    class Meta:
+        db_table = 'permisos'
+        verbose_name = 'permiso'
+        verbose_name_plural = 'permisos'
+        ordering = ('orden', 'nombre')
+
+    def __str__(self):
+        return self.nombre
+
+
+class Rol(models.Model):
+    """Conjunto de permisos asignable a una cuenta (RBAC).
+
+    - `es_admin`: el rol concede administracion total (gestiona roles, empleados
+      y usuarios) y ve todos los modulos, sin importar la lista `permisos`.
+    - `es_sistema`: roles base (Administrador, Empleado) que no se pueden eliminar
+      ni cambiar su naturaleza de admin. Sus permisos si se pueden ajustar.
+    """
+
+    nombre = models.CharField('nombre', max_length=60, unique=True)
+    descripcion = models.CharField('descripcion', max_length=200, blank=True)
+    es_admin = models.BooleanField(
+        'administra el sistema',
+        default=False,
+        help_text='Acceso total: gestiona roles, empleados y usuarios, y ve todos los modulos.',
+    )
+    es_sistema = models.BooleanField(
+        'rol del sistema',
+        default=False,
+        help_text='Roles base que no se pueden eliminar.',
+    )
+    permisos = models.ManyToManyField(
+        Permiso, blank=True, related_name='roles', verbose_name='permisos',
+    )
+    creado = models.DateTimeField('fecha de alta', auto_now_add=True)
+
+    class Meta:
+        db_table = 'roles'
+        verbose_name = 'rol'
+        verbose_name_plural = 'roles'
+        ordering = ('nombre',)
+
+    def __str__(self):
+        return self.nombre
+
+
 class Usuario(AbstractBaseUser, PermissionsMixin):
     """Usuario del sistema de gestion CelTuc.
 
@@ -34,6 +93,16 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
     is_active = models.BooleanField('activo', default=True)
     is_staff = models.BooleanField('acceso al panel', default=False)
     # is_superuser, groups y user_permissions los aporta PermissionsMixin.
+
+    rol = models.ForeignKey(
+        Rol,
+        verbose_name='rol',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='usuarios',
+        help_text='Define a que modulos puede entrar la cuenta. Vacio = sin acceso.',
+    )
 
     date_joined = models.DateTimeField('fecha de alta', default=timezone.now)
 
@@ -61,3 +130,28 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
         if self.username:
             self.username = self.username.lower()
         super().save(*args, **kwargs)
+
+    @property
+    def es_administrador(self) -> bool:
+        """Acceso total al sistema.
+
+        Lo es el superusuario (dueño, intacto), el staff de Django (compat con el
+        esquema previo) y cualquier cuenta con un rol marcado `es_admin`.
+        """
+        return bool(
+            self.is_superuser
+            or self.is_staff
+            or (self.rol_id and self.rol.es_admin)
+        )
+
+    def codigos_permisos(self) -> list[str]:
+        """Codigos de los modulos visibles para esta cuenta.
+
+        Los administradores ven todo; el resto, solo lo que conceda su rol; una
+        cuenta sin rol no ve ningun modulo.
+        """
+        if self.es_administrador:
+            return list(Permiso.objects.values_list('codigo', flat=True))
+        if self.rol_id:
+            return list(self.rol.permisos.values_list('codigo', flat=True))
+        return []

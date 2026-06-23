@@ -4,7 +4,7 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.forms import ReadOnlyPasswordHashField
 from unfold.admin import ModelAdmin
 
-from .models import Usuario
+from .models import Permiso, Rol, Usuario
 
 
 class UsuarioCreationForm(forms.ModelForm):
@@ -54,6 +54,7 @@ class UsuarioAdmin(BaseUserAdmin, ModelAdmin):
     readonly_fields = ('last_login', 'date_joined')
     fieldsets = (
         (None, {'fields': ('email', 'username', 'password')}),
+        ('Rol y acceso', {'fields': ('rol',)}),
         ('Permisos', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
         ('Fechas', {'fields': ('last_login', 'date_joined')}),
     )
@@ -62,7 +63,26 @@ class UsuarioAdmin(BaseUserAdmin, ModelAdmin):
             None,
             {
                 'classes': ('wide',),
-                'fields': ('email', 'username', 'password1', 'password2', 'is_active', 'is_staff', 'is_superuser'),
+                'fields': ('email', 'username', 'password1', 'password2', 'rol', 'is_active', 'is_staff', 'is_superuser'),
             },
         ),
     )
+
+
+@admin.register(Rol)
+class RolAdmin(ModelAdmin):
+    list_display = ('nombre', 'es_admin', 'es_sistema', 'cantidad_usuarios')
+    list_filter = ('es_admin', 'es_sistema')
+    search_fields = ('nombre', 'descripcion')
+    filter_horizontal = ('permisos',)
+
+    @admin.display(description='Cuentas')
+    def cantidad_usuarios(self, obj):
+        return obj.usuarios.count()
+
+
+@admin.register(Permiso)
+class PermisoAdmin(ModelAdmin):
+    list_display = ('nombre', 'codigo', 'orden')
+    search_fields = ('nombre', 'codigo')
+    ordering = ('orden', 'nombre')

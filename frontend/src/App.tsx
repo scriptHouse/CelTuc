@@ -1,6 +1,7 @@
 import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom'
 import { Layout } from '@/components/Layout'
 import { RequireAuth } from '@/components/RequireAuth'
+import { RequirePermiso } from '@/components/RequirePermiso'
 import { LoginPage } from '@/pages/LoginPage'
 import { PanelPage } from '@/pages/PanelPage'
 import { InventarioPage } from '@/pages/InventarioPage'
@@ -17,11 +18,11 @@ const router = createBrowserRouter([
       </RequireAuth>
     ),
     children: [
-      { path: '/', element: <PanelPage /> },
-      { path: '/inventario', element: <InventarioPage /> },
-      { path: '/facturacion', element: <FacturacionPage /> },
-      { path: '/empleados', element: <EmpleadosPage /> },
-      { path: '/usuarios', element: <UsuariosPage /> },
+      { path: '/', element: <RequirePermiso permiso="ver_panel"><PanelPage /></RequirePermiso> },
+      { path: '/inventario', element: <RequirePermiso permiso="ver_inventario"><InventarioPage /></RequirePermiso> },
+      { path: '/facturacion', element: <RequirePermiso permiso="ver_facturacion"><FacturacionPage /></RequirePermiso> },
+      { path: '/empleados', element: <RequirePermiso permiso="ver_empleados"><EmpleadosPage /></RequirePermiso> },
+      { path: '/usuarios', element: <RequirePermiso soloAdmin><UsuariosPage /></RequirePermiso> },
       { path: '*', element: <Navigate to="/" replace /> },
     ],
   },

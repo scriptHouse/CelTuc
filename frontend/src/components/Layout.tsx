@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { LogOut } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/store/auth'
+import { esAdmin, puedeVer } from '@/lib/permisos'
 import { useConfirm } from '@/components/ConfirmProvider'
 import { BrandMark, BrandWordmark } from '@/components/Brand'
 import { navItems } from '@/components/navItems'
@@ -15,9 +16,15 @@ import { navItems } from '@/components/navItems'
 export function Layout() {
   const usuario = useAuth((s) => s.usuario)
   const logout = useAuth((s) => s.logout)
-  // Solo los administradores ven los ítems marcados `soloAdmin`.
-  const items = navItems.filter(
-    (item) => !item.soloAdmin || Boolean(usuario?.is_staff) || Boolean(usuario?.is_superuser),
+  const refrescarUsuario = useAuth((s) => s.refrescarUsuario)
+  // Cada vez que entra al panel, refrescamos rol/permisos: si un admin cambió la
+  // configuración del rol, el sidebar se actualiza sin tener que re-loguear.
+  useEffect(() => {
+    refrescarUsuario()
+  }, [refrescarUsuario])
+  // El sidebar muestra cada módulo según los permisos del rol (los admin ven todo).
+  const items = navItems.filter((item) =>
+    item.soloAdmin ? esAdmin(usuario) : puedeVer(usuario, item.permiso),
   )
   const navigate = useNavigate()
   const confirm = useConfirm()

@@ -1,7 +1,7 @@
 from django.core.validators import MinLengthValidator
 from rest_framework import serializers
 
-from usuarios.models import Usuario, username_validator
+from usuarios.models import Rol, Usuario, username_validator
 
 from .models import Empleado
 
@@ -9,9 +9,16 @@ from .models import Empleado
 class UsuarioBreveSerializer(serializers.ModelSerializer):
     """Vista mínima de la cuenta de login vinculada a un empleado."""
 
+    rol = serializers.SerializerMethodField()
+
     class Meta:
         model = Usuario
-        fields = ('id', 'username', 'email', 'is_active')
+        fields = ('id', 'username', 'email', 'is_active', 'rol')
+
+    def get_rol(self, obj):
+        if not obj.rol_id:
+            return None
+        return {'id': obj.rol_id, 'nombre': obj.rol.nombre, 'es_admin': obj.rol.es_admin}
 
 
 class EmpleadoSerializer(serializers.ModelSerializer):
@@ -59,6 +66,11 @@ class AccesoSerializer(serializers.Serializer):
         write_only=True, required=False, allow_blank=True,
         style={'input_type': 'password'},
     )
+    # Rol que define a que modulos entra el empleado. Opcional: si no se manda al
+    # crear el acceso, se asigna el rol "Empleado" por defecto.
+    rol_id = serializers.PrimaryKeyRelatedField(
+        queryset=Rol.objects.all(), required=False, allow_null=True,
+    )
 
     @property
     def empleado(self):
@@ -93,10 +105,17 @@ class AccesoSerializer(serializers.Serializer):
     def save(self):
         empleado = self.empleado
         data = self.validated_data
+        es_nuevo = empleado.usuario is None
         user = empleado.usuario or Usuario(is_staff=False, is_superuser=False)
         user.username = data['username']
         user.email = data['email']
         user.is_active = True
+        # Asignacion de rol: si viene `rol_id` se respeta (incluido null para
+        # quitarlo); si es una cuenta nueva sin rol explicito, va el "Empleado".
+        if 'rol_id' in data:
+            user.rol = data['rol_id']
+        elif es_nuevo:
+            user.rol = Rol.objects.filter(nombre__iexact='Empleado').first()
         if data.get('password'):
             user.set_password(data['password'])
         user.save()

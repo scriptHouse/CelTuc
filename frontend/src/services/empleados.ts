@@ -20,6 +20,8 @@ export interface AccesoInput {
   email: string
   /** Vacío al editar = no cambia la contraseña. Requerido al crear el acceso. */
   password?: string
+  /** Rol que define a qué módulos entra el empleado. */
+  rol_id?: number | null
 }
 
 export function listarEmpleados(): Promise<Empleado[]> {

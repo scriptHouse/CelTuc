@@ -6,15 +6,32 @@ from .models import Usuario
 
 
 class UsuarioSerializer(serializers.ModelSerializer):
-    """Datos del usuario que devuelve la API (nunca la contrasena)."""
+    """Datos del usuario que devuelve la API (nunca la contrasena).
+
+    Incluye lo que el frontend necesita para decidir que modulos mostrar:
+    `es_administrador`, los `permisos` efectivos (codigos) y el `rol`.
+    """
+
+    es_administrador = serializers.BooleanField(read_only=True)
+    permisos = serializers.SerializerMethodField()
+    rol = serializers.SerializerMethodField()
 
     class Meta:
         model = Usuario
         fields = (
             'id', 'email', 'username',
             'is_active', 'is_staff', 'is_superuser', 'date_joined',
+            'es_administrador', 'permisos', 'rol',
         )
         read_only_fields = fields
+
+    def get_permisos(self, obj):
+        return obj.codigos_permisos()
+
+    def get_rol(self, obj):
+        if not obj.rol_id:
+            return None
+        return {'id': obj.rol_id, 'nombre': obj.rol.nombre, 'es_admin': obj.rol.es_admin}
 
 
 class LoginSerializer(serializers.Serializer):

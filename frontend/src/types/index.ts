@@ -6,7 +6,14 @@
  * conecte un backend real, sin tocar los componentes.
  */
 
-// ===== Sesión =====
+// ===== Sesión / Roles y permisos =====
+/** Rol resumido tal como viaja dentro del usuario o de un empleado. */
+export interface RolBreve {
+  id: number
+  nombre: string
+  es_admin: boolean
+}
+
 /** Usuario autenticado, tal como lo devuelve el backend (`/api/auth/me`, login). */
 export interface Usuario {
   id: number
@@ -16,6 +23,33 @@ export interface Usuario {
   is_staff?: boolean
   is_superuser?: boolean
   date_joined?: string
+  /** Acceso total (superusuario, staff o rol admin). Lo calcula el backend. */
+  es_administrador?: boolean
+  /** Códigos de los módulos que la cuenta puede ver (p. ej. `ver_inventario`). */
+  permisos?: string[]
+  /** Rol asignado a la cuenta, o null si no tiene. */
+  rol?: RolBreve | null
+}
+
+/** Permiso del catálogo (un módulo del panel). */
+export interface Permiso {
+  codigo: string
+  nombre: string
+  descripcion: string
+  orden: number
+}
+
+/** Rol completo, tal como lo administra el panel de Empleados. */
+export interface Rol {
+  id: number
+  nombre: string
+  descripcion: string
+  es_admin: boolean
+  es_sistema: boolean
+  /** Códigos de los permisos que concede el rol. */
+  permisos: string[]
+  cantidad_usuarios: number
+  creado: string
 }
 
 // ===== Inventario =====
@@ -114,6 +148,8 @@ export interface UsuarioBreve {
   username: string
   email: string
   is_active: boolean
+  /** Rol con el que esta cuenta entra al sistema, o null. */
+  rol?: RolBreve | null
 }
 
 export interface Empleado {

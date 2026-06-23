@@ -14,11 +14,12 @@ import {
   Pencil,
   Plus,
   ShieldCheck,
+  SlidersHorizontal,
   Trash2,
   UserPlus,
   Users,
 } from 'lucide-react'
-import type { Empleado } from '@/types'
+import type { Empleado, Rol } from '@/types'
 import {
   actualizarEmpleado,
   type AccesoInput,
@@ -29,6 +30,9 @@ import {
   listarEmpleados,
   quitarAcceso,
 } from '@/services/empleados'
+import { listarRoles } from '@/services/roles'
+import { useAuth } from '@/store/auth'
+import { esAdmin } from '@/lib/permisos'
 import { ApiError } from '@/lib/api'
 import { fecha } from '@/lib/format'
 import { ctStagger } from '@/lib/utils'
@@ -39,8 +43,10 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
+import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { RolesManager } from '@/components/RolesManager'
 import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
 
@@ -52,6 +58,8 @@ const schema = z
     username: z.string().trim(),
     email: z.string().trim(),
     password: z.string(),
+    /** Id del rol como string (lo maneja el Select); '' = sin rol. */
+    rolId: z.string(),
   })
   .superRefine((val, ctx) => {
     if (!val.tieneAcceso) return
@@ -74,13 +82,24 @@ export function EmpleadosPage() {
   const queryClient = useQueryClient()
   const toast = useToast()
   const confirm = useConfirm()
+  const usuario = useAuth((s) => s.usuario)
+  const admin = esAdmin(usuario)
 
   const { data: empleados = [], isLoading } = useQuery({
     queryKey: ['empleados'],
     queryFn: listarEmpleados,
   })
 
+  // Los roles sólo los necesita (y puede leer) un administrador, para el selector
+  // del formulario y el editor de roles.
+  const { data: roles = [] } = useQuery({
+    queryKey: ['roles'],
+    queryFn: listarRoles,
+    enabled: admin,
+  })
+
   const [modalOpen, setModalOpen] = useState(false)
+  const [rolesOpen, setRolesOpen] = useState(false)
   const [editando, setEditando] = useState<Empleado | null>(null)
 
   const invalidar = () => {
@@ -145,7 +164,12 @@ export function EmpleadosPage() {
   async function handleGuardar(values: FormData) {
     const input: EmpleadoInput = { nombre: values.nombre, apellido: values.apellido }
     const acceso: AccesoInput | null = values.tieneAcceso
-      ? { username: values.username, email: values.email, password: values.password || undefined }
+      ? {
+          username: values.username,
+          email: values.email,
+          password: values.password || undefined,
+          rol_id: values.rolId ? Number(values.rolId) : null,
+        }
       : null
     try {
       await guardar.mutateAsync({
@@ -169,10 +193,18 @@ export function EmpleadosPage() {
         subtitle="El equipo de CelTuc y quién puede iniciar sesión."
         className="ct-rise"
         actions={
-          <Button onClick={abrirNuevo}>
-            <Plus className="h-4 w-4" />
-            Nuevo empleado
-          </Button>
+          admin ? (
+            <>
+              <Button variant="outline" onClick={() => setRolesOpen(true)}>
+                <SlidersHorizontal className="h-4 w-4" />
+                Roles
+              </Button>
+              <Button onClick={abrirNuevo}>
+                <Plus className="h-4 w-4" />
+                Nuevo empleado
+              </Button>
+            </>
+          ) : undefined
         }
       />
 
@@ -194,12 +226,14 @@ export function EmpleadosPage() {
         <EmptyState
           icon={UserPlus}
           title="Sin empleados"
-          description="Sumá al primer integrante del equipo."
+          description={admin ? 'Sumá al primer integrante del equipo.' : 'Todavía no hay empleados cargados.'}
           action={
-            <Button onClick={abrirNuevo}>
-              <Plus className="h-4 w-4" />
-              Nuevo empleado
-            </Button>
+            admin ? (
+              <Button onClick={abrirNuevo}>
+                <Plus className="h-4 w-4" />
+                Nuevo empleado
+              </Button>
+            ) : undefined
           }
         />
       ) : (
@@ -221,7 +255,13 @@ export function EmpleadosPage() {
                     <p className="truncate text-sm text-ink-400">Sin acceso al sistema</p>
                   )}
                 </div>
-                {e.puede_loguear && (
+                {e.usuario?.rol && (
+                  <Badge tone={e.usuario.rol.es_admin ? 'solid' : 'soft'}>
+                    <ShieldCheck className="h-3 w-3" />
+                    {e.usuario.rol.nombre}
+                  </Badge>
+                )}
+                {!e.usuario?.rol && e.puede_loguear && (
                   <Badge tone="soft">
                     <ShieldCheck className="h-3 w-3" />
                     Acceso
@@ -237,14 +277,16 @@ export function EmpleadosPage() {
 
               <div className="mt-3 flex items-center justify-between border-t border-line pt-3">
                 <span className="tnum text-xs text-ink-400">Alta: {fecha(e.creado)}</span>
-                <div className="flex items-center gap-2">
-                  <IconBtn label="Editar" onClick={() => abrirEditar(e)}>
-                    <Pencil className="h-4 w-4" />
-                  </IconBtn>
-                  <IconBtn label="Eliminar" onClick={() => handleEliminar(e)}>
-                    <Trash2 className="h-4 w-4" />
-                  </IconBtn>
-                </div>
+                {admin && (
+                  <div className="flex items-center gap-2">
+                    <IconBtn label="Editar" onClick={() => abrirEditar(e)}>
+                      <Pencil className="h-4 w-4" />
+                    </IconBtn>
+                    <IconBtn label="Eliminar" onClick={() => handleEliminar(e)}>
+                      <Trash2 className="h-4 w-4" />
+                    </IconBtn>
+                  </div>
+                )}
               </div>
             </Card>
           ))}
@@ -254,10 +296,13 @@ export function EmpleadosPage() {
       <EmpleadoFormModal
         open={modalOpen}
         empleado={editando}
+        roles={roles}
         saving={guardar.isPending}
         onClose={() => setModalOpen(false)}
         onSubmit={handleGuardar}
       />
+
+      <RolesManager open={rolesOpen} onClose={() => setRolesOpen(false)} />
     </div>
   )
 }
@@ -267,18 +312,26 @@ export function EmpleadosPage() {
 function EmpleadoFormModal({
   open,
   empleado,
+  roles,
   saving,
   onClose,
   onSubmit,
 }: {
   open: boolean
   empleado: Empleado | null
+  roles: Rol[]
   saving: boolean
   onClose: () => void
   onSubmit: (values: FormData) => Promise<void>
 }) {
   const yaTieneAcceso = Boolean(empleado?.usuario)
   const [showPassword, setShowPassword] = useState(false)
+
+  // Rol "Empleado" del sistema: valor por defecto al crear un acceso nuevo.
+  const rolPorDefecto = useMemo(
+    () => roles.find((r) => r.nombre.toLowerCase() === 'empleado') ?? roles.find((r) => !r.es_admin) ?? roles[0],
+    [roles],
+  )
 
   const {
     register,
@@ -290,7 +343,9 @@ function EmpleadoFormModal({
     formState: { errors },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { nombre: '', apellido: '', tieneAcceso: false, username: '', email: '', password: '' },
+    defaultValues: {
+      nombre: '', apellido: '', tieneAcceso: false, username: '', email: '', password: '', rolId: '',
+    },
   })
 
   useEffect(() => {
@@ -303,10 +358,16 @@ function EmpleadoFormModal({
       username: empleado?.usuario?.username ?? '',
       email: empleado?.usuario?.email ?? '',
       password: '',
+      rolId: empleado?.usuario?.rol?.id
+        ? String(empleado.usuario.rol.id)
+        : rolPorDefecto
+          ? String(rolPorDefecto.id)
+          : '',
     })
-  }, [open, empleado, reset])
+  }, [open, empleado, reset, rolPorDefecto])
 
   const tieneAcceso = watch('tieneAcceso')
+  const rolId = watch('rolId')
 
   const internalSubmit = (values: FormData) => {
     // La contraseña solo es obligatoria al CREAR un acceso nuevo (al editar uno
@@ -356,6 +417,21 @@ function EmpleadoFormModal({
 
           {tieneAcceso && (
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <Select
+                  label="Rol"
+                  placeholder="Elegí un rol"
+                  value={rolId}
+                  onChange={(v) => setValue('rolId', v)}
+                  options={roles.map((r) => ({
+                    value: String(r.id),
+                    label: r.es_admin ? `${r.nombre} · acceso total` : r.nombre,
+                  }))}
+                />
+                <p className="mt-1.5 text-xs text-ink-400">
+                  Define a qué módulos entra este empleado. Configurá los roles con el botón “Roles”.
+                </p>
+              </div>
               <Campo label="Nombre de usuario" error={errors.username?.message}>
                 <div className="relative">
                   <AtSign className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />

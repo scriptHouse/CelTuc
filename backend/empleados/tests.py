@@ -2,7 +2,7 @@ from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
 
-from usuarios.models import Usuario
+from usuarios.models import Rol, Usuario
 
 from .models import Empleado
 
@@ -130,11 +130,34 @@ class EmpleadoAPITests(TestCase):
         )
         self.assertEqual(r.status_code, 400)
 
-    def test_no_staff_puede_leer_pero_no_escribir(self):
+    def test_con_permiso_ver_empleados_puede_leer_pero_no_escribir(self):
+        # El rol "Empleado" (sembrado por migracion) trae el permiso ver_empleados.
+        rol = Rol.objects.get(nombre='Empleado')
         regular = Usuario.objects.create_user(
-            email='r@celtuc.ar', username='regular', password='clave-segura-123',
+            email='r@celtuc.ar', username='regular', password='clave-segura-123', rol=rol,
         )
         self._auth(regular)
         self.assertEqual(self.client.get(reverse('empleados:list')).status_code, 200)
         r = self.client.post(reverse('empleados:list'), {'nombre': 'X'}, format='json')
         self.assertEqual(r.status_code, 403)
+
+    def test_sin_permiso_ver_empleados_no_puede_leer(self):
+        # Rol sin el permiso del modulo: ni siquiera puede listar.
+        rol = Rol.objects.create(nombre='Limitado')
+        regular = Usuario.objects.create_user(
+            email='lim@celtuc.ar', username='limitado', password='clave-segura-123', rol=rol,
+        )
+        self._auth(regular)
+        self.assertEqual(self.client.get(reverse('empleados:list')).status_code, 403)
+
+    def test_dar_acceso_asigna_rol_empleado_por_defecto(self):
+        self._auth()
+        emp = self.client.post(reverse('empleados:list'), {'nombre': 'Ana'}, format='json').data
+        self.client.put(
+            reverse('empleados:acceso', args=[emp['id']]),
+            {'username': 'ana', 'email': 'ana@celtuc.ar', 'password': 'clave-123'},
+            format='json',
+        )
+        u = Usuario.objects.get(username='ana')
+        self.assertIsNotNone(u.rol)
+        self.assertEqual(u.rol.nombre, 'Empleado')

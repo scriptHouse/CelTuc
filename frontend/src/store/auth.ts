@@ -15,6 +15,8 @@ interface AuthState {
   refresh: string | null
   /** Login real contra el backend: identificador (email O usuario) + contraseña. */
   login: (identifier: string, password: string) => Promise<void>
+  /** Refresca los datos del usuario (rol/permisos) desde `/api/auth/me/`. */
+  refrescarUsuario: () => Promise<void>
   logout: () => void
 }
 
@@ -25,7 +27,7 @@ interface AuthState {
  */
 export const useAuth = create<AuthState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       usuario: null,
       access: null,
       refresh: null,
@@ -33,13 +35,24 @@ export const useAuth = create<AuthState>()(
         const data = await api.post<LoginResponse>('/auth/login/', { identifier, password })
         set({ usuario: data.user, access: data.access, refresh: data.refresh })
       },
+      refrescarUsuario: async () => {
+        const access = get().access
+        if (!access) return
+        try {
+          const usuario = await api.get<Usuario>('/auth/me/', access)
+          set({ usuario })
+        } catch {
+          // Token vencido/invalidado: la próxima llamada protegida ya redirige al
+          // login; no rompemos la sesión actual de forma agresiva acá.
+        }
+      },
       logout: () => set({ usuario: null, access: null, refresh: null }),
     }),
     {
       name: 'celtuc-auth',
-      // v2: el modelo de sesión cambió (antes era demo sin credenciales). Al subir
-      // de versión, descartamos cualquier sesión vieja y obligamos a re-loguear.
-      version: 2,
+      // v3: el usuario ahora trae rol/permisos. Las sesiones viejas no los tienen,
+      // así que al subir de versión descartamos la sesión y obligamos a re-loguear.
+      version: 3,
       migrate: () => ({ usuario: null, access: null, refresh: null }),
       partialize: (s) => ({ usuario: s.usuario, access: s.access, refresh: s.refresh }),
     },

@@ -7,11 +7,12 @@ para mantener esos archivos enfocados.
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.validators import MinLengthValidator
 from django.shortcuts import get_object_or_404
-from rest_framework import permissions, serializers, status
+from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Usuario, username_validator
+from .permissions import EsAdministrador
 
 
 # --- Serializers -------------------------------------------------------------
@@ -132,7 +133,7 @@ class UsuarioUpdateSerializer(serializers.Serializer):
 # --- Vistas ------------------------------------------------------------------
 
 class UsuarioListCreateView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [EsAdministrador]
 
     def get(self, request):
         usuarios = Usuario.objects.select_related('empleado').order_by('username')
@@ -146,7 +147,7 @@ class UsuarioListCreateView(APIView):
 
 
 class UsuarioDetailView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [EsAdministrador]
 
     def patch(self, request, pk):
         user = get_object_or_404(Usuario, pk=pk)

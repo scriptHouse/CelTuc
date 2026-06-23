@@ -1,31 +1,20 @@
 from django.shortcuts import get_object_or_404
-from rest_framework import generics, permissions
+from rest_framework import generics
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from usuarios.permissions import EsAdministrador, LecturaConPermisoEscrituraAdmin
 
 from .models import Empleado
 from .serializers import AccesoSerializer, EmpleadoSerializer, EmpleadoWriteSerializer
 
 
-class LecturaAutenticadaEscrituraStaff(permissions.BasePermission):
-    """Leer: cualquier usuario autenticado. Crear/editar/borrar: solo staff.
-
-    Así, gestionar empleados (y darles acceso) queda reservado al admin; un
-    empleado con login común (no staff) no puede administrar al equipo.
-    """
-
-    def has_permission(self, request, view):
-        if not (request.user and request.user.is_authenticated):
-            return False
-        if request.method in permissions.SAFE_METHODS:
-            return True
-        return bool(request.user.is_staff)
-
-
 class EmpleadoListCreateView(generics.ListCreateAPIView):
-    queryset = Empleado.objects.select_related('usuario').all()
+    # Leer: quien tenga el permiso del modulo Empleados. Escribir: solo admin.
+    queryset = Empleado.objects.select_related('usuario', 'usuario__rol').all()
     serializer_class = EmpleadoSerializer
-    permission_classes = [LecturaAutenticadaEscrituraStaff]
+    permission_classes = [LecturaConPermisoEscrituraAdmin]
+    permiso_requerido = 'ver_empleados'
 
     def create(self, request, *args, **kwargs):
         write = EmpleadoWriteSerializer(data=request.data)
@@ -35,9 +24,10 @@ class EmpleadoListCreateView(generics.ListCreateAPIView):
 
 
 class EmpleadoDetailView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Empleado.objects.select_related('usuario').all()
+    queryset = Empleado.objects.select_related('usuario', 'usuario__rol').all()
     serializer_class = EmpleadoSerializer
-    permission_classes = [LecturaAutenticadaEscrituraStaff]
+    permission_classes = [LecturaConPermisoEscrituraAdmin]
+    permiso_requerido = 'ver_empleados'
 
     def update(self, request, *args, **kwargs):
         empleado = self.get_object()
@@ -59,7 +49,7 @@ class EmpleadoDetailView(generics.RetrieveUpdateDestroyAPIView):
 class EmpleadoAccesoView(APIView):
     """Gestiona la cuenta de login del empleado: PUT crea/actualiza, DELETE quita."""
 
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [EsAdministrador]
 
     def put(self, request, pk):
         empleado = get_object_or_404(Empleado, pk=pk)
