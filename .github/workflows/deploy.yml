@@ -39,6 +39,18 @@ jobs:
           printf '%s\n' "${{ secrets.CONTABO_SSH_PRIVATE_KEY }}" > ~/.ssh/contabo-deploy
           chmod 600 ~/.ssh/contabo-deploy
           ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          # Keepalive: el build remoto (docker build → npm install) puede quedarse
+          # callado varios minutos. Sin esto la conexión SSH se cae con
+          # "client_loop: send disconnect: Broken pipe" (exit 255). Estas opciones
+          # mantienen viva la sesión y aplican a TODAS las conexiones (también rsync).
+          printf '%s\n' \
+            'Host *' \
+            '  ServerAliveInterval 30' \
+            '  ServerAliveCountMax 20' \
+            '  TCPKeepAlive yes' \
+            '  ConnectTimeout 30' \
+            > ~/.ssh/config
+          chmod 600 ~/.ssh/config
 
       - name: Preflight server
         shell: bash
