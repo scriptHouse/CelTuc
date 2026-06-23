@@ -26,8 +26,8 @@ function AppleLogo({ className }: { className?: string }) {
 export function BrandMark({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 64 64" className={className} fill="none" aria-hidden="true">
-      <rect width="64" height="64" rx="16" fill="#0a0a0b" />
-      <path transform="translate(19 16) scale(0.032)" d={APPLE_PATH} fill="#ffffff" />
+      <rect width="64" height="64" rx="16" fill="var(--brand-mark-bg)" />
+      <path transform="translate(19 16) scale(0.032)" d={APPLE_PATH} fill="var(--brand-mark-fg)" />
     </svg>
   )
 }

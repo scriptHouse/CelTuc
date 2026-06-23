@@ -37,7 +37,7 @@ export function PageHeader({
         {Icon && (
           <span
             aria-hidden
-            className="mt-0.5 grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-ink-950 text-white"
+            className="mt-0.5 grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-ink-950 text-on-ink"
           >
             <Icon className="h-[1.3rem] w-[1.3rem]" strokeWidth={1.75} />
           </span>

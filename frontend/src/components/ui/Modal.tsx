@@ -131,7 +131,7 @@ export function Modal({
         aria-hidden="true"
         onClick={dismissable ? onClose : undefined}
         className={cn(
-          'absolute inset-0 bg-ink-950/45 backdrop-blur-[3px] transition-opacity duration-200 motion-reduce:transition-none',
+          'absolute inset-0 bg-overlay backdrop-blur-[3px] transition-opacity duration-200 motion-reduce:transition-none',
           entered ? 'opacity-100' : 'opacity-0',
         )}
       />

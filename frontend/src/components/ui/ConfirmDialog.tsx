@@ -19,7 +19,7 @@ export interface ConfirmOptions {
 const tones: Record<ConfirmTone, { chip: string; defaultIcon: LucideIcon }> = {
   // En monocromo, el chip OSCURO señala intención fuerte/destructiva.
   brand: { chip: 'bg-ink-100 text-ink-900', defaultIcon: ShieldCheck },
-  danger: { chip: 'bg-ink-950 text-white', defaultIcon: AlertTriangle },
+  danger: { chip: 'bg-ink-950 text-on-ink', defaultIcon: AlertTriangle },
   warning: { chip: 'bg-ink-100 text-ink-900', defaultIcon: AlertTriangle },
 }
 
@@ -92,7 +92,7 @@ export function ConfirmDialog({ open, options, onResolve }: ConfirmDialogProps) 
             type="button"
             data-autofocus={autofocusConfirm ? '' : undefined}
             onClick={() => onResolve(true)}
-            className="inline-flex h-11 items-center justify-center rounded-xl bg-ink-950 px-5 text-sm font-semibold text-white transition-colors hover:bg-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 focus-visible:ring-offset-2 sm:h-10"
+            className="inline-flex h-11 items-center justify-center rounded-xl bg-ink-950 px-5 text-sm font-semibold text-on-ink transition-colors hover:bg-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 focus-visible:ring-offset-2 sm:h-10"
           >
             {confirmLabel}
           </button>

@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#0a0a0a" />
-    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#f7f7f8" />
+    <meta name="color-scheme" content="light dark" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -15,6 +15,19 @@
       content="CelTuc · Software de gestión: inventario, facturación y empleados en un solo lugar."
     />
     <title>CelTuc · Gestión</title>
+    <script>
+      // Aplica el tema guardado ANTES del primer pintado (evita el parpadeo
+      // claro→oscuro). Por defecto: claro. El store de tema lo mantiene luego.
+      (function () {
+        try {
+          var t = localStorage.getItem('celtuc-theme');
+          if (t !== 'dark') t = 'light';
+          document.documentElement.setAttribute('data-theme', t);
+          var m = document.querySelector('meta[name="theme-color"]');
+          if (m) m.setAttribute('content', t === 'dark' ? '#0a0a0b' : '#f7f7f8');
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

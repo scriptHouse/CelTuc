@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils'
 type Tone = 'solid' | 'soft' | 'outline'
 
 const tones: Record<Tone, string> = {
-  solid: 'bg-ink-900 text-white',
+  solid: 'bg-ink-900 text-on-ink',
   soft: 'bg-ink-100 text-ink-700',
   outline: 'border border-line-strong text-ink-600',
 }

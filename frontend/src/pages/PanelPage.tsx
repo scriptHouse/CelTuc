@@ -163,7 +163,7 @@ export function PanelPage() {
                     className="ct-stagger-fade flex items-center gap-3 px-5 py-3.5"
                     style={ctStagger(i)}
                   >
-                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-ink-950 text-xs font-bold text-white">
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-ink-950 text-xs font-bold text-on-ink">
                       {f.tipo}
                     </span>
                     <div className="min-w-0 flex-1">

@@ -32,7 +32,7 @@ export function StatCard({ label, value, hint, icon: Icon, footer, className, st
           {label}
         </p>
         {Icon && (
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-ink-50 text-ink-500 ring-1 ring-line transition-colors group-hover:bg-ink-900 group-hover:text-white">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-ink-50 text-ink-500 ring-1 ring-line transition-colors group-hover:bg-ink-900 group-hover:text-on-ink">
             <Icon className="h-4 w-4" strokeWidth={1.75} />
           </span>
         )}

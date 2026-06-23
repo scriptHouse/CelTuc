@@ -6,6 +6,7 @@ import { useAuth } from '@/store/auth'
 import { esAdmin, puedeVer } from '@/lib/permisos'
 import { useConfirm } from '@/components/ConfirmProvider'
 import { BrandMark, BrandWordmark } from '@/components/Brand'
+import { ThemeToggle } from '@/components/ThemeToggle'
 import { navItems } from '@/components/navItems'
 
 /**
@@ -75,7 +76,7 @@ export function Layout() {
                   'group relative flex h-12 items-center justify-center rounded-2xl px-3 text-sm font-medium outline-none transition-all duration-200 xl:justify-start xl:gap-3',
                   'focus-visible:ring-2 focus-visible:ring-ink-900 focus-visible:ring-offset-2 focus-visible:ring-offset-surface',
                   isActive
-                    ? 'bg-ink-950 text-white shadow-[0_10px_30px_rgba(10,10,11,0.18)]'
+                    ? 'bg-ink-950 text-on-ink shadow-[0_10px_30px_rgba(10,10,11,0.18)]'
                     : 'text-ink-500 hover:bg-ink-100 hover:text-ink-900',
                 )
               }
@@ -96,7 +97,7 @@ export function Layout() {
           ))}
         </nav>
 
-        {/* Footer: usuario + cerrar sesión */}
+        {/* Footer: usuario + tema + cerrar sesión */}
         <div className="border-t border-line p-3">
           <div className="flex items-center gap-3 rounded-2xl px-1 py-1 xl:px-2">
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-ink-100 text-sm font-bold text-ink-900">
@@ -106,25 +107,33 @@ export function Layout() {
               <p className="truncate text-sm font-semibold text-ink-900">{usuario?.username}</p>
               <p className="truncate text-xs text-ink-400">{usuario?.email}</p>
             </div>
+            {/* Acciones en línea (solo expandido) */}
+            <div className="hidden shrink-0 items-center gap-0.5 xl:flex">
+              <ThemeToggle />
+              <button
+                type="button"
+                onClick={handleLogout}
+                aria-label="Cerrar sesión"
+                title="Cerrar sesión"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-ink-400 transition-colors hover:bg-ink-100 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+          {/* Acciones apiladas (sidebar colapsado) */}
+          <div className="mt-1 grid grid-cols-2 gap-1 xl:hidden">
+            <ThemeToggle className="h-10 w-full" />
             <button
               type="button"
               onClick={handleLogout}
               aria-label="Cerrar sesión"
               title="Cerrar sesión"
-              className="hidden h-9 w-9 shrink-0 place-items-center rounded-xl text-ink-400 transition-colors hover:bg-ink-100 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 xl:grid"
+              className="grid h-10 w-full place-items-center rounded-xl text-ink-400 transition-colors hover:bg-ink-100 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
             >
               <LogOut className="h-4 w-4" />
             </button>
           </div>
-          <button
-            type="button"
-            onClick={handleLogout}
-            aria-label="Cerrar sesión"
-            title="Cerrar sesión"
-            className="mt-1 grid h-10 w-full place-items-center rounded-xl text-ink-400 transition-colors hover:bg-ink-100 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 xl:hidden"
-          >
-            <LogOut className="h-4 w-4" />
-          </button>
         </div>
       </aside>
 
@@ -141,16 +150,19 @@ export function Layout() {
           <div className="flex shrink-0 items-center gap-2">
             <BrandWordmark className="text-[1.5rem]" />
           </div>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="flex items-center gap-2 rounded-full px-2 py-1 text-xs font-medium text-ink-500 transition-colors hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
-          >
-            <span className="grid h-7 w-7 place-items-center rounded-full bg-ink-100 text-xs font-bold text-ink-900">
-              {inicial}
-            </span>
-            <LogOut className="h-4 w-4" />
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            <ThemeToggle />
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="flex items-center gap-2 rounded-full px-2 py-1 text-xs font-medium text-ink-500 transition-colors hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
+            >
+              <span className="grid h-7 w-7 place-items-center rounded-full bg-ink-100 text-xs font-bold text-ink-900">
+                {inicial}
+              </span>
+              <LogOut className="h-4 w-4" />
+            </button>
+          </div>
         </header>
 
         <main className="w-full min-w-0 flex-1 px-4 py-5 pb-28 sm:px-6 lg:px-8 lg:pb-10 xl:px-10 2xl:px-12">
@@ -187,7 +199,7 @@ export function Layout() {
                   <span
                     className={cn(
                       'grid h-9 w-9 place-items-center rounded-2xl transition-all duration-200',
-                      isActive ? 'bg-ink-950 text-white shadow-[0_8px_18px_rgba(10,10,11,0.22)]' : 'text-ink-400',
+                      isActive ? 'bg-ink-950 text-on-ink shadow-[0_8px_18px_rgba(10,10,11,0.22)]' : 'text-ink-400',
                     )}
                   >
                     <Icon className="h-5 w-5" strokeWidth={1.85} />

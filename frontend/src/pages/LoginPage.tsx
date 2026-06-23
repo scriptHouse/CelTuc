@@ -71,7 +71,7 @@ export function LoginPage() {
         className="pointer-events-none absolute inset-0"
         style={{
           backgroundImage:
-            'radial-gradient(80% 60% at 50% 0%, rgba(10,10,11,0.05), transparent 70%), radial-gradient(circle at 1px 1px, rgba(10,10,11,0.05) 1px, transparent 0)',
+            'radial-gradient(80% 60% at 50% 0%, var(--ct-dot), transparent 70%), radial-gradient(circle at 1px 1px, var(--ct-dot) 1px, transparent 0)',
           backgroundSize: 'auto, 28px 28px',
         }}
       />

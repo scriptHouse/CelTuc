@@ -167,21 +167,21 @@ export function FacturacionPage() {
                 className={cn(
                   'group flex min-w-[15rem] shrink-0 items-center gap-3 rounded-2xl border p-3 text-left transition-all duration-200',
                   activa
-                    ? 'border-ink-950 bg-ink-950 text-white shadow-[0_10px_30px_rgba(10,10,11,0.18)]'
+                    ? 'border-ink-950 bg-ink-950 text-on-ink shadow-[0_10px_30px_rgba(10,10,11,0.18)]'
                     : 'border-line bg-surface hover:border-ink-300',
                 )}
               >
                 <span
                   className={cn(
                     'grid h-10 w-10 shrink-0 place-items-center rounded-xl',
-                    activa ? 'bg-white/15 text-white' : 'bg-ink-100 text-ink-700',
+                    activa ? 'bg-on-ink/15 text-on-ink' : 'bg-ink-100 text-ink-700',
                   )}
                 >
                   <Building2 className="h-5 w-5" />
                 </span>
                 <span className="min-w-0">
                   <span className="block truncate text-sm font-semibold">{c.nombre}</span>
-                  <span className={cn('tnum block truncate text-xs', activa ? 'text-white/70' : 'text-ink-400')}>
+                  <span className={cn('tnum block truncate text-xs', activa ? 'text-on-ink/70' : 'text-ink-400')}>
                     {CONDICION_CORTA[c.condicion]} · PV {String(c.puntoVenta).padStart(4, '0')}
                   </span>
                 </span>
@@ -223,7 +223,7 @@ export function FacturacionPage() {
                 className="ct-stagger-fade flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-ink-50 sm:px-5"
                 style={ctStagger(i)}
               >
-                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-ink-950 text-sm font-bold text-white">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-ink-950 text-sm font-bold text-on-ink">
                   {f.tipo}
                 </span>
                 <div className="min-w-0 flex-1">
@@ -309,7 +309,7 @@ function DetalleModal({
         <>
           <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
             <div className="flex items-center gap-3">
-              <span className="grid h-11 w-11 place-items-center rounded-xl bg-ink-950 text-base font-bold text-white">
+              <span className="grid h-11 w-11 place-items-center rounded-xl bg-ink-950 text-base font-bold text-on-ink">
                 {factura.tipo}
               </span>
               <div>
@@ -516,7 +516,7 @@ function NuevaFacturaModal({
           <h2 className="text-lg font-semibold text-ink-950">Nueva factura</h2>
           <p className="text-xs text-ink-400">{cuenta.nombre} · {CONDICION_CORTA[cuenta.condicion]}</p>
         </div>
-        <span className="flex items-center gap-2 rounded-xl bg-ink-950 px-3 py-1.5 text-sm font-semibold text-white">
+        <span className="flex items-center gap-2 rounded-xl bg-ink-950 px-3 py-1.5 text-sm font-semibold text-on-ink">
           Comprobante {tipo}
         </span>
       </div>
