@@ -7,10 +7,15 @@
  */
 
 // ===== Sesión =====
+/** Usuario autenticado, tal como lo devuelve el backend (`/api/auth/me`, login). */
 export interface Usuario {
-  id: string
-  nombre: string
-  rol: string
+  id: number
+  email: string
+  username: string
+  is_active?: boolean
+  is_staff?: boolean
+  is_superuser?: boolean
+  date_joined?: string
 }
 
 // ===== Inventario =====

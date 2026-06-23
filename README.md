@@ -89,7 +89,7 @@ backend/
 ├── celtuc/            # proyecto Django (settings, urls, wsgi/asgi)
 ├── usuarios/          # app de usuarios: modelo Usuario, auth JWT, admin
 │   ├── models.py      # Usuario (tabla `usuarios`)
-│   ├── managers.py    # alta por email (sin username)
+│   ├── managers.py    # alta por email + nombre de usuario
 │   ├── tokens.py      # emisión/validación de JWT
 │   ├── authentication.py / serializers.py / views.py / urls.py
 │   └── migrations/
@@ -98,20 +98,27 @@ backend/
 ```
 
 Por ahora solo hay **dos grupos de tablas**: las que necesita Django (auth, sesiones,
-permisos, migraciones, log del admin) y la tabla **`usuarios`**. El usuario se identifica
-por **email** y tiene: nombre, apellido, documento (DNI), teléfono, rol
-(administrador / encargado / vendedor), estado (activo, acceso al panel, superusuario) y
-fechas de alta/actualización. Las cuentas las crea un administrador (no hay autoregistro).
+permisos, migraciones, log del admin) y la tabla **`usuarios`**. La identidad es mínima:
+**email + nombre de usuario + contraseña** (más los flags de Django: activo, acceso al
+panel, superusuario). El **login se puede hacer con el email O con el nombre de usuario**
+(ambos se guardan en minúscula, así es insensible a mayúsculas). Las cuentas las crea un
+administrador (no hay autoregistro).
 
 ### Endpoints
 
-- `POST /api/auth/login/` → `{ access, refresh, user }`
+- `POST /api/auth/login/` — body `{ identifier, password }` (identifier = email **o** usuario) → `{ access, refresh, user }`
 - `POST /api/auth/refresh/` → renueva los tokens
-- `GET/PATCH /api/auth/me/` → datos del usuario autenticado
+- `GET /api/auth/me/` → datos del usuario autenticado (token Bearer)
 - `GET /api/health/` → estado del contenedor
 - `/admin/` → panel de administración (gestión de usuarios)
 
-### Correr el backend en local
+Buenas prácticas del login: error **genérico** ante credenciales inválidas (no revela si
+la cuenta existe), mitigación de **timing**, chequeo de cuenta **activa** y **throttling**
+(10 intentos/min) contra fuerza bruta.
+
+### Correr el login completo en local (back + front)
+
+**1) Backend** (API en http://127.0.0.1:8000):
 
 ```bash
 cd backend
@@ -120,9 +127,13 @@ py -3.13 -m venv .venv
 pip install -r requirements.txt
 copy .env.example .env           # opcional; sin DATABASE_URL usa SQLite
 python manage.py migrate
-python manage.py createsuperuser
-python manage.py runserver       # API en http://127.0.0.1:8000
+python manage.py createsuperuser  # te pide email, nombre de usuario y contraseña
+python manage.py runserver
 ```
+
+**2) Frontend** (en otra terminal): `npm run dev`. Vite hace de **proxy de `/api`** al
+backend (ver `vite.config.ts`), así que el login funciona sin tocar nada. Entrá con el
+email **o** el nombre de usuario que creaste.
 
 ### Despliegue
 

@@ -15,7 +15,7 @@ class UsuarioCreationForm(forms.ModelForm):
 
     class Meta:
         model = Usuario
-        fields = ('email', 'nombre', 'apellido', 'rol', 'is_active', 'is_staff', 'is_superuser')
+        fields = ('email', 'username', 'is_active', 'is_staff', 'is_superuser')
 
     def clean_password2(self):
         password1 = self.cleaned_data.get('password1')
@@ -47,31 +47,22 @@ class UsuarioChangeForm(forms.ModelForm):
 class UsuarioAdmin(BaseUserAdmin, ModelAdmin):
     form = UsuarioChangeForm
     add_form = UsuarioCreationForm
-    list_display = (
-        'email', 'nombre', 'apellido', 'rol',
-        'is_active', 'is_staff', 'is_superuser', 'date_joined',
-    )
-    list_filter = ('rol', 'is_active', 'is_staff', 'is_superuser', 'groups')
-    search_fields = ('email', 'nombre', 'apellido', 'documento')
-    ordering = ('apellido', 'nombre')
-    readonly_fields = ('last_login', 'date_joined', 'updated_at')
+    list_display = ('username', 'email', 'is_active', 'is_staff', 'is_superuser', 'date_joined')
+    list_filter = ('is_active', 'is_staff', 'is_superuser', 'groups')
+    search_fields = ('username', 'email')
+    ordering = ('username',)
+    readonly_fields = ('last_login', 'date_joined')
     fieldsets = (
-        (None, {'fields': ('email', 'password')}),
-        ('Datos personales', {'fields': ('nombre', 'apellido', 'documento', 'telefono')}),
-        ('Rol y permisos', {
-            'fields': ('rol', 'is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions'),
-        }),
-        ('Fechas', {'fields': ('last_login', 'date_joined', 'updated_at')}),
+        (None, {'fields': ('email', 'username', 'password')}),
+        ('Permisos', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
+        ('Fechas', {'fields': ('last_login', 'date_joined')}),
     )
     add_fieldsets = (
         (
             None,
             {
                 'classes': ('wide',),
-                'fields': (
-                    'email', 'nombre', 'apellido', 'rol',
-                    'password1', 'password2', 'is_active', 'is_staff', 'is_superuser',
-                ),
+                'fields': ('email', 'username', 'password1', 'password2', 'is_active', 'is_staff', 'is_superuser'),
             },
         ),
     )

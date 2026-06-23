@@ -1,3 +1,4 @@
+from django.db.models import Q
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 
@@ -5,37 +6,47 @@ from .models import Usuario
 
 
 class UsuarioSerializer(serializers.ModelSerializer):
-    """Representacion del usuario que devuelve la API (sin la contrasena).
-
-    El usuario puede editar sus datos personales (nombre, apellido, telefono);
-    el email, el rol y los flags de permisos son de solo lectura y se gestionan
-    desde el panel de administracion.
-    """
-
-    nombre_completo = serializers.CharField(read_only=True)
+    """Datos del usuario que devuelve la API (nunca la contrasena)."""
 
     class Meta:
         model = Usuario
         fields = (
-            'id', 'email', 'nombre', 'apellido', 'nombre_completo',
-            'documento', 'telefono', 'rol',
+            'id', 'email', 'username',
             'is_active', 'is_staff', 'is_superuser', 'date_joined',
         )
-        read_only_fields = (
-            'id', 'email', 'documento', 'rol',
-            'is_active', 'is_staff', 'is_superuser', 'date_joined',
-        )
+        read_only_fields = fields
 
 
 class LoginSerializer(serializers.Serializer):
-    email = serializers.EmailField()
+    """Login con email O nombre de usuario, mas la contrasena.
+
+    Buenas practicas aplicadas:
+    - Un unico campo `identifier` que acepta cualquiera de los dos.
+    - Mensaje de error generico: no revela si el usuario existe (anti-enumeracion).
+    - Mitigacion de timing: si no hay usuario, igual se computa un hash, para que
+      el tiempo de respuesta no delate la existencia de la cuenta.
+    """
+
+    identifier = serializers.CharField(trim_whitespace=True)
     password = serializers.CharField(write_only=True, style={'input_type': 'password'})
 
     def validate(self, attrs):
-        email = attrs['email'].lower()
-        user = Usuario.objects.filter(email__iexact=email, is_active=True).first()
-        if user is None or not user.check_password(attrs['password']):
-            raise AuthenticationFailed('Email o contrasena incorrectos.')
+        identifier = attrs['identifier'].strip().lower()
+        password = attrs['password']
+
+        user = Usuario.objects.filter(
+            Q(email__iexact=identifier) | Q(username__iexact=identifier)
+        ).first()
+
+        # Si no hay usuario, gastamos el mismo tiempo que un check_password real
+        # (hashea la contrasena en una instancia descartable) y fallamos igual.
+        if user is None:
+            Usuario().set_password(password)
+            raise AuthenticationFailed('Credenciales invalidas.')
+
+        if not user.is_active or not user.check_password(password):
+            raise AuthenticationFailed('Credenciales invalidas.')
+
         attrs['user'] = user
         return attrs
 

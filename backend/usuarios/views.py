@@ -8,8 +8,11 @@ from .tokens import create_token_pair, decode_token
 
 
 class LoginView(APIView):
-    """Inicio de sesion con email + contrasena. Devuelve el par de tokens JWT
-    y los datos del usuario."""
+    """Inicio de sesion con email O nombre de usuario + contrasena.
+
+    Devuelve el par de tokens JWT y los datos del usuario. El throttle por scope
+    'login' (ver settings) limita los intentos para frenar fuerza bruta.
+    """
 
     permission_classes = [permissions.AllowAny]
     throttle_scope = 'login'
@@ -20,7 +23,7 @@ class LoginView(APIView):
         user = serializer.validated_data['user']
         return Response({
             **create_token_pair(user),
-            'user': UsuarioSerializer(user, context={'request': request}).data,
+            'user': UsuarioSerializer(user).data,
         })
 
 
@@ -42,9 +45,8 @@ class RefreshView(APIView):
         return Response(create_token_pair(user))
 
 
-class MeView(generics.RetrieveUpdateAPIView):
-    """Datos del usuario autenticado (GET) y edicion de sus datos personales
-    (PATCH/PUT)."""
+class MeView(generics.RetrieveAPIView):
+    """Datos del usuario autenticado (a partir del token Bearer)."""
 
     serializer_class = UsuarioSerializer
     permission_classes = [permissions.IsAuthenticated]

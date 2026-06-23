@@ -26,7 +26,7 @@ export function Layout() {
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
 
-  const inicial = usuario?.nombre?.trim().charAt(0).toUpperCase() || 'C'
+  const inicial = usuario?.username?.trim().charAt(0).toUpperCase() || 'C'
 
   async function handleLogout() {
     const ok = await confirm({
@@ -92,8 +92,8 @@ export function Layout() {
               {inicial}
             </span>
             <div className="hidden min-w-0 flex-1 xl:block">
-              <p className="truncate text-sm font-semibold text-ink-900">{usuario?.nombre}</p>
-              <p className="truncate text-xs text-ink-400">{usuario?.rol}</p>
+              <p className="truncate text-sm font-semibold text-ink-900">{usuario?.username}</p>
+              <p className="truncate text-xs text-ink-400">{usuario?.email}</p>
             </div>
             <button
               type="button"
