@@ -33,7 +33,7 @@ export function PanelPage() {
   async function handleReset() {
     const ok = await confirm({
       title: '¿Restaurar datos de demostración?',
-      description: 'Se reemplazan los datos actuales (productos, facturas, empleados) por los de ejemplo.',
+      description: 'Se reemplazan los datos actuales (productos y facturas) por los de ejemplo.',
       confirmLabel: 'Restaurar',
       tone: 'danger',
     })
@@ -96,9 +96,9 @@ export function PanelPage() {
             <StatCard
               className="ct-stagger-item"
               style={ctStagger(3)}
-              label="Honorarios (mes)"
-              value={moneyCompact(data.empleados.masaMensual)}
-              hint={`${data.empleados.activos}/${data.empleados.total} activos`}
+              label="Empleados"
+              value={num(data.empleados.total)}
+              hint={`${data.empleados.conAcceso} con acceso`}
               icon={Users}
             />
           </div>

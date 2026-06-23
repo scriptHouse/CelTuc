@@ -1,7 +1,7 @@
 import type { Cuenta, Factura, Producto } from '@/types'
 import { getDB, wait } from '@/lib/db'
 import { estadoEfectivo } from '@/lib/afip'
-import { costoMensualEstimado } from '@/services/empleados'
+import { listarEmpleados } from '@/services/empleados'
 
 export interface FacturaConCuenta extends Factura {
   cuenta?: Cuenta
@@ -26,9 +26,8 @@ export interface ResumenDashboard {
     serie: Array<{ label: string; valor: number }>
   }
   empleados: {
-    activos: number
     total: number
-    masaMensual: number
+    conAcceso: number
   }
 }
 
@@ -91,9 +90,15 @@ export async function obtenerResumen(): Promise<ResumenDashboard> {
     serie.push({ label: ref.toLocaleDateString('es-AR', { month: 'short' }), valor })
   }
 
-  // --- Empleados ---
-  const activos = db.empleados.filter((e) => e.activo)
-  const masaMensual = activos.reduce((acc, e) => acc + costoMensualEstimado(e), 0)
+  // --- Empleados (del backend) ---
+  // Si la API no responde, no rompemos el panel: mostramos 0.
+  let empleados = { total: 0, conAcceso: 0 }
+  try {
+    const lista = await listarEmpleados()
+    empleados = { total: lista.length, conAcceso: lista.filter((e) => e.puede_loguear).length }
+  } catch {
+    /* sin conexión / sin sesión: dejamos los contadores en 0 */
+  }
 
   return {
     inventario: { totalProductos: db.productos.length, unidades, valorVenta, valorCosto, bajoStock },
@@ -107,6 +112,6 @@ export async function obtenerResumen(): Promise<ResumenDashboard> {
       porCuenta,
       serie,
     },
-    empleados: { activos: activos.length, total: db.empleados.length, masaMensual },
+    empleados,
   }
 }

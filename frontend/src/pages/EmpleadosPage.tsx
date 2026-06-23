@@ -4,58 +4,71 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Mail, Pencil, Phone, Plus, Trash2, UserPlus, Users, Wallet } from 'lucide-react'
-import type { Empleado, ModalidadHonorario } from '@/types'
+import {
+  AtSign,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Loader2,
+  Mail,
+  Pencil,
+  Plus,
+  ShieldCheck,
+  Trash2,
+  UserPlus,
+  Users,
+} from 'lucide-react'
+import type { Empleado } from '@/types'
 import {
   actualizarEmpleado,
-  costoMensualEstimado,
+  type AccesoInput,
   crearEmpleado,
+  definirAcceso,
   type EmpleadoInput,
   eliminarEmpleado,
   listarEmpleados,
-  listarPagos,
-  registrarPago,
+  quitarAcceso,
 } from '@/services/empleados'
-import { fecha, money, num, periodoLabel } from '@/lib/format'
+import { ApiError } from '@/lib/api'
+import { fecha } from '@/lib/format'
 import { ctStagger } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatCard } from '@/components/ui/StatCard'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
-import { Select } from '@/components/ui/Select'
 import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { ActivoDot } from '@/components/ui/StatusBadge'
 import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
 
-const MODALIDADES: ModalidadHonorario[] = ['mensual', 'por_hora', 'comision']
-const MODALIDAD_LABEL: Record<ModalidadHonorario, string> = {
-  mensual: 'Mensual',
-  por_hora: 'Por hora',
-  comision: 'Comisión',
-}
-
-function honorarioTexto(e: Empleado): string {
-  if (e.modalidad === 'comision') return `${num(e.honorario)}%`
-  return `${money(e.honorario)}${e.modalidad === 'mensual' ? '/mes' : '/h'}`
-}
-
-const schema = z.object({
-  nombre: z.string().trim().min(1, 'Requerido'),
-  apellido: z.string().trim().min(1, 'Requerido'),
-  puesto: z.string().trim().min(1, 'Requerido'),
-  email: z.string().trim(),
-  telefono: z.string().trim(),
-  modalidad: z.enum(['mensual', 'por_hora', 'comision']),
-  honorario: z.coerce.number({ invalid_type_error: 'Número' }).min(0, 'Inválido'),
-  activo: z.boolean(),
-  ingreso: z.string().min(1, 'Requerido'),
-})
+const schema = z
+  .object({
+    nombre: z.string().trim().min(1, 'Requerido'),
+    apellido: z.string().trim(),
+    tieneAcceso: z.boolean(),
+    username: z.string().trim(),
+    email: z.string().trim(),
+    password: z.string(),
+  })
+  .superRefine((val, ctx) => {
+    if (!val.tieneAcceso) return
+    if (val.username.length < 3) {
+      ctx.addIssue({ path: ['username'], code: z.ZodIssueCode.custom, message: 'Mínimo 3 caracteres' })
+    } else if (!/^[a-zA-Z0-9._-]+$/.test(val.username)) {
+      ctx.addIssue({ path: ['username'], code: z.ZodIssueCode.custom, message: 'Solo letras, números y . _ -' })
+    }
+    if (!val.email) {
+      ctx.addIssue({ path: ['email'], code: z.ZodIssueCode.custom, message: 'Requerido para el acceso' })
+    }
+  })
 type FormData = z.infer<typeof schema>
+
+function iniciales(e: Empleado): string {
+  return `${e.nombre.charAt(0)}${e.apellido.charAt(0)}`.toUpperCase() || 'E'
+}
 
 export function EmpleadosPage() {
   const queryClient = useQueryClient()
@@ -66,57 +79,47 @@ export function EmpleadosPage() {
     queryKey: ['empleados'],
     queryFn: listarEmpleados,
   })
-  const { data: pagos = [] } = useQuery({ queryKey: ['pagos'], queryFn: () => listarPagos() })
 
   const [modalOpen, setModalOpen] = useState(false)
   const [editando, setEditando] = useState<Empleado | null>(null)
-  const [pagoDe, setPagoDe] = useState<Empleado | null>(null)
 
   const invalidar = () => {
     queryClient.invalidateQueries({ queryKey: ['empleados'] })
-    queryClient.invalidateQueries({ queryKey: ['pagos'] })
     queryClient.invalidateQueries({ queryKey: ['dashboard'] })
   }
 
-  const crear = useMutation({
-    mutationFn: (input: EmpleadoInput) => crearEmpleado(input),
+  const stats = useMemo(() => {
+    const conAcceso = empleados.filter((e) => e.puede_loguear).length
+    return { total: empleados.length, conAcceso }
+  }, [empleados])
+
+  const guardar = useMutation({
+    mutationFn: async (p: {
+      id?: number
+      input: EmpleadoInput
+      acceso: AccesoInput | null
+      yaTeniaAcceso: boolean
+    }) => {
+      let emp = p.id ? await actualizarEmpleado(p.id, p.input) : await crearEmpleado(p.input)
+      if (p.acceso) emp = await definirAcceso(emp.id, p.acceso)
+      else if (p.yaTeniaAcceso) emp = await quitarAcceso(emp.id)
+      return emp
+    },
     onSuccess: () => {
       invalidar()
-      toast.success('Empleado agregado')
+      toast.success('Empleado guardado')
     },
+    onError: (e) => toast.error('No se pudo guardar', e instanceof ApiError ? e.message : undefined),
   })
-  const actualizar = useMutation({
-    mutationFn: ({ id, input }: { id: string; input: EmpleadoInput }) => actualizarEmpleado(id, input),
-    onSuccess: () => {
-      invalidar()
-      toast.success('Empleado actualizado')
-    },
-  })
+
   const borrar = useMutation({
-    mutationFn: (id: string) => eliminarEmpleado(id),
+    mutationFn: (id: number) => eliminarEmpleado(id),
     onSuccess: () => {
       invalidar()
       toast.success('Empleado eliminado')
     },
+    onError: (e) => toast.error('No se pudo eliminar', e instanceof ApiError ? e.message : undefined),
   })
-  const pagar = useMutation({
-    mutationFn: (input: { empleadoId: string; monto: number; nota?: string }) => registrarPago(input),
-    onSuccess: () => {
-      invalidar()
-      toast.success('Pago registrado')
-    },
-  })
-
-  const stats = useMemo(() => {
-    const activos = empleados.filter((e) => e.activo)
-    const masa = activos.reduce((a, e) => a + costoMensualEstimado(e), 0)
-    return { activos: activos.length, total: empleados.length, masa }
-  }, [empleados])
-
-  const nombreEmpleado = (id: string) => {
-    const e = empleados.find((x) => x.id === id)
-    return e ? `${e.nombre} ${e.apellido}` : 'Empleado'
-  }
 
   function abrirNuevo() {
     setEditando(null)
@@ -129,22 +132,32 @@ export function EmpleadosPage() {
 
   async function handleEliminar(e: Empleado) {
     const ok = await confirm({
-      title: `¿Eliminar a ${e.nombre} ${e.apellido}?`,
-      description: 'Se quitarán también sus pagos registrados.',
+      title: `¿Eliminar a ${e.nombre_completo}?`,
+      description: e.usuario
+        ? 'También se eliminará su cuenta para iniciar sesión.'
+        : 'Esta acción no se puede deshacer.',
       confirmLabel: 'Eliminar',
       tone: 'danger',
     })
     if (ok) borrar.mutate(e.id)
   }
 
-  async function handleSubmit(values: FormData) {
-    const input: EmpleadoInput = { ...values, ingreso: new Date(`${values.ingreso}T00:00:00`).toISOString() }
-    if (editando) {
-      await actualizar.mutateAsync({ id: editando.id, input })
-    } else {
-      await crear.mutateAsync(input)
+  async function handleGuardar(values: FormData) {
+    const input: EmpleadoInput = { nombre: values.nombre, apellido: values.apellido }
+    const acceso: AccesoInput | null = values.tieneAcceso
+      ? { username: values.username, email: values.email, password: values.password || undefined }
+      : null
+    try {
+      await guardar.mutateAsync({
+        id: editando?.id,
+        input,
+        acceso,
+        yaTeniaAcceso: Boolean(editando?.usuario),
+      })
+      setModalOpen(false)
+    } catch {
+      /* el error ya se notificó en la mutación; dejamos el modal abierto */
     }
-    setModalOpen(false)
   }
 
   return (
@@ -153,7 +166,7 @@ export function EmpleadosPage() {
         icon={Users}
         eyebrow="Equipo"
         title="Empleados"
-        subtitle="El equipo de CelTuc y sus honorarios."
+        subtitle="El equipo de CelTuc y quién puede iniciar sesión."
         className="ct-rise"
         actions={
           <Button onClick={abrirNuevo}>
@@ -163,16 +176,15 @@ export function EmpleadosPage() {
         }
       />
 
-      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard className="ct-stagger-item" style={ctStagger(0)} label="Activos" value={num(stats.activos)} icon={Users} />
-        <StatCard className="ct-stagger-item" style={ctStagger(1)} label="Total" value={num(stats.total)} icon={Users} />
+      <div className="mb-5 grid grid-cols-2 gap-3">
+        <StatCard className="ct-stagger-item" style={ctStagger(0)} label="Empleados" value={String(stats.total)} icon={Users} />
         <StatCard
-          className="ct-stagger-item lg:col-span-2"
-          style={ctStagger(2)}
-          label="Masa de honorarios (mes est.)"
-          value={money(stats.masa)}
-          hint="Mensuales + por hora (las comisiones son variables)"
-          icon={Wallet}
+          className="ct-stagger-item"
+          style={ctStagger(1)}
+          label="Con acceso al sistema"
+          value={String(stats.conAcceso)}
+          hint="Pueden iniciar sesión"
+          icon={ShieldCheck}
         />
       </div>
 
@@ -196,101 +208,61 @@ export function EmpleadosPage() {
             <Card key={e.id} className="ct-stagger-item flex flex-col p-4" style={ctStagger(i)}>
               <div className="flex items-start gap-3">
                 <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-ink-100 text-sm font-bold text-ink-900">
-                  {e.nombre.charAt(0)}
-                  {e.apellido.charAt(0)}
+                  {iniciales(e)}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-semibold text-ink-900">
-                    {e.nombre} {e.apellido}
-                  </p>
-                  <p className="truncate text-sm text-ink-500">{e.puesto}</p>
+                  <p className="truncate font-semibold text-ink-900">{e.nombre_completo}</p>
+                  {e.usuario ? (
+                    <p className="flex items-center gap-1.5 truncate text-sm text-ink-500">
+                      <AtSign className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">{e.usuario.username}</span>
+                    </p>
+                  ) : (
+                    <p className="truncate text-sm text-ink-400">Sin acceso al sistema</p>
+                  )}
                 </div>
-                <ActivoDot activo={e.activo} />
+                {e.puede_loguear && (
+                  <Badge tone="soft">
+                    <ShieldCheck className="h-3 w-3" />
+                    Acceso
+                  </Badge>
+                )}
               </div>
 
-              <div className="mt-3 space-y-1 text-xs text-ink-400">
-                {e.email && (
-                  <p className="flex items-center gap-1.5 truncate">
-                    <Mail className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">{e.email}</span>
-                  </p>
-                )}
-                {e.telefono && (
-                  <p className="flex items-center gap-1.5 truncate">
-                    <Phone className="h-3.5 w-3.5 shrink-0" /> {e.telefono}
-                  </p>
-                )}
-                <p className="tnum">Ingreso: {fecha(e.ingreso)}</p>
-              </div>
+              {e.usuario?.email && (
+                <p className="mt-3 flex items-center gap-1.5 truncate text-xs text-ink-400">
+                  <Mail className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">{e.usuario.email}</span>
+                </p>
+              )}
 
               <div className="mt-3 flex items-center justify-between border-t border-line pt-3">
-                <Badge tone="soft">{MODALIDAD_LABEL[e.modalidad]}</Badge>
-                <span className="tnum text-sm font-semibold text-ink-900">{honorarioTexto(e)}</span>
-              </div>
-
-              <div className="mt-3 flex items-center gap-2">
-                <Button variant="outline" size="sm" className="flex-1" onClick={() => setPagoDe(e)}>
-                  <Wallet className="h-4 w-4" />
-                  Registrar pago
-                </Button>
-                <IconBtn label="Editar" onClick={() => abrirEditar(e)}>
-                  <Pencil className="h-4 w-4" />
-                </IconBtn>
-                <IconBtn label="Eliminar" onClick={() => handleEliminar(e)}>
-                  <Trash2 className="h-4 w-4" />
-                </IconBtn>
+                <span className="tnum text-xs text-ink-400">Alta: {fecha(e.creado)}</span>
+                <div className="flex items-center gap-2">
+                  <IconBtn label="Editar" onClick={() => abrirEditar(e)}>
+                    <Pencil className="h-4 w-4" />
+                  </IconBtn>
+                  <IconBtn label="Eliminar" onClick={() => handleEliminar(e)}>
+                    <Trash2 className="h-4 w-4" />
+                  </IconBtn>
+                </div>
               </div>
             </Card>
           ))}
         </div>
       )}
 
-      {/* Pagos recientes */}
-      {pagos.length > 0 && (
-        <Card className="ct-rise mt-5 overflow-hidden">
-          <div className="flex items-center justify-between border-b border-line px-5 py-4">
-            <h2 className="text-base font-semibold text-ink-900">Pagos recientes</h2>
-            <Wallet className="h-4 w-4 text-ink-300" />
-          </div>
-          <ul className="divide-y divide-line">
-            {pagos.slice(0, 8).map((p, i) => (
-              <li key={p.id} className="ct-stagger-fade flex items-center gap-3 px-5 py-3.5" style={ctStagger(i)}>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-ink-900">{nombreEmpleado(p.empleadoId)}</p>
-                  <p className="truncate text-xs text-ink-400">
-                    {periodoLabel(p.periodo)} · {fecha(p.fecha)}
-                    {p.nota ? ` · ${p.nota}` : ''}
-                  </p>
-                </div>
-                <span className="tnum shrink-0 text-sm font-semibold text-ink-900">{money(p.monto)}</span>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
-
       <EmpleadoFormModal
         open={modalOpen}
         empleado={editando}
-        saving={crear.isPending || actualizar.isPending}
+        saving={guardar.isPending}
         onClose={() => setModalOpen(false)}
-        onSubmit={handleSubmit}
-      />
-
-      <PagoModal
-        empleado={pagoDe}
-        saving={pagar.isPending}
-        onClose={() => setPagoDe(null)}
-        onSubmit={async (monto, nota) => {
-          if (!pagoDe) return
-          await pagar.mutateAsync({ empleadoId: pagoDe.id, monto, nota })
-          setPagoDe(null)
-        }}
+        onSubmit={handleGuardar}
       />
     </div>
   )
 }
 
-// ===== Subcomponentes =====
+// ===== Modal de alta/edición =====
 
 function EmpleadoFormModal({
   open,
@@ -305,61 +277,46 @@ function EmpleadoFormModal({
   onClose: () => void
   onSubmit: (values: FormData) => Promise<void>
 }) {
+  const yaTieneAcceso = Boolean(empleado?.usuario)
+  const [showPassword, setShowPassword] = useState(false)
+
   const {
     register,
     handleSubmit,
     reset,
     watch,
     setValue,
+    setError,
     formState: { errors },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: {
-      nombre: '',
-      apellido: '',
-      puesto: '',
-      email: '',
-      telefono: '',
-      modalidad: 'mensual',
-      honorario: 0,
-      activo: true,
-      ingreso: new Date().toISOString().slice(0, 10),
-    },
+    defaultValues: { nombre: '', apellido: '', tieneAcceso: false, username: '', email: '', password: '' },
   })
 
   useEffect(() => {
     if (!open) return
-    if (empleado) {
-      reset({
-        nombre: empleado.nombre,
-        apellido: empleado.apellido,
-        puesto: empleado.puesto,
-        email: empleado.email,
-        telefono: empleado.telefono,
-        modalidad: empleado.modalidad,
-        honorario: empleado.honorario,
-        activo: empleado.activo,
-        ingreso: empleado.ingreso.slice(0, 10),
-      })
-    } else {
-      reset({
-        nombre: '',
-        apellido: '',
-        puesto: '',
-        email: '',
-        telefono: '',
-        modalidad: 'mensual',
-        honorario: 0,
-        activo: true,
-        ingreso: new Date().toISOString().slice(0, 10),
-      })
-    }
+    setShowPassword(false)
+    reset({
+      nombre: empleado?.nombre ?? '',
+      apellido: empleado?.apellido ?? '',
+      tieneAcceso: Boolean(empleado?.usuario),
+      username: empleado?.usuario?.username ?? '',
+      email: empleado?.usuario?.email ?? '',
+      password: '',
+    })
   }, [open, empleado, reset])
 
-  const modalidad = watch('modalidad')
-  const activo = watch('activo')
-  const honorarioLabel =
-    modalidad === 'comision' ? 'Comisión (%)' : modalidad === 'por_hora' ? 'Valor hora (ARS)' : 'Honorario mensual (ARS)'
+  const tieneAcceso = watch('tieneAcceso')
+
+  const internalSubmit = (values: FormData) => {
+    // La contraseña solo es obligatoria al CREAR un acceso nuevo (al editar uno
+    // existente, vacío = no cambiarla).
+    if (values.tieneAcceso && !yaTieneAcceso && !values.password) {
+      setError('password', { message: 'Requerida para crear el acceso' })
+      return
+    }
+    return onSubmit(values)
+  }
 
   return (
     <Modal open={open} onClose={onClose} size="lg">
@@ -368,54 +325,106 @@ function EmpleadoFormModal({
           {empleado ? 'Editar empleado' : 'Nuevo empleado'}
         </h2>
       </div>
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 overflow-y-auto px-5 py-5" noValidate>
+      <form onSubmit={handleSubmit(internalSubmit)} className="space-y-4 overflow-y-auto px-5 py-5" noValidate>
         <div className="grid gap-4 sm:grid-cols-2">
           <Campo label="Nombre" error={errors.nombre?.message}>
-            <Input placeholder="Lucas" {...register('nombre')} />
+            <Input placeholder="Lucas" autoFocus {...register('nombre')} />
           </Campo>
-          <Campo label="Apellido" error={errors.apellido?.message}>
+          <Campo label="Apellido (opcional)" error={errors.apellido?.message}>
             <Input placeholder="Gómez" {...register('apellido')} />
-          </Campo>
-          <Campo label="Puesto" error={errors.puesto?.message}>
-            <Input placeholder="Vendedor" {...register('puesto')} />
-          </Campo>
-          <Campo label="Fecha de ingreso" error={errors.ingreso?.message}>
-            <Input type="date" {...register('ingreso')} />
-          </Campo>
-          <Campo label="Email">
-            <Input type="email" placeholder="lucas@celtuc.com" {...register('email')} />
-          </Campo>
-          <Campo label="Teléfono">
-            <Input placeholder="381 5 123-456" {...register('telefono')} />
-          </Campo>
-          <Campo label="Modalidad">
-            <Select
-              options={MODALIDADES.map((m) => ({ value: m, label: MODALIDAD_LABEL[m] }))}
-              value={modalidad}
-              onChange={(v) => setValue('modalidad', v as ModalidadHonorario, { shouldValidate: true })}
-            />
-          </Campo>
-          <Campo label={honorarioLabel} error={errors.honorario?.message}>
-            <Input type="number" inputMode="numeric" min={0} step="0.01" {...register('honorario')} />
           </Campo>
         </div>
 
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-700">
-          <input
-            type="checkbox"
-            checked={activo}
-            onChange={(e) => setValue('activo', e.target.checked)}
-            className="h-4 w-4 rounded border-line-strong accent-ink-950"
-          />
-          Empleado activo
-        </label>
+        {/* Acceso al sistema */}
+        <div className="rounded-2xl border border-line bg-canvas/40 p-4">
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              checked={tieneAcceso}
+              onChange={(ev) => setValue('tieneAcceso', ev.target.checked, { shouldValidate: true })}
+              className="mt-0.5 h-4 w-4 rounded border-line-strong accent-ink-950"
+            />
+            <span>
+              <span className="flex items-center gap-1.5 text-sm font-medium text-ink-900">
+                <KeyRound className="h-4 w-4" /> Puede iniciar sesión
+              </span>
+              <span className="mt-0.5 block text-xs text-ink-400">
+                Crea una cuenta para que este empleado entre al sistema (con email o usuario).
+              </span>
+            </span>
+          </label>
+
+          {tieneAcceso && (
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <Campo label="Nombre de usuario" error={errors.username?.message}>
+                <div className="relative">
+                  <AtSign className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
+                  <Input
+                    placeholder="lgomez"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    className="pl-10 text-base sm:text-sm"
+                    {...register('username')}
+                  />
+                </div>
+              </Campo>
+              <Campo label="Email" error={errors.email?.message}>
+                <div className="relative">
+                  <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
+                  <Input
+                    type="email"
+                    placeholder="lucas@celtuc.com"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    className="pl-10 text-base sm:text-sm"
+                    {...register('email')}
+                  />
+                </div>
+              </Campo>
+              <Campo
+                label={yaTieneAcceso ? 'Nueva contraseña (opcional)' : 'Contraseña'}
+                error={errors.password?.message}
+              >
+                <div className="relative sm:col-span-2">
+                  <KeyRound className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
+                  <Input
+                    type={showPassword ? 'text' : 'password'}
+                    autoComplete="new-password"
+                    placeholder={yaTieneAcceso ? 'Dejar vacío para no cambiarla' : '••••••••'}
+                    className="pl-10 pr-11 text-base sm:text-sm"
+                    {...register('password')}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                    className="absolute right-1.5 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg text-ink-400 transition-colors hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </Campo>
+            </div>
+          )}
+        </div>
 
         <div className="flex flex-col-reverse gap-2.5 pt-2 sm:flex-row sm:justify-end">
           <Button type="button" variant="outline" onClick={onClose}>
             Cancelar
           </Button>
           <Button type="submit" disabled={saving}>
-            {saving ? 'Guardando…' : empleado ? 'Guardar cambios' : 'Agregar empleado'}
+            {saving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Guardando…
+              </>
+            ) : empleado ? (
+              'Guardar cambios'
+            ) : (
+              'Agregar empleado'
+            )}
           </Button>
         </div>
       </form>
@@ -423,66 +432,7 @@ function EmpleadoFormModal({
   )
 }
 
-function PagoModal({
-  empleado,
-  saving,
-  onClose,
-  onSubmit,
-}: {
-  empleado: Empleado | null
-  saving: boolean
-  onClose: () => void
-  onSubmit: (monto: number, nota?: string) => Promise<void>
-}) {
-  const [monto, setMonto] = useState(0)
-  const [nota, setNota] = useState('')
-
-  useEffect(() => {
-    if (empleado) {
-      const sugerido = costoMensualEstimado(empleado) || empleado.honorario
-      setMonto(sugerido)
-      setNota('')
-    }
-  }, [empleado])
-
-  return (
-    <Modal open={Boolean(empleado)} onClose={onClose} size="sm">
-      {empleado && (
-        <>
-          <div className="border-b border-line px-5 py-4">
-            <h2 className="text-lg font-semibold text-ink-950">Registrar pago</h2>
-            <p className="text-xs text-ink-400">
-              {empleado.nombre} {empleado.apellido} · {MODALIDAD_LABEL[empleado.modalidad]}
-            </p>
-          </div>
-          <div className="space-y-4 px-5 py-5">
-            <Campo label="Monto (ARS)">
-              <Input
-                type="number"
-                inputMode="numeric"
-                min={0}
-                step="0.01"
-                value={monto}
-                onChange={(e) => setMonto(Number(e.target.value))}
-              />
-            </Campo>
-            <Campo label="Nota (opcional)">
-              <Input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Sueldo, adelanto, etc." />
-            </Campo>
-          </div>
-          <div className="flex flex-col-reverse gap-2.5 border-t border-line px-5 py-4 sm:flex-row sm:justify-end">
-            <Button type="button" variant="outline" onClick={onClose}>
-              Cancelar
-            </Button>
-            <Button type="button" onClick={() => onSubmit(monto, nota.trim() || undefined)} disabled={saving || monto <= 0}>
-              {saving ? 'Registrando…' : 'Registrar pago'}
-            </Button>
-          </div>
-        </>
-      )}
-    </Modal>
-  )
-}
+// ===== Subcomponentes =====
 
 function IconBtn({ children, label, onClick }: { children: ReactNode; label: string; onClick: () => void }) {
   return (

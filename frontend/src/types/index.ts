@@ -107,27 +107,22 @@ export interface Factura {
   total: number
 }
 
-// ===== Empleados =====
-export type ModalidadHonorario = 'mensual' | 'por_hora' | 'comision'
-
-export interface Empleado {
-  id: string
-  nombre: string
-  apellido: string
-  puesto: string
+// ===== Empleados (backend) =====
+/** Cuenta de login vinculada a un empleado (subconjunto del Usuario). */
+export interface UsuarioBreve {
+  id: number
+  username: string
   email: string
-  telefono: string
-  modalidad: ModalidadHonorario
-  honorario: number // mensual / valor hora / % de comisión según modalidad
-  activo: boolean
-  ingreso: string // ISO
+  is_active: boolean
 }
 
-export interface Pago {
-  id: string
-  empleadoId: string
-  monto: number
-  fecha: string // ISO
-  periodo: string // "2026-06"
-  nota?: string
+export interface Empleado {
+  id: number
+  nombre: string
+  apellido: string
+  nombre_completo: string
+  /** Cuenta con la que el empleado inicia sesión, o null si no tiene acceso. */
+  usuario: UsuarioBreve | null
+  puede_loguear: boolean
+  creado: string // ISO
 }

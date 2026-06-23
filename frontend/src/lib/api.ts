@@ -77,4 +77,10 @@ export const api = {
     request<T>(path, { method: 'GET', token, signal }),
   post: <T>(path: string, body?: unknown, token?: string | null, signal?: AbortSignal) =>
     request<T>(path, { method: 'POST', body, token, signal }),
+  put: <T>(path: string, body?: unknown, token?: string | null, signal?: AbortSignal) =>
+    request<T>(path, { method: 'PUT', body, token, signal }),
+  patch: <T>(path: string, body?: unknown, token?: string | null, signal?: AbortSignal) =>
+    request<T>(path, { method: 'PATCH', body, token, signal }),
+  del: <T>(path: string, token?: string | null, signal?: AbortSignal) =>
+    request<T>(path, { method: 'DELETE', token, signal }),
 }

@@ -1,12 +1,4 @@
-import type {
-  Cuenta,
-  Empleado,
-  Factura,
-  ItemFactura,
-  Pago,
-  Producto,
-  TipoComprobante,
-} from '@/types'
+import type { Cuenta, Factura, ItemFactura, Producto, TipoComprobante } from '@/types'
 import { calcularTotales } from '@/lib/afip'
 
 /**
@@ -21,8 +13,6 @@ export interface CelTucDB {
   productos: Producto[]
   cuentas: Cuenta[]
   facturas: Factura[]
-  empleados: Empleado[]
-  pagos: Pago[]
 }
 
 /** Pequeña latencia simulada para que los estados de carga se sientan reales. */
@@ -139,21 +129,7 @@ function seed(): CelTucDB {
     }, [it('Xiaomi Redmi Note 13', 1, 410000, 'CEL-RN13')]),
   ]
 
-  const empleados: Empleado[] = [
-    e('Lucas', 'Gómez', 'Vendedor', 'lucas@celtuc.com', '381 5 123-456', 'mensual', 850000, true, daysAgo(540)),
-    e('Martina', 'Ríos', 'Técnica de reparaciones', 'martina@celtuc.com', '381 5 234-567', 'mensual', 920000, true, daysAgo(410)),
-    e('Diego', 'Pérez', 'Vendedor', 'diego@celtuc.com', '381 5 345-678', 'comision', 8, true, daysAgo(180)),
-    e('Sofía', 'Luna', 'Community Manager', 'sofia@celtuc.com', '381 5 456-789', 'por_hora', 4500, true, daysAgo(95)),
-    e('Tomás', 'Díaz', 'Cadete', 'tomas@celtuc.com', '381 5 567-890', 'mensual', 600000, false, daysAgo(300)),
-  ]
-
-  const pagos: Pago[] = [
-    pago(empleados[0].id, 850000, daysAgo(35), 'Sueldo'),
-    pago(empleados[1].id, 920000, daysAgo(34), 'Sueldo'),
-    pago(empleados[3].id, 720000, daysAgo(33), 'Horas mayo'),
-  ]
-
-  return { productos, cuentas, facturas, empleados, pagos }
+  return { productos, cuentas, facturas }
 
   // helpers de semilla -------------------------------------------------------
 
@@ -215,31 +191,6 @@ function seed(): CelTucDB {
     }
   }
 
-  function e(
-    nombre: string,
-    apellido: string,
-    puesto: string,
-    email: string,
-    telefono: string,
-    modalidad: Empleado['modalidad'],
-    honorario: number,
-    activo: boolean,
-    ingreso: Date,
-  ): Empleado {
-    return { id: uid('emp'), nombre, apellido, puesto, email, telefono, modalidad, honorario, activo, ingreso: iso(ingreso) }
-  }
-
-  function pago(empleadoId: string, monto: number, fecha: Date, nota: string): Pago {
-    const d = fecha
-    return {
-      id: uid('pago'),
-      empleadoId,
-      monto,
-      fecha: iso(d),
-      periodo: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
-      nota,
-    }
-  }
 }
 
 // --- Acceso ----------------------------------------------------------------
