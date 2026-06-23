@@ -6,6 +6,7 @@ import { PanelPage } from '@/pages/PanelPage'
 import { InventarioPage } from '@/pages/InventarioPage'
 import { FacturacionPage } from '@/pages/FacturacionPage'
 import { EmpleadosPage } from '@/pages/EmpleadosPage'
+import { UsuariosPage } from '@/pages/UsuariosPage'
 
 const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
@@ -20,6 +21,7 @@ const router = createBrowserRouter([
       { path: '/inventario', element: <InventarioPage /> },
       { path: '/facturacion', element: <FacturacionPage /> },
       { path: '/empleados', element: <EmpleadosPage /> },
+      { path: '/usuarios', element: <UsuariosPage /> },
       { path: '*', element: <Navigate to="/" replace /> },
     ],
   },

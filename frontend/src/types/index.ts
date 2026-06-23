@@ -126,3 +126,24 @@ export interface Empleado {
   puede_loguear: boolean
   creado: string // ISO
 }
+
+// ===== Usuarios (gestión, solo admin) =====
+/** Empleado vinculado a una cuenta (subconjunto del Empleado). */
+export interface EmpleadoBreve {
+  id: number
+  nombre: string
+  apellido: string
+  nombre_completo: string
+}
+
+/** Cuenta de login, tal como la ve el panel de administración del front. */
+export interface UsuarioAdmin {
+  id: number
+  username: string
+  email: string
+  is_active: boolean
+  is_staff: boolean
+  is_superuser: boolean
+  date_joined: string
+  empleado: EmpleadoBreve | null
+}

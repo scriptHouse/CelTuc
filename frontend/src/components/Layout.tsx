@@ -15,6 +15,10 @@ import { navItems } from '@/components/navItems'
 export function Layout() {
   const usuario = useAuth((s) => s.usuario)
   const logout = useAuth((s) => s.logout)
+  // Solo los administradores ven los ítems marcados `soloAdmin`.
+  const items = navItems.filter(
+    (item) => !item.soloAdmin || Boolean(usuario?.is_staff) || Boolean(usuario?.is_superuser),
+  )
   const navigate = useNavigate()
   const confirm = useConfirm()
 
@@ -52,7 +56,7 @@ export function Layout() {
         </div>
 
         <nav className="flex-1 space-y-1.5 px-3 py-2" aria-label="Principal">
-          {navItems.map(({ to, label, icon: Icon }) => (
+          {items.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}
@@ -153,8 +157,11 @@ export function Layout() {
         style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
         aria-label="Principal"
       >
-        <div className="mx-auto grid max-w-md grid-cols-4 rounded-[1.35rem] border border-line bg-surface/92 p-1.5 shadow-[0_18px_45px_rgba(10,10,11,0.16)] backdrop-blur-xl">
-          {navItems.map(({ to, label, icon: Icon }) => (
+        <div
+          className="mx-auto grid max-w-md rounded-[1.35rem] border border-line bg-surface/92 p-1.5 shadow-[0_18px_45px_rgba(10,10,11,0.16)] backdrop-blur-xl"
+          style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
+        >
+          {items.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}
