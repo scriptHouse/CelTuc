@@ -1,10 +1,24 @@
 from django.contrib.auth.base_user import BaseUserManager
+from django.core.exceptions import FieldDoesNotExist
 
 
 class UsuarioManager(BaseUserManager):
-    """Manager del usuario. Cada cuenta necesita email + nombre de usuario."""
+    """Manager del usuario. Cada cuenta necesita email + nombre de usuario.
+
+    Oculta las cuentas borradas logicamente (`borrado=True`). La comprobacion del
+    campo evita romper las migraciones historicas (estados previos a que la
+    columna `borrado` exista), donde este manager tambien se usa (`use_in_migrations`).
+    """
 
     use_in_migrations = True
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        try:
+            self.model._meta.get_field('borrado')
+        except FieldDoesNotExist:
+            return qs
+        return qs.filter(borrado=False)
 
     def _create_user(self, email, username, password, **extra_fields):
         if not email:

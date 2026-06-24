@@ -79,7 +79,9 @@ class AccesoSerializer(serializers.Serializer):
 
     def _otras_cuentas(self):
         """Usuarios distintos del ya vinculado a este empleado (para unicidad)."""
-        qs = Usuario.objects.all()
+        # `todos` incluye cuentas borradas logicamente, para no chocar con la
+        # constraint unica de username/email al validar.
+        qs = Usuario.todos.all()
         actual = self.empleado.usuario
         return qs.exclude(pk=actual.pk) if actual else qs
 

@@ -6,8 +6,12 @@ from django.utils import timezone
 from rest_framework.exceptions import AuthenticationFailed
 
 
+# El access es de vida corta; el front lo renueva con el refresh cuando vence.
+# El refresh dura "limite de inactividad (6 h) + vida del access (1 h)": como el
+# refresh se rota en cada renovacion, queda una ventana DESLIZANTE: si pasan ~6 h
+# sin actividad, el ultimo refresh vence y la sesion muere tambien en el server.
 ACCESS_TOKEN_LIFETIME = timedelta(minutes=60)
-REFRESH_TOKEN_LIFETIME = timedelta(days=7)
+REFRESH_TOKEN_LIFETIME = timedelta(hours=7)
 ALGORITHM = 'HS256'
 
 

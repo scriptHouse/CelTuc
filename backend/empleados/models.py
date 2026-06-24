@@ -1,8 +1,10 @@
 from django.conf import settings
 from django.db import models
 
+from comun.models import ModeloBase
 
-class Empleado(models.Model):
+
+class Empleado(ModeloBase):
     """Empleado de la tienda.
 
     Puede tener (o no) una cuenta de `Usuario` vinculada para iniciar sesion en
@@ -23,7 +25,7 @@ class Empleado(models.Model):
         help_text='Opcional: cuenta con la que este empleado inicia sesion.',
     )
 
-    creado = models.DateTimeField('fecha de alta', auto_now_add=True)
+    # creado / actualizado / *_por / borrado* los aporta ModeloBase.
 
     class Meta:
         db_table = 'empleados'

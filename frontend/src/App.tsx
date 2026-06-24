@@ -7,6 +7,7 @@ import { PanelPage } from '@/pages/PanelPage'
 import { InventarioPage } from '@/pages/InventarioPage'
 import { FacturacionPage } from '@/pages/FacturacionPage'
 import { EmpleadosPage } from '@/pages/EmpleadosPage'
+import { SimuladorPage } from '@/pages/SimuladorPage'
 import { UsuariosPage } from '@/pages/UsuariosPage'
 
 const router = createBrowserRouter([
@@ -22,6 +23,7 @@ const router = createBrowserRouter([
       { path: '/inventario', element: <RequirePermiso permiso="ver_inventario"><InventarioPage /></RequirePermiso> },
       { path: '/facturacion', element: <RequirePermiso permiso="ver_facturacion"><FacturacionPage /></RequirePermiso> },
       { path: '/empleados', element: <RequirePermiso permiso="ver_empleados"><EmpleadosPage /></RequirePermiso> },
+      { path: '/simulador', element: <RequirePermiso permiso="ver_simulador"><SimuladorPage /></RequirePermiso> },
       { path: '/usuarios', element: <RequirePermiso soloAdmin><UsuariosPage /></RequirePermiso> },
       { path: '*', element: <Navigate to="/" replace /> },
     ],

@@ -112,8 +112,10 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
+    'comun',
     'usuarios',
     'empleados',
+    'simulador',
 ]
 
 MIDDLEWARE = [
@@ -223,9 +225,11 @@ REST_FRAMEWORK = {
 
 
 # --- JWT ---------------------------------------------------------------------
+# Los tiempos REALES viven en usuarios/tokens.py (implementacion propia de JWT).
+# Esto queda solo como referencia: refresh = 6 h de inactividad + 1 h de access.
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'REFRESH_TOKEN_LIFETIME': timedelta(hours=7),
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 

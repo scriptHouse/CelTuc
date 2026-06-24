@@ -27,6 +27,8 @@ export function usePresencia() {
 
     const marcarInteraccion = () => {
       ultimaInteraccion.current = Date.now()
+      // También alimenta el corte por inactividad (con su propio throttle interno).
+      useAuth.getState().marcarActividad()
     }
 
     const latir = () => {

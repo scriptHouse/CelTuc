@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import { useAuth } from '@/store/auth'
 import { esAdmin, puedeVer } from '@/lib/permisos'
 import { usePresencia } from '@/lib/usePresencia'
+import { useInactividad } from '@/lib/useInactividad'
 import { useConfirm } from '@/components/ConfirmProvider'
 import { BrandMark, BrandWordmark } from '@/components/Brand'
 import { ThemeToggle } from '@/components/ThemeToggle'
@@ -26,6 +27,8 @@ export function Layout() {
   }, [refrescarUsuario])
   // Registra "última vez activo" mientras la sesión está abierta (ver hook).
   usePresencia()
+  // Cierra la sesión y vuelve al login tras 6 h de inactividad.
+  useInactividad()
   // El sidebar muestra cada módulo según los permisos del rol (los admin ven todo).
   const items = navItems.filter((item) =>
     item.soloAdmin ? esAdmin(usuario) : puedeVer(usuario, item.permiso),

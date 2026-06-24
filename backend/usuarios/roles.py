@@ -44,7 +44,9 @@ class RolSerializer(serializers.ModelSerializer):
         value = value.strip()
         if not value:
             raise serializers.ValidationError('El nombre es obligatorio.')
-        qs = Rol.objects.filter(nombre__iexact=value)
+        # `todos` incluye los borrados logicamente: el nombre sigue "ocupado"
+        # mientras exista la fila, asi evitamos chocar con la constraint unica.
+        qs = Rol.todos.filter(nombre__iexact=value)
         if self.instance:
             qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():

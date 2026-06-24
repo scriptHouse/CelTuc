@@ -191,3 +191,37 @@ export interface UsuarioAdmin {
   ultima_actividad: string | null
   en_linea: boolean
 }
+
+// ===== Simulador de tarjetas =====
+/** Categoría de producto: el recargo difiere entre accesorios y equipos. */
+export type CategoriaTarjeta = 'accesorios' | 'equipos'
+
+/** Catálogo de categorías para los selectores (orden y textos de la UI). */
+export const CATEGORIAS_TARJETA: { value: CategoriaTarjeta; label: string; hint: string }[] = [
+  { value: 'accesorios', label: 'Accesorios', hint: 'Accesorios y service técnico' },
+  { value: 'equipos', label: 'Equipos', hint: 'iPhone, Samsung y productos Apple' },
+]
+
+/** Un plan de cuotas dentro de una tarjeta (cuántas cuotas y qué recargo). */
+export interface PlanCuota {
+  id: number
+  etiqueta: string
+  cuotas: number
+  /** Porcentaje de recargo sobre el monto (35 = 35 %). */
+  interes: number
+  orden: number
+  activo: boolean
+}
+
+/** Medio de pago configurable: agrupa una tabla de planes con sus recargos. */
+export interface Tarjeta {
+  id: number
+  nombre: string
+  categoria: CategoriaTarjeta
+  descripcion: string
+  orden: number
+  activa: boolean
+  planes: PlanCuota[]
+  creado: string // ISO
+  actualizado: string // ISO
+}

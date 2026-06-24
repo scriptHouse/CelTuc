@@ -6,6 +6,8 @@ from django.core.validators import MinLengthValidator, RegexValidator
 from django.db import models
 from django.utils import timezone
 
+from comun.models import ModeloBase
+
 from .managers import UsuarioManager
 
 # El nombre de usuario admite letras, numeros y . _ - (estilo handle). Se guarda
@@ -16,7 +18,7 @@ username_validator = RegexValidator(
 )
 
 
-class Permiso(models.Model):
+class Permiso(ModeloBase):
     """Permiso atomico del sistema.
 
     Hoy cada permiso representa el acceso a un modulo del panel (un item del
@@ -39,7 +41,7 @@ class Permiso(models.Model):
         return self.nombre
 
 
-class Rol(models.Model):
+class Rol(ModeloBase):
     """Conjunto de permisos asignable a una cuenta (RBAC).
 
     - `es_admin`: el rol concede administracion total (gestiona roles, empleados
@@ -63,7 +65,7 @@ class Rol(models.Model):
     permisos = models.ManyToManyField(
         Permiso, blank=True, related_name='roles', verbose_name='permisos',
     )
-    creado = models.DateTimeField('fecha de alta', auto_now_add=True)
+    # creado / actualizado / *_por / borrado* los aporta ModeloBase.
 
     class Meta:
         db_table = 'roles'
@@ -75,7 +77,7 @@ class Rol(models.Model):
         return self.nombre
 
 
-class Usuario(AbstractBaseUser, PermissionsMixin):
+class Usuario(ModeloBase, AbstractBaseUser, PermissionsMixin):
     """Usuario del sistema de gestion CelTuc.
 
     Identidad minima: email + nombre de usuario + contrasena. El login se puede
@@ -138,6 +140,38 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
         if self.username:
             self.username = self.username.lower()
         super().save(*args, **kwargs)
+
+    def delete(self, using=None, keep_parents=False, *, usuario=None, fisico=False):
+        """Borrado logico de la cuenta.
+
+        Ademas de marcar `borrado`, desvincula al empleado (queda sin login, igual
+        que el viejo SET_NULL) y desactiva la cuenta (`is_active=False`) para que no
+        pueda iniciar sesion ni figurar como activa. `fisico=True` la elimina.
+        """
+        if fisico:
+            return super().delete(using=using, keep_parents=keep_parents, usuario=usuario, fisico=True)
+        from django.core.exceptions import ObjectDoesNotExist
+        try:
+            empleado = self.empleado
+        except ObjectDoesNotExist:
+            empleado = None
+        if empleado is not None:
+            empleado.usuario = None
+            empleado.save(update_fields=['usuario'])
+        self.is_active = False
+        self.borrado = True
+        self.fecha_borrado = timezone.now()
+        self.borrado_por = usuario
+        self.save(update_fields=['borrado', 'fecha_borrado', 'borrado_por', 'is_active'])
+        return (1, {self._meta.label: 1})
+
+    def restaurar(self):
+        """Revierte el borrado logico y reactiva la cuenta."""
+        self.is_active = True
+        self.borrado = False
+        self.fecha_borrado = None
+        self.borrado_por = None
+        self.save(update_fields=['borrado', 'fecha_borrado', 'borrado_por', 'is_active'])
 
     @property
     def es_administrador(self) -> bool:

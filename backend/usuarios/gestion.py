@@ -65,13 +65,13 @@ class UsuarioCreateSerializer(serializers.Serializer):
 
     def validate_username(self, value):
         value = value.strip().lower()
-        if Usuario.objects.filter(username__iexact=value).exists():
+        if Usuario.todos.filter(username__iexact=value).exists():
             raise serializers.ValidationError('Ese nombre de usuario ya está en uso.')
         return value
 
     def validate_email(self, value):
         value = value.strip().lower()
-        if Usuario.objects.filter(email__iexact=value).exists():
+        if Usuario.todos.filter(email__iexact=value).exists():
             raise serializers.ValidationError('Ese email ya está en uso.')
         return value
 
@@ -112,13 +112,13 @@ class UsuarioUpdateSerializer(serializers.Serializer):
 
     def validate_username(self, value):
         value = value.strip().lower()
-        if Usuario.objects.filter(username__iexact=value).exclude(pk=self.instance.pk).exists():
+        if Usuario.todos.filter(username__iexact=value).exclude(pk=self.instance.pk).exists():
             raise serializers.ValidationError('Ese nombre de usuario ya está en uso.')
         return value
 
     def validate_email(self, value):
         value = value.strip().lower()
-        if Usuario.objects.filter(email__iexact=value).exclude(pk=self.instance.pk).exists():
+        if Usuario.todos.filter(email__iexact=value).exclude(pk=self.instance.pk).exists():
             raise serializers.ValidationError('Ese email ya está en uso.')
         return value
 
@@ -138,6 +138,7 @@ class UsuarioListCreateView(APIView):
     permission_classes = [EsAdministrador]
 
     def get(self, request):
+        # `objects` ya excluye las cuentas borradas logicamente (ver UsuarioManager).
         usuarios = Usuario.objects.select_related('empleado').order_by('username')
         return Response(UsuarioAdminSerializer(usuarios, many=True).data)
 

@@ -4,6 +4,8 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.forms import ReadOnlyPasswordHashField
 from unfold.admin import ModelAdmin
 
+from comun.admin import ModeloBaseAdminMixin
+
 from .models import Permiso, Rol, Usuario
 
 
@@ -44,13 +46,14 @@ class UsuarioChangeForm(forms.ModelForm):
 
 
 @admin.register(Usuario)
-class UsuarioAdmin(BaseUserAdmin, ModelAdmin):
+class UsuarioAdmin(ModeloBaseAdminMixin, BaseUserAdmin, ModelAdmin):
     form = UsuarioChangeForm
     add_form = UsuarioCreationForm
-    list_display = ('username', 'email', 'is_active', 'is_staff', 'is_superuser', 'last_login', 'ultima_actividad')
-    list_filter = ('is_active', 'is_staff', 'is_superuser', 'groups')
+    list_display = ('username', 'email', 'is_active', 'is_staff', 'is_superuser', 'borrado', 'last_login', 'ultima_actividad')
+    list_filter = ('is_active', 'is_staff', 'is_superuser', 'borrado', 'groups')
     search_fields = ('username', 'email')
     ordering = ('username',)
+    actions = ('restaurar',)
     readonly_fields = ('last_login', 'date_joined', 'ultima_actividad')
     fieldsets = (
         (None, {'fields': ('email', 'username', 'password')}),
@@ -70,11 +73,12 @@ class UsuarioAdmin(BaseUserAdmin, ModelAdmin):
 
 
 @admin.register(Rol)
-class RolAdmin(ModelAdmin):
-    list_display = ('nombre', 'es_admin', 'es_sistema', 'cantidad_usuarios')
-    list_filter = ('es_admin', 'es_sistema')
+class RolAdmin(ModeloBaseAdminMixin, ModelAdmin):
+    list_display = ('nombre', 'es_admin', 'es_sistema', 'borrado', 'cantidad_usuarios')
+    list_filter = ('es_admin', 'es_sistema', 'borrado')
     search_fields = ('nombre', 'descripcion')
     filter_horizontal = ('permisos',)
+    actions = ('restaurar',)
 
     @admin.display(description='Cuentas')
     def cantidad_usuarios(self, obj):
@@ -82,7 +86,9 @@ class RolAdmin(ModelAdmin):
 
 
 @admin.register(Permiso)
-class PermisoAdmin(ModelAdmin):
-    list_display = ('nombre', 'codigo', 'orden')
+class PermisoAdmin(ModeloBaseAdminMixin, ModelAdmin):
+    list_display = ('nombre', 'codigo', 'orden', 'borrado')
+    list_filter = ('borrado',)
     search_fields = ('nombre', 'codigo')
     ordering = ('orden', 'nombre')
+    actions = ('restaurar',)

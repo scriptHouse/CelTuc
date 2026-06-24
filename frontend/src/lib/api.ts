@@ -44,7 +44,19 @@ interface RequestOptions {
   signal?: AbortSignal
 }
 
-async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
+/**
+ * Manejador de 401 para peticiones autenticadas. Lo registra el store de sesión:
+ * intenta refrescar el token y devuelve uno nuevo (o null si la sesión murió).
+ * Vive acá para evitar el ciclo de imports api ↔ store.
+ */
+type UnauthorizedHandler = () => Promise<string | null>
+let unauthorizedHandler: UnauthorizedHandler | null = null
+
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
+  unauthorizedHandler = handler
+}
+
+async function request<T>(path: string, opts: RequestOptions = {}, reintento = false): Promise<T> {
   const { method = 'GET', body, token, signal } = opts
 
   let res: Response
@@ -61,6 +73,15 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   } catch {
     // Red caída, servidor apagado, CORS, etc.
     throw new ApiError(0, 'No se pudo conectar con el servidor. Revisá tu conexión.', null)
+  }
+
+  // Token vencido en una petición autenticada: intentamos refrescarlo UNA vez y
+  // reintentar de forma transparente. Si no se puede, el handler cierra la sesión.
+  if (res.status === 401 && token && !reintento && unauthorizedHandler) {
+    const nuevoToken = await unauthorizedHandler()
+    if (nuevoToken) {
+      return request<T>(path, { ...opts, token: nuevoToken }, true)
+    }
   }
 
   const isJson = res.headers.get('content-type')?.includes('application/json')

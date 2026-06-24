@@ -82,6 +82,29 @@ class AuthFlowTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()['username'], 'ana')
 
+    def test_refresh_renueva_el_par_de_tokens(self):
+        refresh = self._login('ana').json()['refresh']
+        r = self.client.post(
+            reverse('usuarios:refresh'),
+            {'refresh': refresh},
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertIn('access', body)
+        self.assertIn('refresh', body)
+        # El nuevo access sirve para autenticar.
+        me = self.client.get(reverse('usuarios:me'), HTTP_AUTHORIZATION=f"Bearer {body['access']}")
+        self.assertEqual(me.status_code, 200)
+
+    def test_refresh_invalido_devuelve_401(self):
+        r = self.client.post(
+            reverse('usuarios:refresh'),
+            {'refresh': 'no-es-un-token-valido'},
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 401)
+
 
 class GestionUsuariosTests(TestCase):
     def setUp(self):
@@ -187,12 +210,13 @@ class RolesModelTests(TestCase):
         cache.clear()  # throttle de login compartido por cache (ver AuthFlowTests)
 
     def test_seed_de_roles_y_permisos(self):
-        # La migracion siembra los 4 permisos de modulo y los roles base.
-        self.assertEqual(Permiso.objects.count(), 4)
+        # Las migraciones siembran los permisos de modulo (4 originales +
+        # ver_simulador) y los roles base.
+        self.assertEqual(Permiso.objects.count(), 5)
         self.assertTrue(Rol.objects.get(nombre='Administrador').es_admin)
         empleado = Rol.objects.get(nombre='Empleado')
         self.assertFalse(empleado.es_admin)
-        self.assertEqual(empleado.permisos.count(), 4)
+        self.assertEqual(empleado.permisos.count(), 5)
 
     def test_superusuario_ve_todo_sin_rol(self):
         admin = Usuario.objects.create_superuser(
