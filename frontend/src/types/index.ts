@@ -150,6 +150,10 @@ export interface UsuarioBreve {
   is_active: boolean
   /** Rol con el que esta cuenta entra al sistema, o null. */
   rol?: RolBreve | null
+  /** Auditoría de presencia. */
+  last_login?: string | null
+  ultima_actividad?: string | null
+  en_linea?: boolean
 }
 
 export interface Empleado {
@@ -182,4 +186,8 @@ export interface UsuarioAdmin {
   is_superuser: boolean
   date_joined: string
   empleado: EmpleadoBreve | null
+  /** Auditoría de presencia. */
+  last_login: string | null
+  ultima_actividad: string | null
+  en_linea: boolean
 }

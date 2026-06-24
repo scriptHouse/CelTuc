@@ -4,6 +4,7 @@ import { LogOut } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/store/auth'
 import { esAdmin, puedeVer } from '@/lib/permisos'
+import { usePresencia } from '@/lib/usePresencia'
 import { useConfirm } from '@/components/ConfirmProvider'
 import { BrandMark, BrandWordmark } from '@/components/Brand'
 import { ThemeToggle } from '@/components/ThemeToggle'
@@ -23,6 +24,8 @@ export function Layout() {
   useEffect(() => {
     refrescarUsuario()
   }, [refrescarUsuario])
+  // Registra "última vez activo" mientras la sesión está abierta (ver hook).
+  usePresencia()
   // El sidebar muestra cada módulo según los permisos del rol (los admin ven todo).
   const items = navItems.filter((item) =>
     item.soloAdmin ? esAdmin(usuario) : puedeVer(usuario, item.permiso),

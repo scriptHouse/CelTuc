@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import LoginView, MeView, RefreshView
+from .views import HeartbeatView, LoginView, MeView, RefreshView
 
 app_name = 'usuarios'
 
@@ -8,4 +8,5 @@ urlpatterns = [
     path('login/', LoginView.as_view(), name='login'),
     path('refresh/', RefreshView.as_view(), name='refresh'),
     path('me/', MeView.as_view(), name='me'),
+    path('heartbeat/', HeartbeatView.as_view(), name='heartbeat'),
 ]

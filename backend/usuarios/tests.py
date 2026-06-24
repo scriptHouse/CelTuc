@@ -1,10 +1,15 @@
+from datetime import timedelta
+
+from django.core.cache import cache
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from empleados.models import Empleado
 
 from .models import Permiso, Rol, Usuario
+from .tokens import create_token_pair
 
 
 class UsuarioModelTests(TestCase):
@@ -27,6 +32,9 @@ class UsuarioModelTests(TestCase):
 
 class AuthFlowTests(TestCase):
     def setUp(self):
+        # El throttle de login usa la cache (LocMemCache persiste entre tests):
+        # la limpiamos para que el conteo de intentos no se filtre de un test a otro.
+        cache.clear()
         self.user = Usuario.objects.create_user(
             email='ana@celtuc.ar', username='ana', password='clave-segura-123',
         )
@@ -175,6 +183,9 @@ class GestionUsuariosTests(TestCase):
 class RolesModelTests(TestCase):
     """Helpers de autorizacion en el modelo Usuario (es_administrador/permisos)."""
 
+    def setUp(self):
+        cache.clear()  # throttle de login compartido por cache (ver AuthFlowTests)
+
     def test_seed_de_roles_y_permisos(self):
         # La migracion siembra los 4 permisos de modulo y los roles base.
         self.assertEqual(Permiso.objects.count(), 4)
@@ -277,3 +288,68 @@ class RolesAPITests(TestCase):
             format='json',
         )
         self.assertEqual(r.status_code, 400)
+
+
+class PresenciaTests(TestCase):
+    """Auditoria: ultimo inicio de sesion y 'ultima vez activo' / en linea."""
+
+    def setUp(self):
+        cache.clear()  # throttle de login compartido por cache (ver AuthFlowTests)
+        self.user = Usuario.objects.create_user(
+            email='p@celtuc.ar', username='puser', password='clave-segura-123',
+        )
+
+    def _bearer(self, user):
+        return {'HTTP_AUTHORIZATION': 'Bearer ' + create_token_pair(user)['access']}
+
+    def test_login_registra_last_login_y_actividad(self):
+        self.assertIsNone(self.user.last_login)
+        self.assertIsNone(self.user.ultima_actividad)
+        self.client.post(
+            reverse('usuarios:login'),
+            {'identifier': 'puser', 'password': 'clave-segura-123'},
+            content_type='application/json',
+        )
+        self.user.refresh_from_db()
+        self.assertIsNotNone(self.user.last_login)
+        self.assertIsNotNone(self.user.ultima_actividad)
+        self.assertTrue(self.user.en_linea)
+
+    def test_heartbeat_requiere_autenticacion(self):
+        self.assertEqual(self.client.post(reverse('usuarios:heartbeat')).status_code, 401)
+        r = self.client.post(reverse('usuarios:heartbeat'), **self._bearer(self.user))
+        self.assertEqual(r.status_code, 204)
+
+    def test_request_autenticado_actualiza_actividad_vieja(self):
+        vieja = timezone.now() - timedelta(minutes=10)
+        Usuario.objects.filter(pk=self.user.pk).update(ultima_actividad=vieja)
+        self.client.post(reverse('usuarios:heartbeat'), **self._bearer(self.user))
+        self.user.refresh_from_db()
+        self.assertGreater(self.user.ultima_actividad, vieja)
+        self.assertTrue(self.user.en_linea)
+
+    def test_throttle_no_reescribe_actividad_reciente(self):
+        reciente = timezone.now() - timedelta(seconds=10)
+        Usuario.objects.filter(pk=self.user.pk).update(ultima_actividad=reciente)
+        self.client.get(reverse('usuarios:me'), **self._bearer(self.user))
+        self.user.refresh_from_db()
+        # Dentro del intervalo de 1 min: no se reescribe (1 sola escritura/min).
+        self.assertLess(abs((self.user.ultima_actividad - reciente).total_seconds()), 1)
+
+    def test_en_linea_es_falso_sin_actividad_reciente(self):
+        Usuario.objects.filter(pk=self.user.pk).update(
+            ultima_actividad=timezone.now() - timedelta(minutes=10),
+        )
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.en_linea)
+
+    def test_serializer_admin_expone_presencia(self):
+        admin = Usuario.objects.create_superuser(
+            email='a@celtuc.ar', username='a', password='x',
+        )
+        client = APIClient()
+        client.force_authenticate(admin)
+        fila = [u for u in client.get(reverse('usuarios_gestion:list')).data if u['username'] == 'puser'][0]
+        self.assertIn('last_login', fila)
+        self.assertIn('ultima_actividad', fila)
+        self.assertIn('en_linea', fila)

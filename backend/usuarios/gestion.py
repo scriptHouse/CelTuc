@@ -21,12 +21,14 @@ class UsuarioAdminSerializer(serializers.ModelSerializer):
     """Vista de una cuenta para el panel de administración del front."""
 
     empleado = serializers.SerializerMethodField()
+    en_linea = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Usuario
         fields = (
             'id', 'username', 'email',
             'is_active', 'is_staff', 'is_superuser', 'date_joined', 'empleado',
+            'last_login', 'ultima_actividad', 'en_linea',
         )
 
     def get_empleado(self, obj):

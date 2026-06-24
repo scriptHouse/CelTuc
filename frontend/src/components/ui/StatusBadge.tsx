@@ -1,6 +1,7 @@
 import { AlertTriangle, CheckCircle2, Clock, PackageX, TrendingDown } from 'lucide-react'
 import type { EstadoEfectivo } from '@/types'
 import { Badge } from '@/components/ui/Badge'
+import { tiempoRelativo } from '@/lib/format'
 
 /**
  * Estados SIN color (paleta monocromática). La jerarquía se transmite por:
@@ -72,6 +73,45 @@ export function ActivoDot({ activo }: { activo: boolean }) {
         }
       />
       {activo ? 'Activo' : 'Inactivo'}
+    </span>
+  )
+}
+
+/** Punto de presencia: relleno con "ping" si está en línea; contorno si no. */
+export function EnLineaDot({ enLinea }: { enLinea?: boolean }) {
+  return (
+    <span aria-hidden className="relative inline-flex h-2 w-2 shrink-0">
+      {enLinea && (
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-ink-900/40" />
+      )}
+      <span
+        className={
+          enLinea
+            ? 'relative inline-flex h-2 w-2 rounded-full bg-ink-900'
+            : 'relative inline-flex h-2 w-2 rounded-full border border-ink-400'
+        }
+      />
+    </span>
+  )
+}
+
+/**
+ * Presencia textual para auditoría: "En línea" si está activo ahora, o
+ * "Activo <hace X>" con la última señal de vida. Monocromático (sin verde).
+ */
+export function Presencia({
+  enLinea,
+  ultimaActividad,
+  className,
+}: {
+  enLinea?: boolean
+  ultimaActividad?: string | null
+  className?: string
+}) {
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${enLinea ? 'text-ink-900' : 'text-ink-500'} ${className ?? ''}`}>
+      <EnLineaDot enLinea={enLinea} />
+      {enLinea ? 'En línea' : ultimaActividad ? `Activo ${tiempoRelativo(ultimaActividad)}` : 'Sin actividad'}
     </span>
   )
 }

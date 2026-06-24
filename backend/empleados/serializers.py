@@ -10,10 +10,11 @@ class UsuarioBreveSerializer(serializers.ModelSerializer):
     """Vista mínima de la cuenta de login vinculada a un empleado."""
 
     rol = serializers.SerializerMethodField()
+    en_linea = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Usuario
-        fields = ('id', 'username', 'email', 'is_active', 'rol')
+        fields = ('id', 'username', 'email', 'is_active', 'rol', 'last_login', 'ultima_actividad', 'en_linea')
 
     def get_rol(self, obj):
         if not obj.rol_id:

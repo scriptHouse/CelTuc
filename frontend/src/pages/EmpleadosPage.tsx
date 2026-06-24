@@ -42,6 +42,7 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
+import { Presencia } from '@/components/ui/StatusBadge'
 import { Modal } from '@/components/ui/Modal'
 import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -241,8 +242,18 @@ export function EmpleadosPage() {
           {empleados.map((e, i) => (
             <Card key={e.id} className="ct-stagger-item flex flex-col p-4" style={ctStagger(i)}>
               <div className="flex items-start gap-3">
-                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-ink-100 text-sm font-bold text-ink-900">
+                <span className="relative grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-ink-100 text-sm font-bold text-ink-900">
                   {iniciales(e)}
+                  {e.usuario?.en_linea && (
+                    <span
+                      aria-hidden
+                      title="En línea"
+                      className="absolute -bottom-0.5 -right-0.5 grid place-items-center"
+                    >
+                      <span className="absolute h-3 w-3 animate-ping rounded-full bg-ink-900/40" />
+                      <span className="relative h-3 w-3 rounded-full border-2 border-surface bg-ink-900" />
+                    </span>
+                  )}
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-semibold text-ink-900">{e.nombre_completo}</p>
@@ -273,6 +284,12 @@ export function EmpleadosPage() {
                 <p className="mt-3 flex items-center gap-1.5 truncate text-xs text-ink-400">
                   <Mail className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">{e.usuario.email}</span>
                 </p>
+              )}
+
+              {e.usuario && (
+                <div className="mt-2.5">
+                  <Presencia enLinea={e.usuario.en_linea} ultimaActividad={e.usuario.ultima_actividad} />
+                </div>
               )}
 
               <div className="mt-3 flex items-center justify-between border-t border-line pt-3">

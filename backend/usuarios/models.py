@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.contrib.auth.base_user import AbstractBaseUser
 from django.contrib.auth.models import PermissionsMixin
 from django.core.validators import MinLengthValidator, RegexValidator
@@ -106,6 +108,12 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
 
     date_joined = models.DateTimeField('fecha de alta', default=timezone.now)
 
+    # Ultima vez que la cuenta dio señales de vida: login, request a la API o
+    # latido del front mientras usa el sistema. Alimenta "ultima vez activo" y el
+    # estado "en linea", sin tablas de sesiones ni logs aparte. `last_login` (que
+    # aporta AbstractBaseUser) guarda solo el momento del inicio de sesion.
+    ultima_actividad = models.DateTimeField('ultima actividad', null=True, blank=True)
+
     # Login indistinto: el identificador canonico es el email, pero la vista de
     # login tambien acepta el username (ver usuarios/serializers.py).
     USERNAME_FIELD = 'email'
@@ -155,3 +163,15 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
         if self.rol_id:
             return list(self.rol.permisos.values_list('codigo', flat=True))
         return []
+
+    # Ventana para considerar a una cuenta "en linea": si dio señales de vida en
+    # los ultimos minutos. Es mayor que el intervalo de latido del front para que
+    # el estado no parpadee.
+    VENTANA_EN_LINEA = timedelta(minutes=5)
+
+    @property
+    def en_linea(self) -> bool:
+        """True si la cuenta dio señales de actividad hace poco."""
+        if not self.ultima_actividad:
+            return False
+        return timezone.now() - self.ultima_actividad <= self.VENTANA_EN_LINEA

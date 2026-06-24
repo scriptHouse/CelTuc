@@ -59,6 +59,41 @@ export function fechaLarga(iso: string): string {
   return d.toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
+/** dd/mm/aaaa HH:MM (fecha y hora, para auditoría). */
+export function fechaHora(iso?: string | null): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleString('es-AR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+/**
+ * Tiempo relativo en español: "recién", "hace 5 min", "hace 2 h", "ayer", o la
+ * fecha absoluta si es más vieja que una semana. Ideal para "última vez activo".
+ */
+export function tiempoRelativo(iso?: string | null): string {
+  if (!iso) return 'nunca'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  const seg = Math.floor((Date.now() - d.getTime()) / 1000)
+  if (seg < 0) return 'recién'
+  if (seg < 60) return 'recién'
+  const min = Math.floor(seg / 60)
+  if (min < 60) return `hace ${min} min`
+  const horas = Math.floor(min / 60)
+  if (horas < 24) return `hace ${horas} h`
+  const dias = Math.floor(horas / 24)
+  if (dias === 1) return 'ayer'
+  if (dias < 7) return `hace ${dias} días`
+  return fecha(iso)
+}
+
 /** Rellena con ceros a la izquierda: pad(7, 8) -> "00000007" */
 export function pad(value: number, length: number): string {
   return String(value).padStart(length, '0')

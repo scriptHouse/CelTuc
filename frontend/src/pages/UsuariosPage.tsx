@@ -18,6 +18,7 @@ import {
   Trash2,
   UserCog,
   UserPlus,
+  Wifi,
 } from 'lucide-react'
 import type { UsuarioAdmin } from '@/types'
 import {
@@ -28,7 +29,8 @@ import {
 } from '@/services/usuarios'
 import { useAuth } from '@/store/auth'
 import { ApiError } from '@/lib/api'
-import { fecha } from '@/lib/format'
+import { fecha, fechaHora } from '@/lib/format'
+import { Presencia } from '@/components/ui/StatusBadge'
 import { ctStagger } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatCard } from '@/components/ui/StatCard'
@@ -93,6 +95,7 @@ export function UsuariosPage() {
       total: usuarios.length,
       admins: usuarios.filter(esAdmin).length,
       conEmpleado: usuarios.filter((u) => u.empleado).length,
+      enLinea: usuarios.filter((u) => u.en_linea).length,
     }
   }, [usuarios])
 
@@ -189,12 +192,13 @@ export function UsuariosPage() {
         }
       />
 
-      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-3">
+      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard className="ct-stagger-item" style={ctStagger(0)} label="Cuentas" value={String(stats.total)} icon={UserCog} />
-        <StatCard className="ct-stagger-item" style={ctStagger(1)} label="Administradores" value={String(stats.admins)} icon={ShieldCheck} />
+        <StatCard className="ct-stagger-item" style={ctStagger(1)} label="En línea" value={String(stats.enLinea)} hint="Activos ahora" icon={Wifi} />
+        <StatCard className="ct-stagger-item" style={ctStagger(2)} label="Administradores" value={String(stats.admins)} icon={ShieldCheck} />
         <StatCard
           className="ct-stagger-item"
-          style={ctStagger(2)}
+          style={ctStagger(3)}
           label="Vinculadas a empleado"
           value={String(stats.conEmpleado)}
           icon={Briefcase}
@@ -252,6 +256,13 @@ export function UsuariosPage() {
                     <span className="text-ink-400">Sin empleado vinculado</span>
                   )}
                   {!u.is_active && <Badge tone="soft">Inactivo</Badge>}
+                </div>
+
+                <div className="mt-3 flex flex-col gap-1 rounded-xl bg-canvas/50 px-3 py-2.5">
+                  <Presencia enLinea={u.en_linea} ultimaActividad={u.ultima_actividad} />
+                  <span className="tnum text-xs text-ink-400">
+                    Último ingreso: {fechaHora(u.last_login)}
+                  </span>
                 </div>
 
                 <div className="mt-3 flex items-center justify-between border-t border-line pt-3">

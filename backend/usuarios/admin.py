@@ -47,16 +47,16 @@ class UsuarioChangeForm(forms.ModelForm):
 class UsuarioAdmin(BaseUserAdmin, ModelAdmin):
     form = UsuarioChangeForm
     add_form = UsuarioCreationForm
-    list_display = ('username', 'email', 'is_active', 'is_staff', 'is_superuser', 'date_joined')
+    list_display = ('username', 'email', 'is_active', 'is_staff', 'is_superuser', 'last_login', 'ultima_actividad')
     list_filter = ('is_active', 'is_staff', 'is_superuser', 'groups')
     search_fields = ('username', 'email')
     ordering = ('username',)
-    readonly_fields = ('last_login', 'date_joined')
+    readonly_fields = ('last_login', 'date_joined', 'ultima_actividad')
     fieldsets = (
         (None, {'fields': ('email', 'username', 'password')}),
         ('Rol y acceso', {'fields': ('rol',)}),
         ('Permisos', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
-        ('Fechas', {'fields': ('last_login', 'date_joined')}),
+        ('Fechas', {'fields': ('last_login', 'ultima_actividad', 'date_joined')}),
     )
     add_fieldsets = (
         (

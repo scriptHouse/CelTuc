@@ -1,3 +1,4 @@
+from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -21,6 +22,11 @@ class LoginView(APIView):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data['user']
+        # Auditoria: registramos el inicio de sesion y arrancamos la presencia.
+        ahora = timezone.now()
+        Usuario.objects.filter(pk=user.pk).update(last_login=ahora, ultima_actividad=ahora)
+        user.last_login = ahora
+        user.ultima_actividad = ahora
         return Response({
             **create_token_pair(user),
             'user': UsuarioSerializer(user).data,
@@ -53,3 +59,17 @@ class MeView(generics.RetrieveAPIView):
 
     def get_object(self):
         return self.request.user
+
+
+class HeartbeatView(APIView):
+    """Latido de presencia.
+
+    El front lo llama cada pocos minutos mientras la cuenta esta activa (pestaña
+    visible + interaccion reciente). La marca de `ultima_actividad` la hace
+    JWTAuthentication con su throttle; aca solo confirmamos recepcion, sin cuerpo.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        return Response(status=status.HTTP_204_NO_CONTENT)
