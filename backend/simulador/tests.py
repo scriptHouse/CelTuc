@@ -7,6 +7,10 @@ from .models import PlanCuota, Tarjeta
 
 class BorradoLogicoTests(TestCase):
     def test_borrado_logico_oculta_pero_conserva(self):
+        # Medimos deltas (no conteos absolutos): la migracion de seed deja
+        # tarjetas precargadas, asi que el test no debe asumir la tabla vacia.
+        base_vivos = Tarjeta.objects.count()
+        base_todos = Tarjeta.todos.count()
         tarjeta = Tarjeta.objects.create(
             nombre='No bancarizada', categoria=Tarjeta.Categoria.EQUIPOS,
         )
@@ -16,25 +20,28 @@ class BorradoLogicoTests(TestCase):
 
         tarjeta.delete()  # borrado logico (no fisico)
 
-        # El manager por defecto ya no la ve; `todos` si.
-        self.assertEqual(Tarjeta.objects.count(), 0)
-        self.assertEqual(Tarjeta.todos.count(), 1)
+        # El manager por defecto ya no la ve; `todos` si la conserva.
+        self.assertEqual(Tarjeta.objects.count(), base_vivos)
+        self.assertEqual(Tarjeta.todos.count(), base_todos + 1)
         tarjeta.refresh_from_db()
         self.assertTrue(tarjeta.borrado)
         self.assertIsNotNone(tarjeta.fecha_borrado)
 
     def test_restaurar_revierte_el_borrado(self):
+        base_vivos = Tarjeta.objects.count()
         tarjeta = Tarjeta.objects.create(
             nombre='MercadoPago', categoria=Tarjeta.Categoria.ACCESORIOS,
         )
         tarjeta.delete()
         tarjeta.restaurar()
 
-        self.assertEqual(Tarjeta.objects.count(), 1)
+        self.assertEqual(Tarjeta.objects.count(), base_vivos + 1)
         self.assertFalse(tarjeta.borrado)
         self.assertIsNone(tarjeta.fecha_borrado)
 
     def test_borrado_fisico_elimina_en_cascada(self):
+        base_tarjetas = Tarjeta.todos.count()
+        base_planes = PlanCuota.todos.count()
         tarjeta = Tarjeta.objects.create(
             nombre='Naranja', categoria=Tarjeta.Categoria.EQUIPOS,
         )
@@ -44,8 +51,8 @@ class BorradoLogicoTests(TestCase):
 
         tarjeta.delete(fisico=True)  # borrado real: arrastra los planes
 
-        self.assertEqual(Tarjeta.todos.count(), 0)
-        self.assertEqual(PlanCuota.todos.count(), 0)
+        self.assertEqual(Tarjeta.todos.count(), base_tarjetas)
+        self.assertEqual(PlanCuota.todos.count(), base_planes)
 
 
 class TarjetaSerializerTests(TestCase):

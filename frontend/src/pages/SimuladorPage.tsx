@@ -209,6 +209,7 @@ function TarjetaResultado({ tarjeta, monto, index }: { tarjeta: Tarjeta; monto: 
           {planes.map((plan) => {
             const { total, valorCuota } = calcular(monto, plan)
             const sinInteres = Number(plan.interes) === 0
+            const unaCuota = plan.cuotas <= 1
             return (
               <li key={plan.id} className="flex items-center justify-between gap-3 px-4 py-2.5 sm:px-5">
                 <div className="min-w-0">
@@ -226,9 +227,18 @@ function TarjetaResultado({ tarjeta, monto, index }: { tarjeta: Tarjeta; monto: 
                     {monto > 0 ? money0(valorCuota) : '—'}
                   </p>
                   <p className="tnum text-xs text-ink-400">
-                    {plan.cuotas} {plan.cuotas === 1 ? 'pago' : 'cuotas'}
-                    {monto > 0 ? ` · ${money0(total)}` : ''}
+                    {monto > 0 ? (unaCuota ? '1 pago' : 'por cuota') : `${plan.cuotas} ${unaCuota ? 'pago' : 'cuotas'}`}
                   </p>
+                  {monto > 0 && !unaCuota && (
+                    <p className="tnum mt-1 text-sm font-semibold text-ink-700">
+                      Total {money0(total)}
+                    </p>
+                  )}
+                  {monto > 0 && !sinInteres && (
+                    <p className="tnum mt-0.5 text-[0.7rem] leading-tight text-ink-400">
+                      incluye {money0(total - monto)} de interés
+                    </p>
+                  )}
                 </div>
               </li>
             )
