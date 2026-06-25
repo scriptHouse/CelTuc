@@ -1,4 +1,4 @@
-import { Boxes, CreditCard, LayoutDashboard, ReceiptText, UserCog, Users } from 'lucide-react'
+import { Boxes, CreditCard, FileText, LayoutDashboard, ReceiptText, UserCog, Users } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 export interface NavItem {
@@ -17,5 +17,9 @@ export const navItems: NavItem[] = [
   { to: '/facturacion', label: 'Facturación', icon: ReceiptText, permiso: 'ver_facturacion' },
   { to: '/empleados', label: 'Empleados', icon: Users, permiso: 'ver_empleados' },
   { to: '/simulador', label: 'Simulador', icon: CreditCard, permiso: 'ver_simulador' },
+  // Documentos: por ahora es 100 % front (sin backend), por eso queda visible a
+  // toda cuenta autenticada. Cuando se sume el backend, asignarle un permiso
+  // (p. ej. 'ver_documentos') acá y en la ruta.
+  { to: '/documentos', label: 'Documentos', icon: FileText },
   { to: '/usuarios', label: 'Usuarios', icon: UserCog, soloAdmin: true },
 ]

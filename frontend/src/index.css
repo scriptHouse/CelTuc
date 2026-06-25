@@ -390,6 +390,29 @@ h6 {
   }
 }
 
+/* ===========================================================
+   Campos rellenables de los documentos (módulo Documentos).
+   El papel es siempre claro; estos campos sólo agregan una
+   pista visual sutil (sin romper el aspecto del documento).
+   =========================================================== */
+.ct-doc-field {
+  border-radius: 2px;
+  transition: background-color 0.12s ease;
+  cursor: text;
+}
+.ct-doc-field:hover {
+  background-color: rgba(10, 10, 11, 0.045);
+}
+.ct-doc-field:focus {
+  background-color: rgba(10, 10, 11, 0.08);
+}
+.ct-doc-field::placeholder {
+  color: rgba(10, 10, 11, 0.3);
+}
+.ct-doc-field[readonly] {
+  cursor: default;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-in,
   .ct-rise,
