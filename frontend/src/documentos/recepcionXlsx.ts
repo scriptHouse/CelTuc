@@ -21,12 +21,16 @@ const LINEAS = {
   fallaExtra: '________________________________________________________________________________',
 }
 
-export async function construirRecepcionXlsx(datos: RecepcionData): Promise<Blob> {
+export async function construirRecepcionXlsx(
+  datos: RecepcionData,
+  titulo = 'RECEPCION DE EQUIPO/S',
+  hoja = 'Recepcion',
+): Promise<Blob> {
   const wb = new ExcelJS.Workbook()
   wb.creator = 'CelTuc'
   wb.created = new Date()
 
-  const ws = wb.addWorksheet('Recepcion', {
+  const ws = wb.addWorksheet(hoja, {
     views: [{ showGridLines: false }],
     pageSetup: {
       paperSize: 9, // A4
@@ -144,7 +148,7 @@ export async function construirRecepcionXlsx(datos: RecepcionData): Promise<Blob
   const conValor = (label: string, value: string, blanco: string) => (value.trim() ? `${label} ${value}` : blanco)
 
   // ----- Título -----
-  put('A1', 'RECEPCION DE EQUIPO/S', calibri(14, true), { horizontal: 'center', vertical: 'middle' })
+  put('A1', titulo, calibri(14, true), { horizontal: 'center', vertical: 'middle' })
 
   // ----- Encabezado (textos; el logo va como imagen) -----
   put('C3', '   ' + EMPRESA.nombre, calibri(16, true), { horizontal: 'left', vertical: 'middle' })

@@ -56,3 +56,14 @@ export const GARANTIA_RUNS: GarantiaRun[] = [
 
 /** El mismo texto como string plano (para el campo combinado del Excel). */
 export const GARANTIA_TEXTO = GARANTIA_RUNS.map((r) => r.t).join('')
+
+/**
+ * Parte un texto de garantía en "runs" resaltando en negrita la frase
+ * "Esta garantía NO cubre:" (subtítulo común a todas las garantías de CelTuc).
+ */
+export function partirGarantia(texto: string): GarantiaRun[] {
+  const marca = 'Esta garantía NO cubre:'
+  const i = texto.indexOf(marca)
+  if (i < 0) return [{ t: texto }]
+  return [{ t: texto.slice(0, i) }, { t: marca, bold: true }, { t: texto.slice(i + marca.length) }]
+}

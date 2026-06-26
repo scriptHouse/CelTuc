@@ -24,11 +24,12 @@ export interface RecepcionData {
 
 /** Documento en blanco. La fecha se completa con el día actual al abrir la página. */
 export function recepcionVacia(): RecepcionData {
+  const { dia, mes, anio } = hoyDMY()
   return {
     cupon: '',
-    fechaDia: '',
-    fechaMes: '',
-    fechaAnio: '',
+    fechaDia: dia,
+    fechaMes: mes,
+    fechaAnio: anio,
     recibiDe: '',
     equipos: '',
     falla: '',
@@ -44,19 +45,45 @@ export function recepcionVacia(): RecepcionData {
   }
 }
 
+import type { ComponentType } from 'react'
+
+/** Props comunes a todos los "papeles" (preview HTML rellenable). */
+export interface PaperProps<T> {
+  datos: T
+  onChange: (patch: Partial<T>) => void
+  readOnly?: boolean
+}
+
 /**
- * Definición de un tipo de documento del módulo. Pensado para crecer: hoy sólo
- * está "Recepción", pero el registro (`registry.ts`) admite sumar las demás
- * hojas del Excel (Reparación, Compra, Seña, etc.) con la misma estructura.
+ * Un documento del módulo: su preview HTML (`Paper`) y la carga diferida de sus
+ * exportadores (PDF con @react-pdf, XLSX con exceljs). El Paper es liviano y va
+ * en el bundle principal; los exportadores pesan, por eso se importan on-demand.
+ *
+ * Pensado para crecer: cada hoja del Excel (Recepción, Reparación, Compra, Seña,
+ * Compraventa, etc.) se registra en `registry.tsx` con esta misma forma.
  */
-export interface DocumentoDef<T = unknown> {
+export interface DocModule<T = unknown> {
   id: string
   nombre: string
   descripcion: string
-  /** Si está disponible para usar. Los que faltan se muestran como "próximamente". */
-  habilitado: boolean
-  /** Estado inicial del formulario. */
+  /** Dimensiones naturales del papel (px) para el escalador responsivo. */
+  naturalW: number
+  naturalH: number
+  /** Estado inicial del formulario (con defaults, p. ej. la fecha de hoy). */
   crearVacio: () => T
   /** Nombre de archivo base para las exportaciones (sin extensión). */
   nombreArchivo: (datos: T) => string
+  Paper: ComponentType<PaperProps<T>>
+  loadPdf: () => Promise<ComponentType<{ datos: T }>>
+  loadXlsx: () => Promise<(datos: T) => Promise<Blob>>
+}
+
+/** Fecha de hoy en partes (para prefijar el campo FECHA de los formularios). */
+export function hoyDMY(): { dia: string; mes: string; anio: string } {
+  const d = new Date()
+  return {
+    dia: String(d.getDate()).padStart(2, '0'),
+    mes: String(d.getMonth() + 1).padStart(2, '0'),
+    anio: String(d.getFullYear()).slice(-2),
+  }
 }

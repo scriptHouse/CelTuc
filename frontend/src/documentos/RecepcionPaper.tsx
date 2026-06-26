@@ -38,9 +38,11 @@ interface PaperProps {
   datos: RecepcionData
   onChange: (patch: Patch) => void
   readOnly?: boolean
+  /** Título del documento (Recepción y Reparación comparten este formulario). */
+  titulo?: string
 }
 
-export function RecepcionPaper({ datos, onChange, readOnly = false }: PaperProps) {
+export function RecepcionPaper({ datos, onChange, readOnly = false, titulo = RECEPCION_TITULO }: PaperProps) {
   const set = (k: keyof RecepcionData) => (v: string) => onChange({ [k]: v } as Patch)
 
   return (
@@ -69,7 +71,7 @@ export function RecepcionPaper({ datos, onChange, readOnly = false }: PaperProps
           letterSpacing: '0.01em',
         }}
       >
-        {RECEPCION_TITULO}
+        {titulo}
       </div>
 
       {/* ===== Cuerpo (con márgenes internos = columnas A y J) ===== */}

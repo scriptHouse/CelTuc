@@ -47,14 +47,14 @@ const s = StyleSheet.create({
   row: { flexDirection: 'row' },
 })
 
-export function RecepcionPdf({ datos }: { datos: RecepcionData }) {
+export function RecepcionPdf({ datos, titulo = RECEPCION_TITULO }: { datos: RecepcionData; titulo?: string }) {
   return (
-    <Document title="Recepción de equipos — CelTuc" author="CelTuc">
+    <Document title={`${titulo} — CelTuc`} author="CelTuc">
       <Page size="A4" style={s.page}>
         <View style={s.paper}>
           {/* Título */}
           <View style={s.title}>
-            <Text style={s.titleText}>{RECEPCION_TITULO}</Text>
+            <Text style={s.titleText}>{titulo}</Text>
           </View>
 
           <View style={s.body}>
