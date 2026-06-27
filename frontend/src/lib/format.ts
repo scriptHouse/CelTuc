@@ -47,7 +47,12 @@ export function num(value: number): string {
 
 /** dd/mm/aaaa */
 export function fecha(iso: string): string {
-  const d = new Date(iso)
+  // Una fecha "solo día" (yyyy-mm-dd) se interpreta como LOCAL para que no se
+  // corra un día por zona horaria; un timestamp completo (ISO con hora) va directo.
+  const soloDia = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
+  const d = soloDia
+    ? new Date(Number(soloDia[1]), Number(soloDia[2]) - 1, Number(soloDia[3]))
+    : new Date(iso)
   if (Number.isNaN(d.getTime())) return '—'
   return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }

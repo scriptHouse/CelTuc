@@ -1,108 +1,97 @@
-import type {
-  ClienteFactura,
-  Cuenta,
-  CondicionEmisor,
-  EstadoFactura,
-  Factura,
-  ItemFactura,
-} from '@/types'
-import { getDB, persist, uid, wait } from '@/lib/db'
-import { calcularTotales, tipoComprobante } from '@/lib/afip'
+import type { Comprobante, Emisor, EstadoCobro, ItemComprobante } from '@/types'
+import { api } from '@/lib/api'
+import { useAuth } from '@/store/auth'
 
-// ===== Cuentas =====
+/**
+ * Facturación electrónica real contra ARCA (backend Django).
+ *
+ * - Emisores (cuentas): leer requiere el permiso `ver_facturacion`; crear/editar
+ *   (con credenciales) es solo para administradores.
+ * - Comprobantes: listar y emitir requieren `ver_facturacion`. La emisión llama a
+ *   ARCA y devuelve el comprobante con su CAE.
+ */
 
-export async function listarCuentas(): Promise<Cuenta[]> {
-  await wait()
-  return getDB().cuentas.map((c) => ({ ...c }))
-}
+const token = () => useAuth.getState().access
 
-export interface CuentaInput {
+// ===== Emisores =====
+
+export interface EmisorInput {
   nombre: string
-  condicion: CondicionEmisor
+  condicion: Emisor['condicion']
   cuit: string
-  puntoVenta: number
+  punto_venta: number
+  produccion: boolean
+  activo?: boolean
+  /** Contenido PEM del certificado (.crt). Vacío = no cambiar (en edición). */
+  certificado?: string
+  /** Contenido PEM de la clave privada (.key). Vacío = no cambiar (en edición). */
+  clave_privada?: string
 }
 
-export async function crearCuenta(input: CuentaInput): Promise<Cuenta> {
-  await wait()
-  const db = getDB()
-  const cuenta: Cuenta = { ...input, id: uid('cta'), creadoEn: new Date().toISOString() }
-  db.cuentas.push(cuenta)
-  persist()
-  return { ...cuenta }
+export function listarEmisores(): Promise<Emisor[]> {
+  return api.get<Emisor[]>('/facturacion/emisores/', token())
 }
 
-// ===== Facturas =====
-
-export async function listarFacturas(cuentaId?: string): Promise<Factura[]> {
-  await wait()
-  const facturas = getDB().facturas
-  const filtradas = cuentaId ? facturas.filter((f) => f.cuentaId === cuentaId) : facturas
-  // Orden: más recientes primero.
-  return filtradas
-    .map((f) => ({ ...f }))
-    .sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime())
+export function crearEmisor(input: EmisorInput): Promise<Emisor> {
+  return api.post<Emisor>('/facturacion/emisores/', input, token())
 }
 
-export interface NuevaFactura {
-  cuentaId: string
-  fecha: string
-  vencimiento: string
-  cliente: ClienteFactura
-  items: Array<Omit<ItemFactura, 'id'>>
-  estado?: EstadoFactura
+export function actualizarEmisor(id: number, input: Partial<EmisorInput>): Promise<Emisor> {
+  return api.patch<Emisor>(`/facturacion/emisores/${id}/`, input, token())
+}
+
+export function eliminarEmisor(id: number): Promise<void> {
+  return api.del<void>(`/facturacion/emisores/${id}/`, token())
+}
+
+/** Resultado de probar la conexión y credenciales del emisor contra ARCA. */
+export interface ResultadoConexion {
+  servidor: { app: string | null; base: string | null; auth: string | null } | null
+  autenticacion: string | null
+  ultimo_numero: number | null
+  ok: boolean
+  mensaje: string
+}
+
+export function probarConexion(id: number): Promise<ResultadoConexion> {
+  return api.post<ResultadoConexion>(`/facturacion/emisores/${id}/probar/`, undefined, token())
+}
+
+// ===== Comprobantes =====
+
+export function listarComprobantes(emisorId?: number): Promise<Comprobante[]> {
+  const query = emisorId ? `?emisor=${emisorId}` : ''
+  return api.get<Comprobante[]>(`/facturacion/comprobantes/${query}`, token())
+}
+
+export function obtenerComprobante(id: number): Promise<Comprobante> {
+  return api.get<Comprobante>(`/facturacion/comprobantes/${id}/`, token())
+}
+
+export interface NuevoComprobante {
+  emisor: number
+  concepto?: number
+  cliente_nombre: string
+  cliente_doc_tipo: string
+  cliente_doc_numero?: string
+  cliente_condicion: string
+  fecha?: string
+  vencimiento?: string | null
+  alicuota_iva?: number
   observaciones?: string
+  estado_cobro?: EstadoCobro
+  items: Array<Pick<ItemComprobante, 'descripcion' | 'cantidad' | 'precio_unitario'>>
 }
 
-export async function crearFactura(input: NuevaFactura): Promise<Factura> {
-  await wait(220)
-  const db = getDB()
-  const cuenta = db.cuentas.find((c) => c.id === input.cuentaId)
-  if (!cuenta) throw new Error('Cuenta no encontrada')
-
-  const tipo = tipoComprobante(cuenta.condicion, input.cliente.condicion)
-  // Correlativo por cuenta + tipo de comprobante.
-  const numero =
-    db.facturas
-      .filter((f) => f.cuentaId === cuenta.id && f.tipo === tipo)
-      .reduce((max, f) => Math.max(max, f.numero), 0) + 1
-
-  const items: ItemFactura[] = input.items.map((i) => ({ ...i, id: uid('it') }))
-  const { neto, iva, total } = calcularTotales(items, tipo)
-
-  const factura: Factura = {
-    id: uid('fac'),
-    cuentaId: cuenta.id,
-    tipo,
-    numero,
-    fecha: input.fecha,
-    vencimiento: input.vencimiento,
-    cliente: input.cliente,
-    items,
-    estado: input.estado ?? 'pendiente',
-    observaciones: input.observaciones,
-    neto,
-    iva,
-    total,
-  }
-  db.facturas.unshift(factura)
-  persist()
-  return { ...factura }
+/** Emite el comprobante: el backend pide el CAE a ARCA y lo guarda. */
+export function emitirComprobante(input: NuevoComprobante): Promise<Comprobante> {
+  return api.post<Comprobante>('/facturacion/comprobantes/', input, token())
 }
 
-export async function cambiarEstadoFactura(id: string, estado: EstadoFactura): Promise<Factura> {
-  await wait(90)
-  const db = getDB()
-  const factura = db.facturas.find((f) => f.id === id)
-  if (!factura) throw new Error('Factura no encontrada')
-  factura.estado = estado
-  persist()
-  return { ...factura }
+export function cambiarEstadoCobro(id: number, estado: EstadoCobro): Promise<Comprobante> {
+  return api.patch<Comprobante>(`/facturacion/comprobantes/${id}/`, { estado_cobro: estado }, token())
 }
 
-export async function eliminarFactura(id: string): Promise<void> {
-  await wait()
-  const db = getDB()
-  db.facturas = db.facturas.filter((f) => f.id !== id)
-  persist()
+export function eliminarComprobante(id: number): Promise<void> {
+  return api.del<void>(`/facturacion/comprobantes/${id}/`, token())
 }

@@ -1,0 +1,148 @@
+"""Tests de facturacion que NO tocan ARCA (logica pura, mapeo y serializers).
+
+La conexion real con ARCA (WSAA/WSFEv1) necesita un certificado valido y red, asi
+que no se prueba aca; si se prueba todo lo que la rodea, que es donde se cometen
+errores: el tipo de comprobante, los totales, el armado del pedido y que las
+credenciales nunca se devuelvan por la API.
+"""
+import base64
+import datetime
+import json
+from decimal import Decimal
+
+from django.test import TestCase
+
+from .arca import qr
+from .arca.servicio import _construir_detalle, _iva_id
+from .logica import calcular_totales, tipo_comprobante
+from .serializers import EmisorSerializer
+
+
+class LogicaFiscalTests(TestCase):
+    def test_tipo_comprobante(self):
+        self.assertEqual(tipo_comprobante('monotributista', 'consumidor_final'), 'C')
+        self.assertEqual(tipo_comprobante('monotributista', 'responsable_inscripto'), 'C')
+        self.assertEqual(tipo_comprobante('responsable_inscripto', 'responsable_inscripto'), 'A')
+        self.assertEqual(tipo_comprobante('responsable_inscripto', 'consumidor_final'), 'B')
+        self.assertEqual(tipo_comprobante('responsable_inscripto', 'monotributista'), 'B')
+
+    def test_totales_con_iva(self):
+        items = [
+            {'cantidad': Decimal('2'), 'precio_unitario': Decimal('100')},
+            {'cantidad': 1, 'precio_unitario': 50},
+        ]
+        self.assertEqual(
+            calcular_totales(items, 'B', Decimal('21')),
+            {'neto': Decimal('250.00'), 'iva': Decimal('52.50'), 'total': Decimal('302.50')},
+        )
+
+    def test_totales_factura_c_sin_iva(self):
+        items = [{'cantidad': 3, 'precio_unitario': 100}]
+        self.assertEqual(
+            calcular_totales(items, 'C', Decimal('21')),
+            {'neto': Decimal('300.00'), 'iva': Decimal('0.00'), 'total': Decimal('300.00')},
+        )
+
+    def test_iva_id(self):
+        self.assertEqual(_iva_id(Decimal('21')), 5)
+        self.assertEqual(_iva_id(Decimal('10.5')), 4)
+        self.assertEqual(_iva_id(Decimal('27')), 6)
+        self.assertEqual(_iva_id(Decimal('99')), 5)  # default 21 %
+
+
+class ConstruirDetalleTests(TestCase):
+    fecha = datetime.date(2026, 6, 26)
+
+    def test_factura_a_discrimina_iva(self):
+        totales = {'neto': Decimal('100.00'), 'iva': Decimal('21.00'), 'total': Decimal('121.00')}
+        d = _construir_detalle(
+            tipo='A', concepto=1, doc_tipo='CUIT', doc_numero='30714567893', numero=5,
+            fecha=self.fecha, vencimiento=None, totales=totales, alicuota=Decimal('21'),
+            cliente_condicion='responsable_inscripto',
+        )
+        self.assertEqual(d['CbteDesde'], 5)
+        self.assertEqual(d['DocTipo'], 80)
+        self.assertEqual(d['DocNro'], 30714567893)
+        self.assertEqual(d['CbteFch'], '20260626')
+        self.assertEqual(d['CondicionIVAReceptorId'], 1)
+        self.assertEqual(d['ImpNeto'], 100.0)
+        self.assertEqual(d['ImpIVA'], 21.0)
+        self.assertEqual(d['Iva']['AlicIva'][0], {'Id': 5, 'BaseImp': 100.0, 'Importe': 21.0})
+
+    def test_factura_c_sin_iva(self):
+        totales = {'neto': Decimal('100.00'), 'iva': Decimal('0.00'), 'total': Decimal('100.00')}
+        d = _construir_detalle(
+            tipo='C', concepto=1, doc_tipo='CF', doc_numero='', numero=1,
+            fecha=self.fecha, vencimiento=None, totales=totales, alicuota=Decimal('21'),
+            cliente_condicion='consumidor_final',
+        )
+        self.assertNotIn('Iva', d)
+        self.assertEqual(d['DocTipo'], 99)
+        self.assertEqual(d['DocNro'], 0)
+        self.assertEqual(d['CondicionIVAReceptorId'], 5)
+        self.assertEqual(d['ImpIVA'], 0.0)
+
+    def test_servicios_agrega_fechas(self):
+        totales = {'neto': Decimal('100.00'), 'iva': Decimal('21.00'), 'total': Decimal('121.00')}
+        d = _construir_detalle(
+            tipo='B', concepto=2, doc_tipo='CF', doc_numero='', numero=1,
+            fecha=self.fecha, vencimiento=datetime.date(2026, 7, 10), totales=totales,
+            alicuota=Decimal('21'), cliente_condicion='consumidor_final',
+        )
+        self.assertEqual(d['FchServDesde'], '20260626')
+        self.assertEqual(d['FchServHasta'], '20260626')
+        self.assertEqual(d['FchVtoPago'], '20260710')
+
+
+class QRTests(TestCase):
+    def test_url_y_payload(self):
+        url = qr.construir_url(
+            fecha='2026-06-26', cuit_emisor='20111111112', punto_venta=1, tipo_cbte=6,
+            numero=1, importe_total=Decimal('121.00'), tipo_doc_receptor=99,
+            nro_doc_receptor='', cae='71234567890123',
+        )
+        self.assertTrue(url.startswith('https://www.afip.gob.ar/fe/qr/?p='))
+        payload = json.loads(base64.b64decode(url.split('p=')[1]))
+        self.assertEqual(payload['cuit'], 20111111112)
+        self.assertEqual(payload['codAut'], 71234567890123)
+        self.assertEqual(payload['tipoCodAut'], 'E')
+        self.assertEqual(payload['nroDocRec'], 0)
+
+
+class EmisorSerializerTests(TestCase):
+    base = {
+        'nombre': 'CelTuc SRL',
+        'condicion': 'responsable_inscripto',
+        'cuit': '30-71456789-3',
+        'punto_venta': 1,
+        'produccion': False,
+    }
+
+    def test_normaliza_cuit_y_oculta_credenciales(self):
+        s = EmisorSerializer(data={**self.base, 'certificado': 'CERT', 'clave_privada': 'KEY'})
+        s.is_valid(raise_exception=True)
+        emisor = s.save()
+        self.assertEqual(emisor.cuit, '30714567893')
+        self.assertTrue(emisor.tiene_credenciales)
+
+        salida = EmisorSerializer(emisor).data
+        self.assertNotIn('certificado', salida)
+        self.assertNotIn('clave_privada', salida)
+        self.assertTrue(salida['tiene_credenciales'])
+
+    def test_cuit_invalido(self):
+        s = EmisorSerializer(data={**self.base, 'cuit': '123'})
+        self.assertFalse(s.is_valid())
+        self.assertIn('cuit', s.errors)
+
+    def test_editar_sin_credenciales_no_las_pisa(self):
+        s = EmisorSerializer(data={**self.base, 'certificado': 'CERT', 'clave_privada': 'KEY'})
+        s.is_valid(raise_exception=True)
+        emisor = s.save()
+
+        s2 = EmisorSerializer(emisor, data={'certificado': '', 'clave_privada': ''}, partial=True)
+        s2.is_valid(raise_exception=True)
+        s2.save()
+        emisor.refresh_from_db()
+        self.assertEqual(emisor.certificado, 'CERT')
+        self.assertEqual(emisor.clave_privada, 'KEY')

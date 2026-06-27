@@ -141,6 +141,70 @@ export interface Factura {
   total: number
 }
 
+// ===== Facturación electrónica real (backend ARCA) =====
+// Estos tipos reflejan la API real (snake_case, ids numéricos). Conviven con los
+// tipos mock de arriba (Cuenta/Factura), que todavía alimentan el dashboard.
+
+/** Una cuenta que factura ante ARCA, con su punto de venta y credenciales. */
+export interface Emisor {
+  id: number
+  nombre: string
+  condicion: CondicionEmisor
+  cuit: string
+  punto_venta: number
+  produccion: boolean
+  activo: boolean
+  /** True si tiene certificado + clave cargados (puede autenticar). */
+  tiene_credenciales: boolean
+  creado: string
+  actualizado: string
+}
+
+export type EstadoCobro = 'pendiente' | 'pagada'
+export type DocTipo = 'CUIT' | 'CUIL' | 'DNI' | 'CF'
+
+export interface ItemComprobante {
+  id?: number
+  descripcion: string
+  cantidad: number
+  precio_unitario: number // NETO (sin IVA)
+  subtotal?: number
+}
+
+/** Un comprobante emitido (Factura A, B o C) con su CAE. */
+export interface Comprobante {
+  id: number
+  emisor: number
+  emisor_nombre?: string
+  emisor_cuit?: string
+  emisor_condicion?: CondicionEmisor
+  tipo: TipoComprobante
+  concepto?: number
+  punto_venta: number
+  numero: number
+  numero_formateado: string
+  cliente_nombre: string
+  cliente_doc_tipo?: DocTipo
+  cliente_doc_numero?: string
+  cliente_condicion: CondicionFiscal
+  fecha: string
+  vencimiento: string | null
+  alicuota_iva?: number
+  neto?: number
+  iva?: number
+  total: number
+  /** Código de Autorización Electrónico que devuelve ARCA. */
+  cae?: string
+  cae_vencimiento?: string | null
+  qr_url?: string
+  /** Imagen del QR como data URI (solo en el detalle). */
+  qr?: string | null
+  estado_cobro: EstadoCobro
+  observaciones?: string
+  items?: ItemComprobante[]
+  creado?: string
+}
+
 // ===== Empleados (backend) =====
 /** Cuenta de login vinculada a un empleado (subconjunto del Usuario). */
 export interface UsuarioBreve {
