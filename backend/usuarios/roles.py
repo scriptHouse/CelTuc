@@ -73,6 +73,13 @@ class RolListCreateView(APIView):
     def post(self, request):
         serializer = RolSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        # Crear un rol de administrador es solo del superadministrador (evita que un
+        # admin se fabrique un rol admin y escale permisos).
+        if serializer.validated_data.get('es_admin') and not request.user.is_superuser:
+            return Response(
+                {'detail': 'Solo un superadministrador puede crear roles de administrador.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         serializer.save()
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
@@ -82,6 +89,12 @@ class RolDetailView(APIView):
 
     def patch(self, request, pk):
         rol = get_object_or_404(Rol, pk=pk)
+        # Tocar un rol de administrador (o convertir uno en admin) es solo del superadmin.
+        if (rol.es_admin or request.data.get('es_admin')) and not request.user.is_superuser:
+            return Response(
+                {'detail': 'Solo un superadministrador puede modificar roles de administrador.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         serializer = RolSerializer(rol, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
@@ -93,6 +106,11 @@ class RolDetailView(APIView):
             return Response(
                 {'detail': 'No se puede eliminar un rol del sistema.'},
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+        if rol.es_admin and not request.user.is_superuser:
+            return Response(
+                {'detail': 'Solo un superadministrador puede eliminar roles de administrador.'},
+                status=status.HTTP_403_FORBIDDEN,
             )
         # Las cuentas con este rol quedan sin rol (Usuario.rol = SET_NULL).
         rol.delete()

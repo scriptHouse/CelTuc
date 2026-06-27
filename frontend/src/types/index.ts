@@ -248,6 +248,10 @@ export interface UsuarioAdmin {
   is_active: boolean
   is_staff: boolean
   is_superuser: boolean
+  /** Acceso de administrador (superusuario, staff o rol admin). Lo calcula el backend. */
+  es_administrador?: boolean
+  /** Tope de la jerarquía (el dueño). Solo lo es el superusuario. */
+  es_superadministrador?: boolean
   date_joined: string
   empleado: EmpleadoBreve | null
   /** Auditoría de presencia. */

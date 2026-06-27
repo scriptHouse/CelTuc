@@ -17,6 +17,16 @@ class EsAdministrador(permissions.BasePermission):
         return bool(user and user.is_authenticated and user.es_administrador)
 
 
+class EsSuperadministrador(permissions.BasePermission):
+    """Solo el superadministrador (superusuario / dueño)."""
+
+    message = 'Necesitas permisos de superadministrador.'
+
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(user and user.is_authenticated and user.is_superuser)
+
+
 class LecturaConPermisoEscrituraAdmin(permissions.BasePermission):
     """Lectura: requiere el permiso de modulo declarado por la vista.
 

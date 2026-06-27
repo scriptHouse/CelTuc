@@ -1,5 +1,6 @@
 from django.shortcuts import get_object_or_404
-from rest_framework import generics
+from rest_framework import generics, status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -41,6 +42,9 @@ class EmpleadoDetailView(generics.RetrieveUpdateDestroyAPIView):
     def perform_destroy(self, instance):
         # Borrar el empleado también elimina su cuenta de login (si la tenía).
         usuario = instance.usuario
+        # Jerarquia: un admin comun no puede eliminar a un empleado con cuenta admin.
+        if usuario is not None and usuario.es_administrador and not self.request.user.is_superuser:
+            raise PermissionDenied('Solo un superadministrador puede eliminar a un administrador.')
         instance.delete()
         if usuario is not None:
             usuario.delete()
@@ -53,8 +57,21 @@ class EmpleadoAccesoView(APIView):
 
     def put(self, request, pk):
         empleado = get_object_or_404(Empleado, pk=pk)
+        # No gestionar el acceso de una cuenta administradora si no sos superadmin.
+        if empleado.usuario is not None and empleado.usuario.es_administrador and not request.user.is_superuser:
+            return Response(
+                {'detail': 'Solo un superadministrador puede gestionar el acceso de un administrador.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         serializer = AccesoSerializer(data=request.data, context={'empleado': empleado})
         serializer.is_valid(raise_exception=True)
+        # Tampoco puede asignar un rol de administrador si no es superadmin.
+        rol = serializer.validated_data.get('rol_id')
+        if rol is not None and rol.es_admin and not request.user.is_superuser:
+            return Response(
+                {'detail': 'Solo un superadministrador puede asignar un rol de administrador.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         serializer.save()
         empleado.refresh_from_db()
         return Response(EmpleadoSerializer(empleado).data)
@@ -62,6 +79,12 @@ class EmpleadoAccesoView(APIView):
     def delete(self, request, pk):
         empleado = get_object_or_404(Empleado, pk=pk)
         usuario = empleado.usuario
+        # Quitarle el acceso a una cuenta administradora es solo del superadmin.
+        if usuario is not None and usuario.es_administrador and not request.user.is_superuser:
+            return Response(
+                {'detail': 'Solo un superadministrador puede quitar el acceso de un administrador.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         if usuario is not None:
             empleado.usuario = None
             empleado.save(update_fields=['usuario'])

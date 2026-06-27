@@ -314,6 +314,96 @@ class RolesAPITests(TestCase):
         self.assertEqual(r.status_code, 400)
 
 
+class JerarquiaSuperadminTests(TestCase):
+    """Jerarquia: un administrador COMUN no puede crear/editar/eliminar a otros
+    administradores ni superadministradores; eso queda reservado al superadmin
+    (is_superuser). El admin comun si gestiona usuarios regulares."""
+
+    def setUp(self):
+        cache.clear()
+        # Admin comun: tiene el rol "Administrador" (es_admin) pero NO es superusuario.
+        self.admin = Usuario.objects.create_user(
+            email='adminc@celtuc.ar', username='adminc', password='x',
+            rol=Rol.objects.get(nombre='Administrador'),
+        )
+        # Otro administrador (staff) que actua de "objetivo".
+        self.otro_admin = Usuario.objects.create_user(
+            email='staff@celtuc.ar', username='staffadmin', password='x',
+        )
+        self.otro_admin.is_staff = True
+        self.otro_admin.save(update_fields=['is_staff'])
+        # Un usuario regular (objetivo no-admin).
+        self.regular = Usuario.objects.create_user(
+            email='reg@celtuc.ar', username='regular', password='x',
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+
+    def test_admin_no_crea_administradores(self):
+        r = self.client.post(
+            reverse('usuarios_gestion:list'),
+            {'username': 'nuevoadmin', 'email': 'na@celtuc.ar', 'password': 'clave-123', 'is_staff': True},
+            format='json',
+        )
+        self.assertEqual(r.status_code, 403)
+
+    def test_admin_si_crea_usuarios_regulares(self):
+        r = self.client.post(
+            reverse('usuarios_gestion:list'),
+            {'username': 'nuevoreg', 'email': 'nr@celtuc.ar', 'password': 'clave-123'},
+            format='json',
+        )
+        self.assertEqual(r.status_code, 201)
+
+    def test_admin_no_promueve_a_administrador(self):
+        r = self.client.patch(
+            reverse('usuarios_gestion:detail', args=[self.regular.id]),
+            {'is_staff': True}, format='json',
+        )
+        self.assertEqual(r.status_code, 403)
+
+    def test_admin_no_edita_a_otro_admin(self):
+        r = self.client.patch(
+            reverse('usuarios_gestion:detail', args=[self.otro_admin.id]),
+            {'email': 'hack@celtuc.ar'}, format='json',
+        )
+        self.assertEqual(r.status_code, 403)
+
+    def test_admin_no_elimina_a_otro_admin(self):
+        r = self.client.delete(reverse('usuarios_gestion:detail', args=[self.otro_admin.id]))
+        self.assertEqual(r.status_code, 403)
+
+    def test_admin_si_edita_usuario_regular(self):
+        r = self.client.patch(
+            reverse('usuarios_gestion:detail', args=[self.regular.id]),
+            {'email': 'reg2@celtuc.ar'}, format='json',
+        )
+        self.assertEqual(r.status_code, 200)
+
+    def test_admin_no_crea_rol_de_administrador(self):
+        r = self.client.post(
+            reverse('roles:list'),
+            {'nombre': 'OtroAdmin', 'es_admin': True, 'permisos': []}, format='json',
+        )
+        self.assertEqual(r.status_code, 403)
+
+    def test_superadmin_si_gestiona_administradores(self):
+        sup = Usuario.objects.create_superuser(email='sup@celtuc.ar', username='sup', password='x')
+        c = APIClient()
+        c.force_authenticate(sup)
+        crear_admin = c.post(
+            reverse('usuarios_gestion:list'),
+            {'username': 'adminok', 'email': 'ao@celtuc.ar', 'password': 'clave-123', 'is_staff': True},
+            format='json',
+        )
+        self.assertEqual(crear_admin.status_code, 201)
+        crear_rol = c.post(
+            reverse('roles:list'),
+            {'nombre': 'RolAdmin', 'es_admin': True, 'permisos': []}, format='json',
+        )
+        self.assertEqual(crear_rol.status_code, 201)
+
+
 class PresenciaTests(TestCase):
     """Auditoria: ultimo inicio de sesion y 'ultima vez activo' / en linea."""
 

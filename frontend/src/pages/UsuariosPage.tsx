@@ -67,7 +67,7 @@ const schema = z
 type FormData = z.infer<typeof schema>
 
 function esAdmin(u: UsuarioAdmin): boolean {
-  return u.is_superuser || u.is_staff
+  return u.es_administrador ?? (u.is_superuser || u.is_staff)
 }
 
 export function UsuariosPage() {
@@ -75,6 +75,8 @@ export function UsuariosPage() {
   const toast = useToast()
   const confirm = useConfirm()
   const yo = useAuth((s) => s.usuario)
+  // Solo el superadministrador (dueño) gestiona cuentas de nivel administrador.
+  const soySuper = Boolean(yo?.is_superuser)
 
   const { data: usuarios = [], isLoading } = useQuery({
     queryKey: ['usuarios'],
@@ -223,6 +225,8 @@ export function UsuariosPage() {
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {usuarios.map((u, i) => {
             const protegido = u.id === yo?.id || u.is_superuser
+            // Un admin común no puede gestionar cuentas de nivel admin (salvo la propia).
+            const puedoGestionar = soySuper || !esAdmin(u) || u.id === yo?.id
             return (
               <Card key={u.id} className="ct-stagger-item flex flex-col p-4" style={ctStagger(i)}>
                 <div className="flex items-start gap-3">
@@ -241,7 +245,7 @@ export function UsuariosPage() {
                   {esAdmin(u) && (
                     <Badge tone="solid">
                       <ShieldCheck className="h-3 w-3" />
-                      {u.is_superuser ? 'Dueño' : 'Admin'}
+                      {u.is_superuser ? 'Superadmin' : 'Admin'}
                     </Badge>
                   )}
                 </div>
@@ -268,10 +272,12 @@ export function UsuariosPage() {
                 <div className="mt-3 flex items-center justify-between border-t border-line pt-3">
                   <span className="tnum text-xs text-ink-400">Alta: {fecha(u.date_joined)}</span>
                   <div className="flex items-center gap-2">
-                    <IconBtn label="Editar" onClick={() => abrirEditar(u)}>
-                      <Pencil className="h-4 w-4" />
-                    </IconBtn>
-                    {!protegido && (
+                    {puedoGestionar && (
+                      <IconBtn label="Editar" onClick={() => abrirEditar(u)}>
+                        <Pencil className="h-4 w-4" />
+                      </IconBtn>
+                    )}
+                    {puedoGestionar && !protegido && (
                       <IconBtn label="Eliminar" onClick={() => handleEliminar(u)}>
                         <Trash2 className="h-4 w-4" />
                       </IconBtn>
@@ -288,6 +294,7 @@ export function UsuariosPage() {
         open={modalOpen}
         usuario={editando}
         esYoMismo={Boolean(editando && editando.id === yo?.id)}
+        puedeAsignarAdmin={soySuper}
         saving={crear.isPending || actualizar.isPending}
         onClose={() => setModalOpen(false)}
         onSubmit={handleGuardar}
@@ -302,6 +309,7 @@ function UsuarioFormModal({
   open,
   usuario,
   esYoMismo,
+  puedeAsignarAdmin,
   saving,
   onClose,
   onSubmit,
@@ -309,6 +317,7 @@ function UsuarioFormModal({
   open: boolean
   usuario: UsuarioAdmin | null
   esYoMismo: boolean
+  puedeAsignarAdmin: boolean
   saving: boolean
   onClose: () => void
   onSubmit: (values: FormData) => Promise<void>
@@ -427,25 +436,29 @@ function UsuarioFormModal({
         </div>
 
         {/* Permisos */}
-        <div className="space-y-2 rounded-2xl border border-line bg-canvas/40 p-4">
-          <Check
-            label="Puede administrar (gestiona empleados y usuarios)"
-            checked={isStaff}
-            disabled={esYoMismo}
-            onChange={(v) => setValue('isStaff', v)}
-          />
-          {esEdicion && (
-            <Check
-              label="Cuenta activa"
-              checked={activo}
-              disabled={esYoMismo}
-              onChange={(v) => setValue('activo', v)}
-            />
-          )}
-          {esYoMismo && (
-            <p className="text-xs text-ink-400">No podés cambiar tus propios permisos ni desactivarte.</p>
-          )}
-        </div>
+        {(puedeAsignarAdmin || esEdicion) && (
+          <div className="space-y-2 rounded-2xl border border-line bg-canvas/40 p-4">
+            {puedeAsignarAdmin && (
+              <Check
+                label="Puede administrar (gestiona empleados y usuarios)"
+                checked={isStaff}
+                disabled={esYoMismo}
+                onChange={(v) => setValue('isStaff', v)}
+              />
+            )}
+            {esEdicion && (
+              <Check
+                label="Cuenta activa"
+                checked={activo}
+                disabled={esYoMismo}
+                onChange={(v) => setValue('activo', v)}
+              />
+            )}
+            {esYoMismo && (
+              <p className="text-xs text-ink-400">No podés cambiar tus propios permisos ni desactivarte.</p>
+            )}
+          </div>
+        )}
 
         {/* Crear empleado (solo al crear una cuenta nueva) */}
         {!esEdicion && (

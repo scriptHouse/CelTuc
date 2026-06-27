@@ -186,6 +186,16 @@ class Usuario(ModeloBase, AbstractBaseUser, PermissionsMixin):
             or (self.rol_id and self.rol.es_admin)
         )
 
+    @property
+    def es_superadministrador(self) -> bool:
+        """Tope de la jerarquia: el dueño. Gestiona a los administradores.
+
+        Se concede SOLO con `is_superuser` (por consola con `createsuperuser` o desde
+        el admin de Django). Un administrador comun NO puede crear/editar/eliminar a un
+        superadministrador ni a otros administradores: eso queda reservado al superadmin.
+        """
+        return self.is_superuser
+
     def codigos_permisos(self) -> list[str]:
         """Codigos de los modulos visibles para esta cuenta.
 

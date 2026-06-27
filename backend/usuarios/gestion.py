@@ -22,6 +22,8 @@ class UsuarioAdminSerializer(serializers.ModelSerializer):
 
     empleado = serializers.SerializerMethodField()
     en_linea = serializers.BooleanField(read_only=True)
+    es_administrador = serializers.BooleanField(read_only=True)
+    es_superadministrador = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Usuario
@@ -29,6 +31,7 @@ class UsuarioAdminSerializer(serializers.ModelSerializer):
             'id', 'username', 'email',
             'is_active', 'is_staff', 'is_superuser', 'date_joined', 'empleado',
             'last_login', 'ultima_actividad', 'en_linea',
+            'es_administrador', 'es_superadministrador',
         )
 
     def get_empleado(self, obj):
@@ -145,6 +148,12 @@ class UsuarioListCreateView(APIView):
     def post(self, request):
         serializer = UsuarioCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        # Jerarquia: crear una cuenta administradora es solo del superadministrador.
+        if serializer.validated_data.get('is_staff') and not request.user.is_superuser:
+            return Response(
+                {'detail': 'Solo un superadministrador puede crear administradores.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         user = serializer.save()
         return Response(UsuarioAdminSerializer(user).data, status=status.HTTP_201_CREATED)
 
@@ -154,6 +163,20 @@ class UsuarioDetailView(APIView):
 
     def patch(self, request, pk):
         user = get_object_or_404(Usuario, pk=pk)
+        actor = request.user
+        # Jerarquia: solo un superadministrador edita cuentas de nivel administrador
+        # (a sí mismo sí puede, para cambiar sus propios datos).
+        if user.es_administrador and user.pk != actor.pk and not actor.is_superuser:
+            return Response(
+                {'detail': 'Solo un superadministrador puede editar a un administrador.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        # Tampoco puede PROMOVER una cuenta a administradora si no es superadmin.
+        if request.data.get('is_staff') is True and not user.is_staff and not actor.is_superuser:
+            return Response(
+                {'detail': 'Solo un superadministrador puede dar permisos de administrador.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         # Evitar que el admin se deje afuera a sí mismo.
         if user.pk == request.user.pk:
             if request.data.get('is_active') is False:
@@ -182,6 +205,12 @@ class UsuarioDetailView(APIView):
             return Response(
                 {'detail': 'No se puede eliminar a un superusuario.'},
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Jerarquia: solo un superadministrador puede eliminar a un administrador.
+        if user.es_administrador and not request.user.is_superuser:
+            return Response(
+                {'detail': 'Solo un superadministrador puede eliminar a un administrador.'},
+                status=status.HTTP_403_FORBIDDEN,
             )
         # El Empleado vinculado (si hay) sobrevive sin login (Empleado.usuario = SET_NULL).
         user.delete()
