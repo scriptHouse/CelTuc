@@ -35,3 +35,12 @@ backend/.env
 backend/db.sqlite3
 backend/staticfiles/
 backend/media/
+
+# Certificados y claves de ARCA/AFIP: NUNCA versionar (sobre todo las claves privadas)
+*.key
+*.crt
+*.csr
+*.pem
+*.pfx
+*.p12
+certificados-arca/
