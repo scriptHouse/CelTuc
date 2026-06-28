@@ -16,8 +16,8 @@ from .errores import ErrorARCA
 
 def estado_servidor(produccion: bool) -> dict:
     """Estado de ARCA (FEDummy): app, base de datos y autenticacion."""
-    cliente = _cliente(produccion)
     try:
+        cliente = _cliente(produccion)
         r = cliente.service.FEDummy()
     except Exception as exc:
         raise ErrorARCA('No se pudo conectar con el WSFEv1 de ARCA.', detalle=str(exc)) from exc
@@ -30,8 +30,8 @@ def estado_servidor(produccion: bool) -> dict:
 
 def ultimo_autorizado(produccion, cuit, token, sign, punto_venta, cbte_tipo) -> int:
     """Ultimo numero autorizado para ese punto de venta y tipo (0 si no hay)."""
-    cliente = _cliente(produccion)
     try:
+        cliente = _cliente(produccion)
         r = cliente.service.FECompUltimoAutorizado(
             Auth=_auth(cuit, token, sign),
             PtoVta=int(punto_venta),
@@ -45,7 +45,6 @@ def ultimo_autorizado(produccion, cuit, token, sign, punto_venta, cbte_tipo) -> 
 
 def solicitar_cae(produccion, cuit, token, sign, punto_venta, cbte_tipo, detalle) -> dict:
     """Solicita el CAE de un comprobante. Lanza ErrorARCA si ARCA lo rechaza."""
-    cliente = _cliente(produccion)
     pedido = {
         'FeCabReq': {
             'CantReg': 1,
@@ -55,6 +54,7 @@ def solicitar_cae(produccion, cuit, token, sign, punto_venta, cbte_tipo, detalle
         'FeDetReq': {'FECAEDetRequest': [detalle]},
     }
     try:
+        cliente = _cliente(produccion)
         r = cliente.service.FECAESolicitar(Auth=_auth(cuit, token, sign), FeCAEReq=pedido)
     except Exception as exc:
         raise ErrorARCA('No se pudo solicitar el CAE a ARCA.', detalle=str(exc)) from exc

@@ -6,6 +6,8 @@
 - La emision real la hace `arca.servicio.emitir`; si ARCA falla, devolvemos 502
   con un mensaje claro en `detail`.
 """
+import logging
+
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
 from rest_framework.response import Response
@@ -25,6 +27,8 @@ from .serializers import (
     CrearComprobanteSerializer,
     EmisorSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ===== Emisores =====
@@ -83,6 +87,12 @@ class ComprobanteListCreateView(generics.ListCreateAPIView):
             comprobante = servicio.emitir(emisor, datos, usuario=usuario)
         except ErrorARCA as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        except Exception as exc:  # nunca devolvemos un 500 opaco al facturar
+            logger.exception('Error inesperado al emitir comprobante')
+            return Response(
+                {'detail': f'Error inesperado al emitir: {exc}'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
         salida = ComprobanteDetailSerializer(comprobante, context=self.get_serializer_context())
         return Response(salida.data, status=status.HTTP_201_CREATED)
 
