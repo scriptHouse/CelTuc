@@ -8,9 +8,7 @@ Tres operaciones que usamos:
 
 Todas (salvo FEDummy) reciben el ``Auth`` con el token/sign del WSAA mas el CUIT.
 """
-from functools import lru_cache
-
-from .constantes import TIMEOUT, WSFEV1_WSDL
+from .constantes import WSFEV1_WSDL
 from .errores import ErrorARCA
 
 
@@ -105,11 +103,7 @@ def _texto_observaciones(resp) -> str:
     return '; '.join(f'{o.Code}: {o.Msg}' for o in lista)
 
 
-@lru_cache(maxsize=4)
 def _cliente(produccion: bool):
-    """Cliente zeep del WSFEv1 cacheado por ambiente."""
-    import zeep
-    from zeep.transports import Transport
-
-    wsdl = WSFEV1_WSDL[bool(produccion)]
-    return zeep.Client(wsdl, transport=Transport(timeout=TIMEOUT, operation_timeout=TIMEOUT))
+    """Cliente zeep del WSFEv1, con TLS compatible con ARCA y cacheado (ver arca.soap)."""
+    from .soap import cliente
+    return cliente(WSFEV1_WSDL[bool(produccion)])

@@ -14,12 +14,11 @@ importar/migrar aunque la libreria todavia no este instalada.
 import base64
 import xml.etree.ElementTree as ET
 from datetime import datetime
-from functools import lru_cache
 
 from django.db import transaction
 from django.utils import timezone
 
-from .constantes import SERVICIO_WSFE, TIMEOUT, WSAA_WSDL
+from .constantes import SERVICIO_WSFE, WSAA_WSDL
 from .errores import ErrorARCA
 
 
@@ -157,10 +156,7 @@ def _parsear_respuesta(xml_texto: str) -> tuple[str, str, datetime]:
     return token, sign, expiracion
 
 
-@lru_cache(maxsize=4)
 def _cliente_wsaa(wsdl: str):
-    """Cliente zeep cacheado (evita re-descargar el WSDL en cada login)."""
-    import zeep
-    from zeep.transports import Transport
-
-    return zeep.Client(wsdl, transport=Transport(timeout=TIMEOUT, operation_timeout=TIMEOUT))
+    """Cliente zeep del WSAA, con TLS compatible con ARCA y cacheado (ver arca.soap)."""
+    from .soap import cliente
+    return cliente(wsdl)
