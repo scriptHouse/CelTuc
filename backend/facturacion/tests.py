@@ -11,6 +11,10 @@ import json
 from decimal import Decimal
 
 from django.test import TestCase
+from django.urls import reverse
+from rest_framework.test import APIClient
+
+from usuarios.models import Permiso, Rol, Usuario
 
 from .arca import qr
 from .arca.servicio import _construir_detalle, _iva_id
@@ -107,6 +111,60 @@ class QRTests(TestCase):
         self.assertEqual(payload['codAut'], 71234567890123)
         self.assertEqual(payload['tipoCodAut'], 'E')
         self.assertEqual(payload['nroDocRec'], 0)
+
+
+class EmisorPermisosTests(TestCase):
+    """Gestionar emisores (crear/editar/borrar) es SOLO del superadministrador.
+    Leer (listar para elegir el emisor) lo puede hacer un facturador con permiso."""
+
+    def setUp(self):
+        self.super = Usuario.objects.create_superuser(
+            email='sup@celtuc.ar', username='sup', password='x',
+        )
+        # Admin comun: rol Administrador (es_admin) pero NO superusuario.
+        self.admin = Usuario.objects.create_user(
+            email='adm@celtuc.ar', username='adm', password='x',
+            rol=Rol.objects.get(nombre='Administrador'),
+        )
+        # Facturador: rol con permiso ver_facturacion, no admin.
+        rol_cajero = Rol.objects.create(nombre='Cajero')
+        rol_cajero.permisos.set(Permiso.objects.filter(codigo='ver_facturacion'))
+        self.fact = Usuario.objects.create_user(
+            email='fac@celtuc.ar', username='fac', password='x', rol=rol_cajero,
+        )
+
+    def _payload(self):
+        return {
+            'nombre': 'Emisor X', 'condicion': 'monotributista',
+            'cuit': '20111111112', 'punto_venta': 1, 'produccion': False,
+        }
+
+    def _client(self, user):
+        c = APIClient()
+        c.force_authenticate(user)
+        return c
+
+    def test_admin_comun_no_crea_emisor(self):
+        r = self._client(self.admin).post(
+            reverse('facturacion:emisor-list'), self._payload(), format='json',
+        )
+        self.assertEqual(r.status_code, 403)
+
+    def test_facturador_no_crea_emisor(self):
+        r = self._client(self.fact).post(
+            reverse('facturacion:emisor-list'), self._payload(), format='json',
+        )
+        self.assertEqual(r.status_code, 403)
+
+    def test_superadmin_si_crea_emisor(self):
+        r = self._client(self.super).post(
+            reverse('facturacion:emisor-list'), self._payload(), format='json',
+        )
+        self.assertEqual(r.status_code, 201)
+
+    def test_facturador_puede_listar_emisores(self):
+        r = self._client(self.fact).get(reverse('facturacion:emisor-list'))
+        self.assertEqual(r.status_code, 200)
 
 
 class EmisorSerializerTests(TestCase):

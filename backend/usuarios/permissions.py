@@ -27,6 +27,28 @@ class EsSuperadministrador(permissions.BasePermission):
         return bool(user and user.is_authenticated and user.is_superuser)
 
 
+class LecturaConPermisoEscrituraSuperadmin(permissions.BasePermission):
+    """Lectura: con el permiso de modulo (o admin). Escritura: SOLO superadmin.
+
+    Para recursos sensibles (ej. credenciales de los emisores de facturacion) que
+    solo el dueño (superusuario) puede crear/editar/eliminar, pero que los
+    facturadores SI pueden leer (p. ej. para elegir el emisor al facturar).
+    """
+
+    message = 'Solo un superadministrador puede gestionar esto.'
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not (user and user.is_authenticated):
+            return False
+        if request.method in permissions.SAFE_METHODS:
+            if user.es_administrador:
+                return True
+            codigo = getattr(view, 'permiso_requerido', None)
+            return codigo is None or codigo in user.codigos_permisos()
+        return bool(user.is_superuser)
+
+
 class LecturaConPermisoEscrituraAdmin(permissions.BasePermission):
     """Lectura: requiere el permiso de modulo declarado por la vista.
 

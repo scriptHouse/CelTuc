@@ -51,7 +51,6 @@ import {
 } from '@/lib/afip'
 import { fecha, money, num, pad } from '@/lib/format'
 import { cn, ctStagger } from '@/lib/utils'
-import { esAdmin } from '@/lib/permisos'
 import { useAuth } from '@/store/auth'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatCard } from '@/components/ui/StatCard'
@@ -123,7 +122,8 @@ export function FacturacionPage() {
   const toast = useToast()
   const confirm = useConfirm()
   const usuario = useAuth((s) => s.usuario)
-  const admin = esAdmin(usuario)
+  // Gestionar cuentas/credenciales de facturación es SOLO del superadministrador.
+  const soySuper = Boolean(usuario?.is_superuser)
 
   const { data: emisores = [], isLoading: loadingEmisores } = useQuery({
     queryKey: ['emisores'],
@@ -257,7 +257,7 @@ export function FacturacionPage() {
         className="ct-rise"
         actions={
           <>
-            {admin && (
+            {soySuper && (
               <Button variant="outline" size="sm" onClick={abrirNuevaCuenta}>
                 <Building2 className="h-4 w-4" />
                 Nueva cuenta
@@ -283,12 +283,12 @@ export function FacturacionPage() {
           icon={Building2}
           title="Sin cuentas para facturar"
           description={
-            admin
+            soySuper
               ? 'Creá la primera cuenta (CUIT, punto de venta y certificado de ARCA) para empezar a emitir.'
-              : 'Todavía no hay cuentas configuradas. Pedile a un administrador que cargue una.'
+              : 'Todavía no hay cuentas configuradas. Pedile a un superadministrador que cargue una.'
           }
           action={
-            admin ? (
+            soySuper ? (
               <Button onClick={abrirNuevaCuenta}>
                 <Building2 className="h-4 w-4" />
                 Nueva cuenta
@@ -367,7 +367,7 @@ export function FacturacionPage() {
                   <PlugZap className="h-4 w-4" />
                   {probarMut.isPending ? 'Probando…' : 'Probar conexión'}
                 </Button>
-                {admin && (
+                {soySuper && (
                   <Button variant="outline" size="sm" onClick={abrirEditarCuenta}>
                     <Pencil className="h-4 w-4" />
                     Editar

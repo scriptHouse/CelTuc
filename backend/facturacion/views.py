@@ -14,7 +14,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from comun.mixins import AuditoriaMixin
-from usuarios.permissions import LecturaConPermisoEscrituraAdmin
+from usuarios.permissions import LecturaConPermisoEscrituraSuperadmin
 
 from .arca import servicio
 from .arca.errores import ErrorARCA
@@ -36,14 +36,14 @@ logger = logging.getLogger(__name__)
 class EmisorListCreateView(AuditoriaMixin, generics.ListCreateAPIView):
     queryset = Emisor.objects.all()
     serializer_class = EmisorSerializer
-    permission_classes = [LecturaConPermisoEscrituraAdmin]
+    permission_classes = [LecturaConPermisoEscrituraSuperadmin]
     permiso_requerido = 'ver_facturacion'
 
 
 class EmisorDetailView(AuditoriaMixin, generics.RetrieveUpdateDestroyAPIView):
     queryset = Emisor.objects.all()
     serializer_class = EmisorSerializer
-    permission_classes = [LecturaConPermisoEscrituraAdmin]
+    permission_classes = [LecturaConPermisoEscrituraSuperadmin]
     permiso_requerido = 'ver_facturacion'
 
 
