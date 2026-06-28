@@ -1206,11 +1206,23 @@ function ListaSkeleton() {
 
 // ===== Helpers de fecha (input date) =====
 
+/**
+ * Fecha (yyyy-mm-dd) en la zona horaria de Argentina, robusta ante el TZ del
+ * navegador. Antes se usaba `toISOString()` (UTC): de noche ya daba el día
+ * siguiente y las facturas salían fechadas mañana.
+ */
+function fechaArgentina(offsetDias = 0): string {
+  const hoyAR = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+  }).format(new Date()) // 'yyyy-mm-dd'
+  if (offsetDias === 0) return hoyAR
+  const [y, m, d] = hoyAR.split('-').map(Number)
+  const base = new Date(y, m - 1, d + offsetDias)
+  return `${base.getFullYear()}-${pad(base.getMonth() + 1, 2)}-${pad(base.getDate(), 2)}`
+}
 function hoyInput(): string {
-  return new Date().toISOString().slice(0, 10)
+  return fechaArgentina(0)
 }
 function addDaysInput(n: number): string {
-  const d = new Date()
-  d.setDate(d.getDate() + n)
-  return d.toISOString().slice(0, 10)
+  return fechaArgentina(n)
 }
