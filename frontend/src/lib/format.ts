@@ -23,6 +23,12 @@ const ARS_COMPACT = new Intl.NumberFormat('es-AR', {
   maximumFractionDigits: 1,
 })
 
+const USD0 = new Intl.NumberFormat('es-AR', {
+  style: 'currency',
+  currency: 'USD',
+  maximumFractionDigits: 0,
+})
+
 const NUM = new Intl.NumberFormat('es-AR')
 
 /** Dinero con dos decimales: $ 1.234,50 */
@@ -38,6 +44,11 @@ export function money0(value: number): string {
 /** Dinero compacto: $ 1,2 M — ideal para tarjetas de métricas. */
 export function moneyCompact(value: number): string {
   return ARS_COMPACT.format(value || 0)
+}
+
+/** Dólares sin decimales: US$ 310 — las cotizaciones se manejan en USD. */
+export function usd0(value: number): string {
+  return USD0.format(value || 0)
 }
 
 /** Número con separadores de miles. */

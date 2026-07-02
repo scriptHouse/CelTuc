@@ -293,3 +293,47 @@ export interface Tarjeta {
   creado: string // ISO
   actualizado: string // ISO
 }
+
+// ===== Cotizaciones (toma de equipos usados y service) =====
+/** Rango de toma (en USD) de un modelo para una capacidad de almacenamiento. */
+export interface CotizacionCapacidad {
+  id: number
+  /** Capacidad en GB: 128, 256, 512, 1024 (= 1 TB)... */
+  capacidad_gb: number
+  /** Etiqueta lista para mostrar ("128 GB", "1 TB"); la arma el backend. */
+  capacidad_label: string
+  precio_min: number
+  precio_max: number
+}
+
+/** Precio (USD) de un tipo de service para un modelo concreto. */
+export interface PrecioServicioEquipo {
+  id: number
+  /** Id del TipoServicio. */
+  tipo: number
+  tipo_nombre: string
+  precio: number
+}
+
+/** Un modelo cotizable con sus rangos de toma y precios de service. */
+export interface ModeloEquipo {
+  id: number
+  marca: string
+  nombre: string
+  /** "iPhone 13 Pro" (marca + nombre); lo arma el backend. */
+  nombre_completo: string
+  orden: number
+  activo: boolean
+  cotizaciones: CotizacionCapacidad[]
+  servicios: PrecioServicioEquipo[]
+  creado: string // ISO
+  actualizado: string // ISO
+}
+
+/** Tipo de service cotizable (cambio de batería, de módulo, de tapa...). */
+export interface TipoServicio {
+  id: number
+  nombre: string
+  orden: number
+  activo: boolean
+}

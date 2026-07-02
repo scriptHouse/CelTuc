@@ -211,12 +211,12 @@ class RolesModelTests(TestCase):
 
     def test_seed_de_roles_y_permisos(self):
         # Las migraciones siembran los permisos de modulo (4 originales +
-        # ver_simulador) y los roles base.
-        self.assertEqual(Permiso.objects.count(), 5)
+        # ver_simulador + ver_cotizaciones) y los roles base.
+        self.assertEqual(Permiso.objects.count(), 6)
         self.assertTrue(Rol.objects.get(nombre='Administrador').es_admin)
         empleado = Rol.objects.get(nombre='Empleado')
         self.assertFalse(empleado.es_admin)
-        self.assertEqual(empleado.permisos.count(), 5)
+        self.assertEqual(empleado.permisos.count(), 6)
 
     def test_superusuario_ve_todo_sin_rol(self):
         admin = Usuario.objects.create_superuser(
