@@ -74,6 +74,43 @@ class ConfiguracionService(ModeloBase):
         return f'dolar {self.dolar} · cash -{self.descuento_cash_pct} % · redondeo {self.redondeo_ars}'
 
 
+class Dispositivo(ModeloBase):
+    """Un equipo reparable del taller (iPhone 11 Pro, iPad, Apple Watch...).
+
+    Es el catalogo del selector de la pagina Service: elegir un dispositivo
+    muestra todas las filas vinculadas a el; elegir una linea ("11") muestra
+    lo de todos los dispositivos de esa linea. Es un catalogo APARTE del de
+    Cotizaciones a proposito: este es "lo que reparamos" (iPhone 6 en
+    adelante, iPad, Mac, Watch), aquel es "lo que compramos usado".
+    """
+
+    nombre = models.CharField('nombre', max_length=120)
+    linea = models.CharField(
+        'linea',
+        max_length=40,
+        blank=True,
+        help_text='Agrupa para el filtro por linea: "11" junta a 11, 11 Pro y 11 Pro Max.',
+    )
+    orden = models.PositiveSmallIntegerField('orden', default=0)
+    activo = models.BooleanField('activo', default=True)
+
+    class Meta:
+        db_table = 'precios_service_dispositivos'
+        verbose_name = 'dispositivo'
+        verbose_name_plural = 'dispositivos'
+        ordering = ('orden', 'nombre')
+        constraints = [
+            models.UniqueConstraint(
+                fields=('nombre',),
+                condition=models.Q(borrado=False),
+                name='uq_dispositivo_vivo',
+            ),
+        ]
+
+    def __str__(self):
+        return self.nombre
+
+
 class SeccionService(ModeloBase):
     """Un bloque de la hoja (Baterias, Modulos, Camara trasera, ...)."""
 
@@ -142,6 +179,13 @@ class ItemService(ModeloBase):
         max_length=200,
         blank=True,
         help_text='Aclaracion de la fila (ej: "CON LASER 2-3 DIAS").',
+    )
+    dispositivos = models.ManyToManyField(
+        Dispositivo,
+        blank=True,
+        related_name='items',
+        verbose_name='dispositivos',
+        help_text='Equipos a los que aplica esta fila (alimenta el selector de la pagina).',
     )
     orden = models.PositiveSmallIntegerField('orden', default=0)
     activo = models.BooleanField('activo', default=True)

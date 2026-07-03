@@ -6,7 +6,7 @@ import type {
   PrecioEfectivoService,
   SeccionPreciosService,
 } from '@/types'
-import { listarSecciones, obtenerConfiguracion } from '@/services/preciosService'
+import { listarDispositivos, listarSecciones, obtenerConfiguracion } from '@/services/preciosService'
 import { useAuth } from '@/store/auth'
 import { esAdmin } from '@/lib/permisos'
 import { money0, num, usd } from '@/lib/format'
@@ -15,9 +15,28 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
+import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PreciosServiceManager } from '@/components/PreciosServiceManager'
+
+/** Arma las opciones del selector: líneas (con 2+ equipos) y equipos. */
+export function opcionesDeEquipo(
+  dispositivos: { id: number; nombre: string; linea: string }[],
+): { value: string; label: string }[] {
+  const porLinea = new Map<string, number>()
+  for (const d of dispositivos) {
+    if (d.linea) porLinea.set(d.linea, (porLinea.get(d.linea) ?? 0) + 1)
+  }
+  const lineas = [...new Set(dispositivos.map((d) => d.linea))].filter(
+    (l) => l && (porLinea.get(l) ?? 0) > 1,
+  )
+  return [
+    { value: '', label: 'Todos los equipos' },
+    ...lineas.map((l) => ({ value: `linea:${l}`, label: `Línea ${l} (completa)` })),
+    ...dispositivos.map((d) => ({ value: `disp:${d.id}`, label: d.nombre })),
+  ]
+}
 
 /**
  * Lista de precios del service técnico (hoja "Precios Service" del Excel).
@@ -32,6 +51,7 @@ export function PreciosServicePage() {
   const admin = esAdmin(usuario)
 
   const [busqueda, setBusqueda] = useState('')
+  const [filtroEquipo, setFiltroEquipo] = useState('')
   const [seccionId, setSeccionId] = useState<number | null>(null)
   const [configOpen, setConfigOpen] = useState(false)
 
@@ -42,6 +62,10 @@ export function PreciosServicePage() {
   const { data: config } = useQuery({
     queryKey: ['service-config'],
     queryFn: obtenerConfiguracion,
+  })
+  const { data: dispositivos = [] } = useQuery({
+    queryKey: ['service-dispositivos'],
+    queryFn: listarDispositivos,
   })
 
   const activas = useMemo(
@@ -55,22 +79,44 @@ export function PreciosServicePage() {
   const seleccionada = activas.find((s) => s.id === seccionId) ?? activas[0]
   const query = busqueda.trim().toLowerCase()
 
-  /** Con búsqueda: resultados en todas las secciones. Sin ella: la sección activa. */
+  const dispositivosActivos = useMemo(
+    () =>
+      dispositivos
+        .filter((d) => d.activo)
+        .sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre)),
+    [dispositivos],
+  )
+
+  const opcionesEquipos = useMemo(() => opcionesDeEquipo(dispositivosActivos), [dispositivosActivos])
+
+  /** Ids de equipos que matchean el filtro del selector (null = sin filtro). */
+  const idsEquipo = useMemo(() => {
+    if (!filtroEquipo) return null
+    const [tipo, valor] = filtroEquipo.split(':')
+    if (tipo === 'disp') return new Set([Number(valor)])
+    return new Set(dispositivosActivos.filter((d) => d.linea === valor).map((d) => d.id))
+  }, [filtroEquipo, dispositivosActivos])
+
+  const filtrando = Boolean(query) || idsEquipo !== null
+
+  /** Filtrando (texto o equipo): todas las secciones. Si no: la sección activa. */
   const visibles = useMemo(() => {
-    const base = query ? activas : seleccionada ? [seleccionada] : []
+    const base = filtrando ? activas : seleccionada ? [seleccionada] : []
     return base
       .map((seccion) => ({
         seccion,
         items: seccion.items.filter(
           (item) =>
             item.activo &&
-            (!query || `${item.etiqueta} ${item.nota}`.toLowerCase().includes(query)),
+            (!query || `${item.etiqueta} ${item.nota}`.toLowerCase().includes(query)) &&
+            (idsEquipo === null || item.dispositivos.some((id) => idsEquipo.has(id))),
         ),
       }))
       .filter((grupo) => grupo.items.length > 0)
-  }, [activas, seleccionada, query])
+  }, [activas, seleccionada, filtrando, query, idsEquipo])
 
   const totalResultados = visibles.reduce((total, grupo) => total + grupo.items.length, 0)
+  const etiquetaFiltro = opcionesEquipos.find((o) => o.value === filtroEquipo)?.label
 
   return (
     <div className="animate-fade-in">
@@ -121,9 +167,21 @@ export function PreciosServicePage() {
                 </button>
               )}
             </div>
-            <p className="mt-3 text-xs text-ink-400">
-              La búsqueda recorre todas las secciones y agrupa lo que encuentra.
-            </p>
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+              <div className="w-full sm:max-w-[16rem]">
+                <Select
+                  options={opcionesEquipos}
+                  value={filtroEquipo}
+                  onChange={setFiltroEquipo}
+                  searchable
+                  searchPlaceholder="iPhone 11 Pro, línea 13…"
+                  placeholder="Todos los equipos"
+                />
+              </div>
+              <p className="text-xs text-ink-400">
+                Elegí un equipo o una línea y aparece todo lo que le aplica.
+              </p>
+            </div>
           </div>
 
           <div className="border-t border-line bg-canvas/40 p-5 sm:border-l sm:border-t-0 sm:p-6">
@@ -152,7 +210,7 @@ export function PreciosServicePage() {
       </Card>
 
       {/* Chips de sección (scroll horizontal en móvil) */}
-      {activas.length > 0 && !query && (
+      {activas.length > 0 && !filtrando && (
         <div className="ct-rise -mx-1 mb-4 overflow-x-auto px-1 pb-1">
           <div className="flex w-max gap-2">
             {activas.map((seccion) => {
@@ -201,20 +259,31 @@ export function PreciosServicePage() {
       ) : visibles.length === 0 ? (
         <EmptyState
           icon={SearchX}
-          title={`Sin resultados para «${busqueda.trim()}»`}
-          description="Probá con el modelo (13 Pro, XS Max) o el nombre del service (módulo, baño químico)."
+          title={
+            query
+              ? `Sin resultados para «${busqueda.trim()}»`
+              : `Sin precios cargados para ${etiquetaFiltro ?? 'ese equipo'}`
+          }
+          description="Probá con el modelo (13 Pro, XS Max), una línea o el nombre del service (módulo, baño químico)."
           action={
-            <Button variant="outline" onClick={() => setBusqueda('')}>
-              Limpiar búsqueda
+            <Button
+              variant="outline"
+              onClick={() => {
+                setBusqueda('')
+                setFiltroEquipo('')
+              }}
+            >
+              Limpiar filtros
             </Button>
           }
         />
       ) : (
         <>
-          {query && (
+          {filtrando && (
             <p className="mb-3 text-xs text-ink-400">
               {totalResultados === 1 ? '1 resultado' : `${totalResultados} resultados`} en{' '}
               {visibles.length === 1 ? '1 sección' : `${visibles.length} secciones`}
+              {idsEquipo !== null && etiquetaFiltro ? ` para ${etiquetaFiltro}` : ''}
             </p>
           )}
           <div className="space-y-4">

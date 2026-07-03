@@ -1,20 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, Loader2, Plus, Search, Settings2, Trash2, Wrench, X } from 'lucide-react'
+import { Check, ChevronDown, Loader2, Plus, Search, Settings2, Trash2, Wrench, X } from 'lucide-react'
 import type {
   ConfiguracionPreciosService,
+  DispositivoService,
   ItemPrecioService,
   SeccionPreciosService,
   VarianteSeccionService,
 } from '@/types'
 import {
   actualizarConfiguracion,
+  actualizarDispositivo,
   actualizarItem,
   actualizarSeccion,
+  crearDispositivo,
   crearItem,
   crearSeccion,
+  eliminarDispositivo,
   eliminarItem,
   eliminarSeccion,
+  listarDispositivos,
   listarSecciones,
   obtenerConfiguracion,
   type ItemInput,
@@ -25,9 +30,17 @@ import { cn } from '@/lib/utils'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
+
+const TABS = [
+  { value: 'precios', label: 'Precios' },
+  { value: 'equipos', label: 'Equipos' },
+] as const
+
+type Tab = (typeof TABS)[number]['value']
 
 /**
  * Editor de la lista de precios de service (solo administradores).
@@ -54,6 +67,7 @@ const aTexto = (valor: number | null | undefined): string =>
 
 export function PreciosServiceManager({ open, onClose }: { open: boolean; onClose: () => void }) {
   const queryClient = useQueryClient()
+  const [tab, setTab] = useState<Tab>('precios')
   const [seccionId, setSeccionId] = useState<number | null>(null)
   const [creandoSeccion, setCreandoSeccion] = useState(false)
 
@@ -67,16 +81,31 @@ export function PreciosServiceManager({ open, onClose }: { open: boolean; onClos
     queryFn: obtenerConfiguracion,
     enabled: open,
   })
+  const { data: dispositivos = [] } = useQuery({
+    queryKey: ['service-dispositivos'],
+    queryFn: listarDispositivos,
+    enabled: open,
+  })
 
   const invalidar = () => {
     queryClient.invalidateQueries({ queryKey: ['service-secciones'] })
     queryClient.invalidateQueries({ queryKey: ['service-config'] })
+    queryClient.invalidateQueries({ queryKey: ['service-dispositivos'] })
   }
+
+  const dispositivosActivos = useMemo(
+    () =>
+      dispositivos
+        .filter((d) => d.activo)
+        .sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre)),
+    [dispositivos],
+  )
 
   useEffect(() => {
     if (!open) {
       setCreandoSeccion(false)
       setSeccionId(null)
+      setTab('precios')
     }
   }, [open])
 
@@ -108,12 +137,37 @@ export function PreciosServiceManager({ open, onClose }: { open: boolean; onClos
         </button>
       </div>
 
+      {/* Pestañas */}
+      <div className="border-b border-line px-4 py-3 sm:px-5">
+        <div className="inline-flex w-full rounded-xl border border-line-strong bg-surface p-1 sm:w-auto">
+          {TABS.map((t) => {
+            const activo = tab === t.value
+            return (
+              <button
+                key={t.value}
+                type="button"
+                onClick={() => setTab(t.value)}
+                aria-pressed={activo}
+                className={cn(
+                  'flex-1 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors sm:flex-initial',
+                  activo ? 'bg-ink-950 text-on-ink' : 'text-ink-500 hover:text-ink-900',
+                )}
+              >
+                {t.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
       <div className="space-y-4 overflow-y-auto px-4 py-4 sm:px-5">
         {isLoading || !config ? (
           <>
             <Skeleton className="h-24 w-full rounded-2xl" />
             <Skeleton className="h-40 w-full rounded-2xl" />
           </>
+        ) : tab === 'equipos' ? (
+          <EquiposEditor dispositivos={dispositivos} onListo={invalidar} />
         ) : (
           <>
             <ConfigEditor config={config} onListo={invalidar} />
@@ -175,7 +229,12 @@ export function PreciosServiceManager({ open, onClose }: { open: boolean; onClos
                 }}
               />
             ) : seleccionada ? (
-              <SeccionPanel key={seleccionada.id} seccion={seleccionada} onListo={invalidar} />
+              <SeccionPanel
+                key={seleccionada.id}
+                seccion={seleccionada}
+                dispositivos={dispositivosActivos}
+                onListo={invalidar}
+              />
             ) : (
               <p className="py-8 text-center text-sm text-ink-400">
                 Todavía no hay secciones. Creá la primera con «Nueva».
@@ -313,9 +372,11 @@ function CampoNumero({
 
 function SeccionPanel({
   seccion,
+  dispositivos,
   onListo,
 }: {
   seccion: SeccionPreciosService
+  dispositivos: DispositivoService[]
   onListo: () => void
 }) {
   const [editandoMeta, setEditandoMeta] = useState(false)
@@ -378,6 +439,7 @@ function SeccionPanel({
           <ItemForm
             seccion={seccion}
             variantes={variantes}
+            dispositivos={dispositivos}
             modoCreacion
             onCancelar={() => setCreandoItem(false)}
             onListo={() => {
@@ -389,7 +451,14 @@ function SeccionPanel({
       )}
 
       {items.map((item) => (
-        <ItemColapsable key={item.id} item={item} seccion={seccion} variantes={variantes} onListo={onListo} />
+        <ItemColapsable
+          key={item.id}
+          item={item}
+          seccion={seccion}
+          variantes={variantes}
+          dispositivos={dispositivos}
+          onListo={onListo}
+        />
       ))}
 
       {items.length === 0 && !creandoItem && (
@@ -631,15 +700,18 @@ function ItemColapsable({
   item,
   seccion,
   variantes,
+  dispositivos,
   onListo,
 }: {
   item: ItemPrecioService
   seccion: SeccionPreciosService
   variantes: VarianteSeccionService[]
+  dispositivos: DispositivoService[]
   onListo: () => void
 }) {
   const [abierto, setAbierto] = useState(false)
   const conPrecio = item.precios.length
+  const conEquipos = item.dispositivos.length
 
   return (
     <div className="rounded-2xl border border-line bg-surface">
@@ -653,6 +725,7 @@ function ItemColapsable({
           <p className="truncate text-sm font-semibold text-ink-900">{item.etiqueta}</p>
           <p className="truncate text-xs text-ink-400">
             {conPrecio === 0 ? 'Sin precios' : conPrecio === 1 ? '1 variante con precio' : `${conPrecio} variantes con precio`}
+            {` · ${conEquipos === 1 ? '1 equipo' : `${conEquipos} equipos`}`}
             {item.nota && ` · ${item.nota}`}
           </p>
         </div>
@@ -662,7 +735,13 @@ function ItemColapsable({
       </button>
       {abierto && (
         <div className="border-t border-line p-4">
-          <ItemForm item={item} seccion={seccion} variantes={variantes} onListo={onListo} />
+          <ItemForm
+            item={item}
+            seccion={seccion}
+            variantes={variantes}
+            dispositivos={dispositivos}
+            onListo={onListo}
+          />
         </div>
       )}
     </div>
@@ -676,6 +755,7 @@ function ItemForm({
   item,
   seccion,
   variantes,
+  dispositivos,
   modoCreacion = false,
   onListo,
   onCancelar,
@@ -683,6 +763,7 @@ function ItemForm({
   item?: ItemPrecioService
   seccion: SeccionPreciosService
   variantes: VarianteSeccionService[]
+  dispositivos: DispositivoService[]
   modoCreacion?: boolean
   onListo: () => void
   onCancelar?: () => void
@@ -706,14 +787,47 @@ function ItemForm({
 
   const [etiqueta, setEtiqueta] = useState(item?.etiqueta ?? '')
   const [nota, setNota] = useState(item?.nota ?? '')
+  const [equipos, setEquipos] = useState<number[]>(item?.dispositivos ?? [])
   const [precios, setPrecios] = useState<PreciosDraft>(() => aDraft(item))
 
   useEffect(() => {
     setEtiqueta(item?.etiqueta ?? '')
     setNota(item?.nota ?? '')
+    setEquipos(item?.dispositivos ?? [])
     setPrecios(aDraft(item))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item, variantes])
+
+  const equipoPorId = useMemo(() => new Map(dispositivos.map((d) => [d.id, d])), [dispositivos])
+
+  /** Opciones para agregar: líneas completas (con 2+ equipos) y equipos sueltos. */
+  const opcionesAgregar = useMemo(() => {
+    const porLinea = new Map<string, number>()
+    for (const d of dispositivos) {
+      if (d.linea) porLinea.set(d.linea, (porLinea.get(d.linea) ?? 0) + 1)
+    }
+    const lineas = [...new Set(dispositivos.map((d) => d.linea))].filter(
+      (l) => l && (porLinea.get(l) ?? 0) > 1,
+    )
+    return [
+      ...lineas.map((l) => ({ value: `linea:${l}`, label: `Línea ${l} (toda)` })),
+      ...dispositivos
+        .filter((d) => !equipos.includes(d.id))
+        .map((d) => ({ value: `disp:${d.id}`, label: d.nombre })),
+    ]
+  }, [dispositivos, equipos])
+
+  function agregarEquipo(valor: string) {
+    if (!valor) return
+    const [tipo, dato] = valor.split(':')
+    if (tipo === 'disp') {
+      const id = Number(dato)
+      setEquipos((prev) => (prev.includes(id) ? prev : [...prev, id]))
+      return
+    }
+    const ids = dispositivos.filter((d) => d.linea === dato).map((d) => d.id)
+    setEquipos((prev) => [...prev, ...ids.filter((id) => !prev.includes(id))])
+  }
 
   const efectivoPorVariante = useMemo(() => {
     const mapa = new Map<number, ItemPrecioService['precios'][number]['efectivo']>()
@@ -731,6 +845,8 @@ function ItemForm({
     modoCreacion ||
     etiqueta.trim() !== (item?.etiqueta ?? '') ||
     nota.trim() !== (item?.nota ?? '') ||
+    [...equipos].sort((a, b) => a - b).join(',') !==
+      [...(item?.dispositivos ?? [])].sort((a, b) => a - b).join(',') ||
     firma(precios) !== firma(aDraft(item))
 
   const guardar = useMutation({
@@ -797,6 +913,7 @@ function ItemForm({
         : {}),
       etiqueta: etiqueta.trim(),
       nota: nota.trim(),
+      dispositivos: equipos,
       precios: filas,
     })
   }
@@ -827,6 +944,43 @@ function ItemForm({
           placeholder="Nota de la fila (opcional)"
           className="h-10 text-sm"
         />
+      </div>
+
+      {/* Equipos que abarca (alimenta el selector de la página) */}
+      <div className="mt-3">
+        <p className="mb-1.5 px-0.5 text-[0.7rem] font-medium uppercase tracking-[0.08em] text-ink-400">
+          Equipos que abarca
+        </p>
+        {equipos.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {equipos.map((id) => (
+              <span
+                key={id}
+                className="inline-flex items-center gap-1 rounded-lg bg-ink-100 py-1 pl-2.5 pr-1 text-xs font-medium text-ink-700"
+              >
+                {equipoPorId.get(id)?.nombre ?? `#${id}`}
+                <button
+                  type="button"
+                  onClick={() => setEquipos((prev) => prev.filter((x) => x !== id))}
+                  aria-label={`Quitar ${equipoPorId.get(id)?.nombre ?? id}`}
+                  className="grid h-5 w-5 place-items-center rounded-md text-ink-400 transition-colors hover:bg-ink-200 hover:text-ink-900"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="sm:max-w-[16rem]">
+          <Select
+            options={opcionesAgregar}
+            value=""
+            onChange={agregarEquipo}
+            searchable
+            searchPlaceholder="iPhone 13 Pro, línea 11…"
+            placeholder="Agregar equipo o línea"
+          />
+        </div>
       </div>
 
       <p className="mt-3 px-0.5 text-xs leading-relaxed text-ink-400">
@@ -903,6 +1057,186 @@ function ItemForm({
           </Button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ===== Catálogo de equipos (alimenta el selector y los vínculos) =====
+
+function EquiposEditor({
+  dispositivos,
+  onListo,
+}: {
+  dispositivos: DispositivoService[]
+  onListo: () => void
+}) {
+  const toast = useToast()
+  const [nuevoNombre, setNuevoNombre] = useState('')
+  const [nuevaLinea, setNuevaLinea] = useState('')
+
+  const ordenados = useMemo(
+    () =>
+      [...dispositivos].sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre)),
+    [dispositivos],
+  )
+  const ordenSiguiente = dispositivos.reduce((max, d) => Math.max(max, d.orden), -1) + 1
+
+  const crear = useMutation({
+    mutationFn: () =>
+      crearDispositivo({
+        nombre: nuevoNombre.trim(),
+        linea: nuevaLinea.trim(),
+        orden: ordenSiguiente,
+      }),
+    onSuccess: () => {
+      toast.success('Equipo creado', 'Ya podés vincularlo desde cada ítem.')
+      setNuevoNombre('')
+      setNuevaLinea('')
+      onListo()
+    },
+    onError: (e) => toast.error('No se pudo crear', e instanceof ApiError ? e.message : undefined),
+  })
+
+  function handleCrear() {
+    if (!nuevoNombre.trim()) {
+      toast.error('Poné el nombre del equipo (ej: iPhone 18)')
+      return
+    }
+    crear.mutate()
+  }
+
+  return (
+    <div>
+      <p className="mb-3 text-xs leading-relaxed text-ink-400">
+        Estos equipos alimentan el selector de la página. La <b>línea</b> agrupa para el filtro:
+        todos los que digan «11» aparecen al elegir «Línea 11».
+      </p>
+
+      <div className="mb-1.5 grid grid-cols-[minmax(0,1fr)_4.5rem_2.25rem_2.25rem] items-center gap-2 px-0.5 text-[0.7rem] font-medium uppercase tracking-[0.08em] text-ink-400 sm:grid-cols-[minmax(0,1fr)_6rem_2.25rem_2.25rem]">
+        <span>Equipo</span>
+        <span className="text-center">Línea</span>
+        <span />
+        <span />
+      </div>
+
+      <div className="space-y-2">
+        {ordenados.map((dispositivo) => (
+          <DispositivoFila key={dispositivo.id} dispositivo={dispositivo} onListo={onListo} />
+        ))}
+        {ordenados.length === 0 && (
+          <p className="py-6 text-center text-sm text-ink-400">Todavía no hay equipos cargados.</p>
+        )}
+      </div>
+
+      <div className="mt-3 flex items-center gap-2 border-t border-line pt-3">
+        <Input
+          value={nuevoNombre}
+          onChange={(e) => setNuevoNombre(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handleCrear()
+          }}
+          placeholder="Nuevo equipo (ej: iPhone 18)"
+          className="h-10 text-sm"
+        />
+        <Input
+          value={nuevaLinea}
+          onChange={(e) => setNuevaLinea(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handleCrear()
+          }}
+          placeholder="Línea"
+          className="tnum h-10 w-24 shrink-0 px-2 text-center text-sm"
+        />
+        <Button size="sm" onClick={handleCrear} disabled={crear.isPending}>
+          {crear.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+          Agregar
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function DispositivoFila({
+  dispositivo,
+  onListo,
+}: {
+  dispositivo: DispositivoService
+  onListo: () => void
+}) {
+  const toast = useToast()
+  const confirm = useConfirm()
+  const [nombre, setNombre] = useState(dispositivo.nombre)
+  const [linea, setLinea] = useState(dispositivo.linea)
+
+  useEffect(() => {
+    setNombre(dispositivo.nombre)
+    setLinea(dispositivo.linea)
+  }, [dispositivo])
+
+  const sucio =
+    nombre.trim() !== '' &&
+    (nombre.trim() !== dispositivo.nombre || linea.trim() !== dispositivo.linea)
+
+  const guardar = useMutation({
+    mutationFn: () => actualizarDispositivo(dispositivo.id, { nombre: nombre.trim(), linea: linea.trim() }),
+    onSuccess: () => {
+      toast.success('Equipo actualizado')
+      onListo()
+    },
+    onError: (e) => toast.error('No se pudo guardar', e instanceof ApiError ? e.message : undefined),
+  })
+
+  const borrar = useMutation({
+    mutationFn: () => eliminarDispositivo(dispositivo.id),
+    onSuccess: () => {
+      toast.success('Equipo eliminado')
+      onListo()
+    },
+    onError: (e) => toast.error('No se pudo eliminar', e instanceof ApiError ? e.message : undefined),
+  })
+
+  async function handleEliminar() {
+    const ok = await confirm({
+      title: `¿Eliminar ${dispositivo.nombre}?`,
+      description: 'Dejará de aparecer en el selector y en los ítems vinculados.',
+      confirmLabel: 'Eliminar',
+      tone: 'danger',
+    })
+    if (ok) borrar.mutate()
+  }
+
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)_4.5rem_2.25rem_2.25rem] items-center gap-2 sm:grid-cols-[minmax(0,1fr)_6rem_2.25rem_2.25rem]">
+      <Input value={nombre} onChange={(e) => setNombre(e.target.value)} className="h-10 text-sm" />
+      <Input
+        value={linea}
+        onChange={(e) => setLinea(e.target.value)}
+        className="tnum h-10 px-2 text-center text-sm"
+        aria-label={`Línea de ${dispositivo.nombre}`}
+      />
+      <button
+        type="button"
+        onClick={() => guardar.mutate()}
+        disabled={!sucio || guardar.isPending}
+        aria-label={`Guardar ${dispositivo.nombre}`}
+        className={cn(
+          'grid h-9 w-9 shrink-0 place-items-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900',
+          sucio
+            ? 'bg-ink-950 text-on-ink hover:bg-ink-800'
+            : 'text-ink-200',
+        )}
+      >
+        {guardar.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+      </button>
+      <button
+        type="button"
+        onClick={handleEliminar}
+        disabled={borrar.isPending}
+        aria-label={`Eliminar ${dispositivo.nombre}`}
+        className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-ink-400 transition-colors hover:bg-ink-100 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
     </div>
   )
 }

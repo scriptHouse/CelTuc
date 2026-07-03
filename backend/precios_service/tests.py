@@ -4,6 +4,7 @@ from django.test import TestCase
 
 from .models import (
     ConfiguracionService,
+    Dispositivo,
     ItemService,
     PrecioItemService,
     SeccionService,
@@ -152,7 +153,7 @@ class SeedExcelTests(TestCase):
     def test_baterias_con_dos_variantes_y_overrides(self):
         baterias = SeccionService.objects.get(nombre__iexact='Baterías')
         self.assertEqual(baterias.variantes.count(), 2)
-        once = baterias.items.get(etiqueta='11')
+        once = baterias.items.get(etiqueta='iPhone 11')
         normal = once.precios.get(variante__orden=0)
         # Cash USD retocado a mano en la hoja (51 y no 70*0.8=56): override.
         self.assertEqual(normal.precio_lista_usd, Decimal('70'))
@@ -160,7 +161,7 @@ class SeedExcelTests(TestCase):
 
     def test_reparaciones_derivadas_sin_overrides(self):
         reparaciones = SeccionService.objects.get(nombre__iexact='Reparaciones generales')
-        diagnostico = reparaciones.items.get(etiqueta__startswith='DIAGNOSTICO HASTA LINEA 11')
+        diagnostico = reparaciones.items.get(etiqueta__startswith='Diagnóstico hasta línea 11')
         precio = diagnostico.precios.first()
         self.assertEqual(precio.precio_lista_usd, Decimal('20.4'))
         # Todo lo demas sale de la formula: no hace falta override.
@@ -176,6 +177,69 @@ class SeedExcelTests(TestCase):
         modulos = SeccionService.objects.get(nombre__iexact='Módulos')
         self.assertEqual(modulos.variantes.count(), 3)
         # 13 PRO en Apple Original: 410 USD (celda D73 de la hoja).
-        item = modulos.items.get(etiqueta='13 PRO')
+        item = modulos.items.get(etiqueta='iPhone 13 Pro')
         ao = item.precios.get(variante__nombre__icontains='Apple Original')
         self.assertEqual(ao.precio_lista_usd, Decimal('410'))
+
+
+class SeedDispositivosTests(TestCase):
+    """El mapeo item -> equipos sembrado desde las etiquetas de la hoja."""
+
+    def test_catalogo_sembrado(self):
+        self.assertEqual(Dispositivo.objects.count(), 46)
+
+    def test_linea_expande_a_la_familia(self):
+        item = ItemService.objects.get(
+            seccion__nombre='Reparación de Face ID', etiqueta='Línea 11',
+        )
+        nombres = set(item.dispositivos.values_list('nombre', flat=True))
+        self.assertEqual(nombres, {'iPhone 11', 'iPhone 11 Pro', 'iPhone 11 Pro Max'})
+
+    def test_hasta_linea_incluye_los_se_de_la_epoca(self):
+        item = ItemService.objects.get(etiqueta__startswith='Baño químico hasta línea 11')
+        nombres = set(item.dispositivos.values_list('nombre', flat=True))
+        for esperado in ('iPhone 6', 'iPhone 7 Plus', 'iPhone SE 2016', 'iPhone SE 2020',
+                         'iPhone XR', 'iPhone 11 Pro Max'):
+            self.assertIn(esperado, nombres)
+        self.assertNotIn('iPhone 12', nombres)
+        self.assertNotIn('iPhone SE 2022', nombres)  # es de la era 13
+
+    def test_software_iphone_aplica_a_todos(self):
+        item = ItemService.objects.get(etiqueta__startswith='Software iPhone')
+        self.assertEqual(item.dispositivos.count(), 43)  # todos los iPhone
+        self.assertFalse(item.dispositivos.filter(nombre='iPad').exists())
+
+    def test_watch_y_grupos_con_barra(self):
+        watch = SeccionService.objects.get(nombre__startswith='Módulo Apple Watch')
+        for item in watch.items.all():
+            self.assertEqual(
+                list(item.dispositivos.values_list('nombre', flat=True)), ['Apple Watch'],
+            )
+        tapa = ItemService.objects.get(
+            seccion__nombre='Tapa trasera', etiqueta='iPhone 11 Pro / 11 Pro Max',
+        )
+        self.assertEqual(tapa.dispositivos.count(), 2)
+
+    def test_perfil_completo_de_un_equipo(self):
+        # El caso de uso del selector: elegir iPhone 11 Pro trae su perfil entero.
+        once_pro = Dispositivo.objects.get(nombre='iPhone 11 Pro')
+        secciones = set(once_pro.items.values_list('seccion__nombre', flat=True))
+        for esperada in ('Baterías', 'Módulos', 'Reparación de Face ID',
+                         'Reparaciones generales', 'Cámara trasera', 'Tapa trasera'):
+            self.assertIn(esperada, secciones)
+
+    def test_item_serializer_reemplaza_dispositivos(self):
+        seccion = SeccionService.objects.get(nombre='Tapa trasera')
+        item = seccion.items.get(etiqueta='iPhone 11')
+        nuevo = Dispositivo.objects.get(nombre='iPhone 12')
+        serializer = ItemServiceSerializer(
+            item, data={'dispositivos': [nuevo.id]}, partial=True,
+            context={'config': ConfiguracionService.obtener()},
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        self.assertEqual(
+            list(item.dispositivos.values_list('nombre', flat=True)), ['iPhone 12'],
+        )
+        # El PATCH parcial no toco los precios.
+        self.assertEqual(item.precios.count(), 1)

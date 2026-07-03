@@ -2,6 +2,8 @@ from django.urls import path
 
 from .views import (
     ConfiguracionServiceView,
+    DispositivoDetailView,
+    DispositivoListCreateView,
     ItemDetailView,
     ItemListCreateView,
     SeccionDetailView,
@@ -16,4 +18,6 @@ urlpatterns = [
     path('secciones/<int:pk>/', SeccionDetailView.as_view(), name='seccion'),
     path('items/', ItemListCreateView.as_view(), name='items'),
     path('items/<int:pk>/', ItemDetailView.as_view(), name='item'),
+    path('dispositivos/', DispositivoListCreateView.as_view(), name='dispositivos'),
+    path('dispositivos/<int:pk>/', DispositivoDetailView.as_view(), name='dispositivo'),
 ]

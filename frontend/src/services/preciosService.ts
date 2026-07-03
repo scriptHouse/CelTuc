@@ -1,4 +1,9 @@
-import type { ConfiguracionPreciosService, ItemPrecioService, SeccionPreciosService } from '@/types'
+import type {
+  ConfiguracionPreciosService,
+  DispositivoService,
+  ItemPrecioService,
+  SeccionPreciosService,
+} from '@/types'
 import { api } from '@/lib/api'
 import { useAuth } from '@/store/auth'
 
@@ -46,9 +51,18 @@ export interface ItemInput {
   seccion: number
   etiqueta: string
   nota?: string
+  /** Ids de los equipos a los que aplica la fila (alimenta el selector). */
+  dispositivos?: number[]
   orden?: number
   activo?: boolean
   precios?: PrecioInput[]
+}
+
+export interface DispositivoInput {
+  nombre: string
+  linea?: string
+  orden?: number
+  activo?: boolean
 }
 
 export function obtenerConfiguracion(): Promise<ConfiguracionPreciosService> {
@@ -90,4 +104,23 @@ export function actualizarItem(id: number, input: Partial<ItemInput>): Promise<I
 
 export function eliminarItem(id: number): Promise<void> {
   return api.del<void>(`/precios-service/items/${id}/`, token())
+}
+
+export function listarDispositivos(): Promise<DispositivoService[]> {
+  return api.get<DispositivoService[]>('/precios-service/dispositivos/', token())
+}
+
+export function crearDispositivo(input: DispositivoInput): Promise<DispositivoService> {
+  return api.post<DispositivoService>('/precios-service/dispositivos/', input, token())
+}
+
+export function actualizarDispositivo(
+  id: number,
+  input: Partial<DispositivoInput>,
+): Promise<DispositivoService> {
+  return api.patch<DispositivoService>(`/precios-service/dispositivos/${id}/`, input, token())
+}
+
+export function eliminarDispositivo(id: number): Promise<void> {
+  return api.del<void>(`/precios-service/dispositivos/${id}/`, token())
 }

@@ -5,6 +5,7 @@ from comun.admin import ModeloBaseAdminMixin
 
 from .models import (
     ConfiguracionService,
+    Dispositivo,
     ItemService,
     PrecioItemService,
     SeccionService,
@@ -25,6 +26,15 @@ class ConfiguracionServiceAdmin(ModeloBaseAdminMixin, ModelAdmin):
     def has_add_permission(self, request):
         # Fila unica: se crea sola via obtener(); no tiene sentido agregar mas.
         return not ConfiguracionService.todos.exists()
+
+
+@admin.register(Dispositivo)
+class DispositivoAdmin(ModeloBaseAdminMixin, ModelAdmin):
+    list_display = ('nombre', 'linea', 'activo', 'borrado', 'orden', 'actualizado')
+    list_filter = ('linea', 'activo', 'borrado')
+    search_fields = ('nombre', 'linea')
+    readonly_fields = _AUDITORIA
+    actions = ('restaurar',)
 
 
 class VarianteSeccionInline(TabularInline):

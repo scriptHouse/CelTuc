@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from .models import (
     ConfiguracionService,
+    Dispositivo,
     ItemService,
     PrecioItemService,
     SeccionService,
@@ -31,6 +32,28 @@ class ConfiguracionServiceSerializer(serializers.ModelSerializer):
         model = ConfiguracionService
         fields = ('dolar', 'descuento_cash_pct', 'redondeo_ars', 'actualizado')
         read_only_fields = ('actualizado',)
+
+
+class DispositivoSerializer(serializers.ModelSerializer):
+    """Equipo del catalogo del taller (alimenta el selector de la pagina)."""
+
+    class Meta:
+        model = Dispositivo
+        fields = ('id', 'nombre', 'linea', 'orden', 'activo')
+
+    def validate_nombre(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError('El nombre es obligatorio.')
+        repetido = Dispositivo.objects.filter(nombre__iexact=value)
+        if self.instance is not None:
+            repetido = repetido.exclude(pk=self.instance.pk)
+        if repetido.exists():
+            raise serializers.ValidationError('Ya existe un equipo con ese nombre.')
+        return value
+
+    def validate_linea(self, value):
+        return value.strip()
 
 
 class VarianteSeccionSerializer(serializers.ModelSerializer):
@@ -77,11 +100,14 @@ class ItemServiceSerializer(serializers.ModelSerializer):
     """
 
     seccion = serializers.PrimaryKeyRelatedField(queryset=SeccionService.objects.all())
+    dispositivos = serializers.PrimaryKeyRelatedField(
+        queryset=Dispositivo.objects.all(), many=True, required=False,
+    )
     precios = PrecioItemServiceSerializer(many=True, required=False)
 
     class Meta:
         model = ItemService
-        fields = ('id', 'seccion', 'etiqueta', 'nota', 'orden', 'activo', 'precios')
+        fields = ('id', 'seccion', 'etiqueta', 'nota', 'dispositivos', 'orden', 'activo', 'precios')
 
     def validate_etiqueta(self, value):
         value = value.strip()
@@ -134,15 +160,20 @@ class ItemServiceSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         precios = validated_data.pop('precios', [])
+        dispositivos = validated_data.pop('dispositivos', [])
         item = ItemService.objects.create(**validated_data)
+        item.dispositivos.set(dispositivos)
         self._reemplazar_precios(item, precios)
         return item
 
     def update(self, instance, validated_data):
         precios = validated_data.pop('precios', None)
+        dispositivos = validated_data.pop('dispositivos', None)
         for campo, valor in validated_data.items():
             setattr(instance, campo, valor)
         instance.save()
+        if dispositivos is not None:
+            instance.dispositivos.set(dispositivos)
         if precios is not None:
             self._reemplazar_precios(instance, precios)
         return instance

@@ -357,6 +357,16 @@ export interface VarianteSeccionService {
   orden: number
 }
 
+/** Un equipo reparable del taller (alimenta el selector de la página Service). */
+export interface DispositivoService {
+  id: number
+  nombre: string
+  /** Agrupa para el filtro por línea: "11" junta a 11, 11 Pro y 11 Pro Max. */
+  linea: string
+  orden: number
+  activo: boolean
+}
+
 /** Los 4 precios ya resueltos (override si hay, fórmula si no). */
 export interface PrecioEfectivoService {
   lista_usd: number | null
@@ -384,6 +394,8 @@ export interface ItemPrecioService {
   seccion: number
   etiqueta: string
   nota: string
+  /** Ids de los DispositivoService a los que aplica esta fila. */
+  dispositivos: number[]
   orden: number
   activo: boolean
   precios: PrecioItemService[]

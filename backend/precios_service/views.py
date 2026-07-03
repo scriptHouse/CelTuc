@@ -4,9 +4,10 @@ from rest_framework import generics
 from comun.mixins import AuditoriaMixin
 from usuarios.permissions import LecturaConPermisoEscrituraAdmin
 
-from .models import ConfiguracionService, ItemService, SeccionService
+from .models import ConfiguracionService, Dispositivo, ItemService, SeccionService
 from .serializers import (
     ConfiguracionServiceSerializer,
+    DispositivoSerializer,
     ItemServiceSerializer,
     SeccionServiceSerializer,
 )
@@ -27,7 +28,7 @@ class _BaseService:
 
 
 def _items_queryset():
-    return ItemService.objects.select_related('seccion').prefetch_related('precios')
+    return ItemService.objects.select_related('seccion').prefetch_related('precios', 'dispositivos')
 
 
 class ConfiguracionServiceView(_BaseService, AuditoriaMixin, generics.RetrieveUpdateAPIView):
@@ -64,3 +65,13 @@ class ItemListCreateView(_BaseService, AuditoriaMixin, generics.ListCreateAPIVie
 class ItemDetailView(_BaseService, AuditoriaMixin, generics.RetrieveUpdateDestroyAPIView):
     queryset = _items_queryset().all()
     serializer_class = ItemServiceSerializer
+
+
+class DispositivoListCreateView(_BaseService, AuditoriaMixin, generics.ListCreateAPIView):
+    queryset = Dispositivo.objects.all()
+    serializer_class = DispositivoSerializer
+
+
+class DispositivoDetailView(_BaseService, AuditoriaMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = Dispositivo.objects.all()
+    serializer_class = DispositivoSerializer
