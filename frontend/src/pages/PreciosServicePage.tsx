@@ -180,8 +180,9 @@ export function PreciosServicePage() {
         }
       />
 
-      {/* Hero: buscador + parámetros vigentes */}
-      <Card className="ct-rise mb-5 overflow-hidden">
+      {/* Hero: buscador + parámetros vigentes. OJO: sin overflow-hidden, porque
+          el panel del select de equipos es absolute y quedaría recortado. */}
+      <Card className="ct-rise mb-5">
         <div className="grid sm:grid-cols-[1.6fr_1fr]">
           <div className="p-5 sm:p-6">
             <label
@@ -228,7 +229,8 @@ export function PreciosServicePage() {
             </div>
           </div>
 
-          <div className="border-t border-line bg-canvas/40 p-5 sm:border-l sm:border-t-0 sm:p-6">
+          {/* Redondeo propio (la Card ya no recorta con overflow-hidden). */}
+          <div className="rounded-b-2xl border-t border-line bg-canvas/40 p-5 sm:rounded-bl-none sm:rounded-tr-2xl sm:border-l sm:border-t-0 sm:p-6">
             <p className="mb-2.5 text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-ink-400">
               Parámetros vigentes
             </p>
