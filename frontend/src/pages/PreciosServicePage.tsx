@@ -1,6 +1,26 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Eraser, Search, SearchX, SlidersHorizontal, Wrench } from 'lucide-react'
+import {
+  Aperture,
+  BatteryCharging,
+  Camera,
+  CircuitBoard,
+  Eraser,
+  Layers,
+  MessageSquareX,
+  PlugZap,
+  ScanFace,
+  Search,
+  SearchX,
+  SlidersHorizontal,
+  Smartphone,
+  SmartphoneNfc,
+  SwitchCamera,
+  Volume2,
+  Watch,
+  Wrench,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import type {
   ItemPrecioService,
   PrecioEfectivoService,
@@ -19,6 +39,30 @@ import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PreciosServiceManager } from '@/components/PreciosServiceManager'
+
+/** Ícono para el chip de cada sección, por palabra clave del nombre.
+ * Así las secciones nuevas que cargue el admin reciben un ícono razonable
+ * sin tocar código (fallback: llave inglesa). El orden importa: "watch" y
+ * "selfie" antes que "módulos"/"cámara", que son más genéricos. */
+const ICONOS_SECCION: [RegExp, LucideIcon][] = [
+  [/watch/i, Watch],
+  [/bater/i, BatteryCharging],
+  [/glass de pantalla/i, Smartphone],
+  [/m[óo]dulo/i, Layers],
+  [/pieza desconocida|mensaje/i, MessageSquareX],
+  [/placa/i, CircuitBoard],
+  [/face id/i, ScanFace],
+  [/selfie/i, SwitchCamera],
+  [/glass de c[áa]mara/i, Aperture],
+  [/c[áa]mara/i, Camera],
+  [/flex|carga/i, PlugZap],
+  [/audio|parlante|o[íi]do/i, Volume2],
+  [/tapa/i, SmartphoneNfc],
+]
+
+function iconoDeSeccion(nombre: string): LucideIcon {
+  return ICONOS_SECCION.find(([patron]) => patron.test(nombre))?.[1] ?? Wrench
+}
 
 /** Arma las opciones del selector: líneas (con 2+ equipos) y equipos. */
 export function opcionesDeEquipo(
@@ -209,31 +253,37 @@ export function PreciosServicePage() {
         </div>
       </Card>
 
-      {/* Chips de sección (scroll horizontal en móvil) */}
+      {/* Secciones: chips con ícono que envuelven — todas visibles de un
+          vistazo, sin scroll horizontal escondiendo opciones. */}
       {activas.length > 0 && !filtrando && (
-        <div className="ct-rise -mx-1 mb-4 overflow-x-auto px-1 pb-1">
-          <div className="flex w-max gap-2">
-            {activas.map((seccion) => {
-              const activa = seleccionada?.id === seccion.id
-              return (
-                <button
-                  key={seccion.id}
-                  type="button"
-                  onClick={() => setSeccionId(seccion.id)}
-                  aria-pressed={activa}
-                  className={cn(
-                    'whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm font-medium transition-colors',
-                    activa
-                      ? 'border-ink-950 bg-ink-950 text-on-ink'
-                      : 'border-line-strong bg-surface text-ink-600 hover:border-ink-300 hover:bg-ink-50 hover:text-ink-900',
-                  )}
-                >
-                  {seccion.nombre}
-                </button>
-              )
-            })}
-          </div>
-        </div>
+        <nav aria-label="Secciones de service" className="ct-rise mb-4 flex flex-wrap gap-2">
+          {activas.map((seccion) => {
+            const activa = seleccionada?.id === seccion.id
+            const Icono = iconoDeSeccion(seccion.nombre)
+            return (
+              <button
+                key={seccion.id}
+                type="button"
+                onClick={() => setSeccionId(seccion.id)}
+                aria-pressed={activa}
+                className={cn(
+                  'inline-flex min-w-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-sm font-medium transition-colors',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas',
+                  activa
+                    ? 'border-ink-950 bg-ink-950 text-on-ink'
+                    : 'border-line-strong bg-surface text-ink-600 hover:border-ink-300 hover:bg-ink-50 hover:text-ink-900',
+                )}
+              >
+                <Icono
+                  aria-hidden
+                  strokeWidth={1.9}
+                  className={cn('h-4 w-4 shrink-0', activa ? 'text-on-ink' : 'text-ink-400')}
+                />
+                <span className="truncate">{seccion.nombre}</span>
+              </button>
+            )
+          })}
+        </nav>
       )}
 
       {/* Resultados */}
