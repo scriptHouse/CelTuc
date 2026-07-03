@@ -337,3 +337,69 @@ export interface TipoServicio {
   orden: number
   activo: boolean
 }
+
+// ===== Precios de service (lista de precios del taller) =====
+/** Parámetros globales: de acá se derivan los precios que no tienen override. */
+export interface ConfiguracionPreciosService {
+  /** Cotización para pasar la lista USD a pesos. */
+  dolar: number
+  /** Descuento por pago cash (20 = 20 %). */
+  descuento_cash_pct: number
+  /** Los pesos se redondean PARA ARRIBA a este múltiplo. */
+  redondeo_ars: number
+  actualizado: string // ISO
+}
+
+/** Calidad/columna de una sección (LCD, OLED, Apple Original...). */
+export interface VarianteSeccionService {
+  id: number
+  nombre: string
+  orden: number
+}
+
+/** Los 4 precios ya resueltos (override si hay, fórmula si no). */
+export interface PrecioEfectivoService {
+  lista_usd: number | null
+  cash_usd: number | null
+  lista_ars: number | null
+  cash_ars: number | null
+}
+
+/** Precios crudos de una fila × variante. NULL = se deriva con la fórmula. */
+export interface PrecioItemService {
+  id: number
+  /** Id de la VarianteSeccionService. */
+  variante: number
+  precio_lista_usd: number | null
+  precio_cash_usd: number | null
+  precio_lista_ars: number | null
+  precio_cash_ars: number | null
+  efectivo: PrecioEfectivoService
+}
+
+/** Una fila de la lista (modelo, grupo, línea o servicio suelto). */
+export interface ItemPrecioService {
+  id: number
+  /** Id de la sección a la que pertenece. */
+  seccion: number
+  etiqueta: string
+  nota: string
+  orden: number
+  activo: boolean
+  precios: PrecioItemService[]
+}
+
+/** Un bloque de la lista de precios (Baterías, Módulos, ...). */
+export interface SeccionPreciosService {
+  id: number
+  nombre: string
+  nota: string
+  /** Descuento cash propio (promos); null = usa el global. */
+  descuento_cash_pct: number | null
+  orden: number
+  activo: boolean
+  variantes: VarianteSeccionService[]
+  items: ItemPrecioService[]
+  creado: string // ISO
+  actualizado: string // ISO
+}

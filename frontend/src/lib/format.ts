@@ -51,6 +51,18 @@ export function usd0(value: number): string {
   return USD0.format(value || 0)
 }
 
+const USD2 = new Intl.NumberFormat('es-AR', {
+  style: 'currency',
+  currency: 'USD',
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 2,
+})
+
+/** Dólares con centavos solo si los hay: US$ 91,8 · US$ 73,44 · US$ 40. */
+export function usd(value: number): string {
+  return USD2.format(value || 0)
+}
+
 /** Número con separadores de miles. */
 export function num(value: number): string {
   return NUM.format(value || 0)
