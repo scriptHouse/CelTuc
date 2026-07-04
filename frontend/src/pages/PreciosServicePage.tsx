@@ -7,6 +7,7 @@ import {
   CircuitBoard,
   Eraser,
   Layers,
+  LayoutGrid,
   MessageSquareX,
   PlugZap,
   ScanFace,
@@ -120,7 +121,6 @@ export function PreciosServicePage() {
     [secciones],
   )
 
-  const seleccionada = activas.find((s) => s.id === seccionId) ?? activas[0]
   const query = busqueda.trim().toLowerCase()
 
   const dispositivosActivos = useMemo(
@@ -143,9 +143,17 @@ export function PreciosServicePage() {
 
   const filtrando = Boolean(query) || idsEquipo !== null
 
-  /** Filtrando (texto o equipo): todas las secciones. Si no: la sección activa. */
+  /** Sección activa. `null` = "Todas": solo tiene sentido mientras hay un
+   * filtro de equipo o de texto (si no, se navega de a una sección). Los
+   * filtros COMPONEN: equipo/búsqueda + sección elegida. */
+  const seleccionada = useMemo(() => {
+    const elegida = activas.find((s) => s.id === seccionId)
+    if (elegida) return elegida
+    return filtrando ? null : activas[0]
+  }, [activas, seccionId, filtrando])
+
   const visibles = useMemo(() => {
-    const base = filtrando ? activas : seleccionada ? [seleccionada] : []
+    const base = seleccionada ? [seleccionada] : activas
     return base
       .map((seccion) => ({
         seccion,
@@ -157,7 +165,7 @@ export function PreciosServicePage() {
         ),
       }))
       .filter((grupo) => grupo.items.length > 0)
-  }, [activas, seleccionada, filtrando, query, idsEquipo])
+  }, [activas, seleccionada, query, idsEquipo])
 
   const totalResultados = visibles.reduce((total, grupo) => total + grupo.items.length, 0)
   const etiquetaFiltro = opcionesEquipos.find((o) => o.value === filtroEquipo)?.label
@@ -256,9 +264,32 @@ export function PreciosServicePage() {
       </Card>
 
       {/* Secciones: chips con ícono que envuelven — todas visibles de un
-          vistazo, sin scroll horizontal escondiendo opciones. */}
-      {activas.length > 0 && !filtrando && (
+          vistazo, sin scroll horizontal escondiendo opciones. Se mantienen
+          también con un equipo/búsqueda activos, para combinar filtros
+          (con "Todas" para volver al perfil completo). */}
+      {activas.length > 0 && (
         <nav aria-label="Secciones de service" className="ct-rise mb-4 flex flex-wrap gap-2">
+          {filtrando && (
+            <button
+              type="button"
+              onClick={() => setSeccionId(null)}
+              aria-pressed={seleccionada === null}
+              className={cn(
+                'inline-flex min-w-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-sm font-medium transition-colors',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas',
+                seleccionada === null
+                  ? 'border-ink-950 bg-ink-950 text-on-ink'
+                  : 'border-line-strong bg-surface text-ink-600 hover:border-ink-300 hover:bg-ink-50 hover:text-ink-900',
+              )}
+            >
+              <LayoutGrid
+                aria-hidden
+                strokeWidth={1.9}
+                className={cn('h-4 w-4 shrink-0', seleccionada === null ? 'text-on-ink' : 'text-ink-400')}
+              />
+              Todas
+            </button>
+          )}
           {activas.map((seccion) => {
             const activa = seleccionada?.id === seccion.id
             const Icono = iconoDeSeccion(seccion.nombre)
@@ -323,6 +354,7 @@ export function PreciosServicePage() {
               onClick={() => {
                 setBusqueda('')
                 setFiltroEquipo('')
+                setSeccionId(null)
               }}
             >
               Limpiar filtros
