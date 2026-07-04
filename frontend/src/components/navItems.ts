@@ -1,4 +1,4 @@
-import { Boxes, CreditCard, FileText, LayoutDashboard, ReceiptText, ScanSearch, ShoppingBag, Smartphone, UserCog, Users, Wrench } from 'lucide-react'
+import { Boxes, CreditCard, DollarSign, FileText, LayoutDashboard, ReceiptText, ScanSearch, ShoppingBag, Smartphone, UserCog, Users, Wrench } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 export interface NavItem {
@@ -13,6 +13,7 @@ export interface NavItem {
 
 export const navItems: NavItem[] = [
   { to: '/', label: 'Panel', icon: LayoutDashboard, permiso: 'ver_panel' },
+  { to: '/dolar', label: 'Dólar', icon: DollarSign, permiso: 'ver_dolar' },
   { to: '/inventario', label: 'Inventario', icon: Boxes, permiso: 'ver_inventario' },
   { to: '/facturacion', label: 'Facturación', icon: ReceiptText, permiso: 'ver_facturacion' },
   { to: '/empleados', label: 'Empleados', icon: Users, permiso: 'ver_empleados' },

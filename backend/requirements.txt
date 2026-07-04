@@ -12,3 +12,4 @@ gunicorn>=23.0,<24.0
 zeep>=4.3,<5.0            # cliente SOAP de los Web Services de ARCA
 cryptography>=43.0        # firma CMS/PKCS#7 del Ticket de Acceso (WSAA)
 qrcode[pil]>=7.4,<9.0     # imagen del codigo QR obligatorio de la factura
+requests>=2.32,<3.0       # HTTP saliente (DolarAPI; tambien lo usa zeep/ARCA)

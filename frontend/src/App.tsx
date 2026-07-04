@@ -4,6 +4,7 @@ import { RequireAuth } from '@/components/RequireAuth'
 import { RequirePermiso } from '@/components/RequirePermiso'
 import { LoginPage } from '@/pages/LoginPage'
 import { PanelPage } from '@/pages/PanelPage'
+import { DolarPage } from '@/pages/DolarPage'
 import { InventarioPage } from '@/pages/InventarioPage'
 import { FacturacionPage } from '@/pages/FacturacionPage'
 import { EmpleadosPage } from '@/pages/EmpleadosPage'
@@ -25,6 +26,7 @@ const router = createBrowserRouter([
     ),
     children: [
       { path: '/', element: <RequirePermiso permiso="ver_panel"><PanelPage /></RequirePermiso> },
+      { path: '/dolar', element: <RequirePermiso permiso="ver_dolar"><DolarPage /></RequirePermiso> },
       { path: '/inventario', element: <RequirePermiso permiso="ver_inventario"><InventarioPage /></RequirePermiso> },
       { path: '/facturacion', element: <RequirePermiso permiso="ver_facturacion"><FacturacionPage /></RequirePermiso> },
       { path: '/empleados', element: <RequirePermiso permiso="ver_empleados"><EmpleadosPage /></RequirePermiso> },

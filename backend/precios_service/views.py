@@ -1,5 +1,9 @@
+import requests
+from django.core.cache import cache
 from django.db.models import Prefetch
 from rest_framework import generics
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from comun.mixins import AuditoriaMixin
 from usuarios.permissions import LecturaConPermisoEscrituraAdmin
@@ -35,6 +39,8 @@ class ConfiguracionServiceView(_BaseService, AuditoriaMixin, generics.RetrieveUp
     """Fila unica de parametros (dolar, descuento, redondeo)."""
 
     serializer_class = ConfiguracionServiceSerializer
+    # La lee tambien el gestor de dolar (pagina Dolar y bloque del Panel).
+    permiso_requerido = ('ver_precios_service', 'ver_dolar')
 
     def get_object(self):
         return ConfiguracionService.obtener()
@@ -65,6 +71,43 @@ class ItemListCreateView(_BaseService, AuditoriaMixin, generics.ListCreateAPIVie
 class ItemDetailView(_BaseService, AuditoriaMixin, generics.RetrieveUpdateDestroyAPIView):
     queryset = _items_queryset().all()
     serializer_class = ItemServiceSerializer
+
+
+class DolarBlueView(_BaseService, APIView):
+    """Cotizacion del dolar blue, de DolarAPI (https://dolarapi.com).
+
+    El backend hace de proxy (evita CORS y centraliza el manejo de errores) y
+    cachea la respuesta 2 minutos para no golpear la API en cada apertura del
+    gestor. Es SOLO una referencia: el dolar del negocio sigue siendo manual y
+    se actualiza desde Configurar (con el boton "Usar venta" del gestor).
+    """
+
+    URL = 'https://dolarapi.com/v1/dolares/blue'
+    CACHE_KEY = 'dolar_blue'
+    CACHE_SEGUNDOS = 120
+
+    # Lo consultan los gestores de dolar (pagina Dolar, Panel, Service y Productos).
+    permiso_requerido = ('ver_precios_service', 'ver_productos', 'ver_equipos', 'ver_dolar')
+
+    def get(self, request):
+        datos = cache.get(self.CACHE_KEY)
+        if datos is None:
+            try:
+                respuesta = requests.get(self.URL, timeout=6)
+                respuesta.raise_for_status()
+                cuerpo = respuesta.json()
+                datos = {
+                    'compra': cuerpo.get('compra'),
+                    'venta': cuerpo.get('venta'),
+                    'fecha': cuerpo.get('fechaActualizacion'),
+                }
+            except (requests.RequestException, ValueError):
+                return Response(
+                    {'detail': 'No se pudo consultar DolarAPI. Probá de nuevo en un rato.'},
+                    status=503,
+                )
+            cache.set(self.CACHE_KEY, datos, self.CACHE_SEGUNDOS)
+        return Response(datos)
 
 
 class DispositivoListCreateView(_BaseService, AuditoriaMixin, generics.ListCreateAPIView):

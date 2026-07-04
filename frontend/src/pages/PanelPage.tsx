@@ -10,6 +10,8 @@ import {
   Wallet,
 } from 'lucide-react'
 import { obtenerResumen } from '@/services/dashboard'
+import { useAuth } from '@/store/auth'
+import { esAdmin } from '@/lib/permisos'
 import { resetDB } from '@/lib/db'
 import { CONDICION_CORTA, estadoEfectivo, numeroComprobante } from '@/lib/afip'
 import { fecha, money, moneyCompact, num } from '@/lib/format'
@@ -21,6 +23,7 @@ import { Card } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Button } from '@/components/ui/Button'
 import { FacturaEstadoBadge } from '@/components/ui/StatusBadge'
+import { GestorDolar } from '@/components/GestorDolar'
 import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
 
@@ -28,6 +31,8 @@ export function PanelPage() {
   const queryClient = useQueryClient()
   const toast = useToast()
   const confirm = useConfirm()
+  const usuario = useAuth((s) => s.usuario)
+  const admin = esAdmin(usuario)
   const { data, isLoading } = useQuery({ queryKey: ['dashboard'], queryFn: obtenerResumen })
 
   async function handleReset() {
@@ -58,6 +63,12 @@ export function PanelPage() {
           </Button>
         }
       />
+
+      {/* Gestor de dólar: el del negocio + el blue de DolarAPI, a mano desde
+          el inicio. Los que no son admin lo ven en modo solo lectura. */}
+      <div className="ct-rise mb-5">
+        <GestorDolar soloLectura={!admin} />
+      </div>
 
       {isLoading || !data ? (
         <PanelSkeleton />

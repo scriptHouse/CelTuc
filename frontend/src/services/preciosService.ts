@@ -65,6 +65,18 @@ export interface DispositivoInput {
   activo?: boolean
 }
 
+/** Cotización del dólar blue (DolarAPI), vía el backend. SOLO referencia:
+ * leerla nunca modifica el dólar del negocio. */
+export interface DolarBlue {
+  compra: number | null
+  venta: number | null
+  fecha: string | null
+}
+
+export function obtenerDolarBlue(): Promise<DolarBlue> {
+  return api.get<DolarBlue>('/precios-service/dolar-blue/', token())
+}
+
 export function obtenerConfiguracion(): Promise<ConfiguracionPreciosService> {
   return api.get<ConfiguracionPreciosService>('/precios-service/configuracion/', token())
 }

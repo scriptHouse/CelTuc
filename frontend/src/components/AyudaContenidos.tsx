@@ -328,6 +328,47 @@ export function AyudaCotizacionesManager() {
   )
 }
 
+// ================================================================ DÓLAR ====
+
+export function AyudaDolar() {
+  return (
+    <>
+      <AyudaSeccion titulo="Qué es esta pantalla">
+        <AyudaCampos
+          campos={[
+            [<>Dólar del negocio</>, <>El valor con el que se calculan <b>todos</b> los precios en pesos de Service y Productos. Lo define el negocio (no es el del mercado): incluye el margen cambiario.</>],
+            [<>Dólar blue · DolarAPI</>, <>La cotización de mercado en vivo (compra y venta), como referencia. <b>Nunca</b> modifica el del negocio por sí sola.</>],
+            [<>La comparación</>, <>Cuánto está tu dólar por encima o por debajo de la venta blue, en pesos y porcentaje — el dato para decidir si conviene actualizarlo.</>],
+          ]}
+        />
+      </AyudaSeccion>
+
+      <AyudaSeccion titulo="Cómo actualizar el dólar del negocio (solo admins)">
+        <AyudaPasos
+          pasos={[
+            <>Mirá la referencia: si el blue se movió y tu margen quedó corto, es momento de actualizar.</>,
+            <>Escribí el valor nuevo en el campo (ej: <b>1600</b>) y tocá <b>Guardar</b>.</>,
+            <>Listo: <b>todas</b> las listas (Service y Productos) quedan recalculadas al instante. Los precios que alguna vez se pisaron a mano no se tocan.</>,
+          ]}
+        />
+        <AyudaEjemplo titulo="el blue subió de $1.510 a $1.600">
+          <p className="tnum">
+            Tu dólar está en $ 1.550 → quedaste <b>por debajo</b> del mercado. Lo subís a
+            $ 1.650 (para recuperar el margen) → la batería que costaba $ 155.000 pasa a
+            $ 165.000 automáticamente, en las dos listas.
+          </p>
+        </AyudaEjemplo>
+      </AyudaSeccion>
+
+      <AyudaTip>
+        Este mismo gestor está en el <b>Panel</b> (inicio) y dentro de Configurar en Service y
+        Productos: es uno solo, mires donde lo mires. El botón ↻ refresca la cotización del blue
+        (se actualiza sola cada 2 minutos).
+      </AyudaTip>
+    </>
+  )
+}
+
 // ================================================================ FICHA ====
 
 export function AyudaFichaEquipo() {

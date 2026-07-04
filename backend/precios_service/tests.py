@@ -1,6 +1,10 @@
 from decimal import Decimal
+from unittest.mock import Mock, patch
 
+import requests
+from django.core.cache import cache
 from django.test import TestCase
+from rest_framework.test import APIClient
 
 from .models import (
     ConfiguracionService,
@@ -73,6 +77,48 @@ class DerivacionPreciosTests(TestCase):
         self.config.dolar = Decimal('2000')
         efectivo = resolver_precios(precio, self.config)
         self.assertEqual(efectivo['lista_ars'], Decimal('200000'))
+
+
+class DolarBlueTests(TestCase):
+    """El proxy a DolarAPI: cachea, mapea los campos y falla con gracia."""
+
+    URL = '/api/precios-service/dolar-blue/'
+
+    def setUp(self):
+        cache.delete('dolar_blue')
+        from usuarios.models import Usuario
+        self.cliente = APIClient()
+        self.cliente.force_authenticate(
+            Usuario.objects.create_superuser(email='blue@celtuc.test', username='blue', password='x'),
+        )
+
+    def _respuesta_ok(self):
+        respuesta = Mock()
+        respuesta.raise_for_status.return_value = None
+        respuesta.json.return_value = {
+            'compra': 1500, 'venta': 1540, 'fechaActualizacion': '2026-07-04T12:00:00.000Z',
+        }
+        return respuesta
+
+    @patch('precios_service.views.requests.get')
+    def test_devuelve_la_cotizacion_y_cachea(self, mock_get):
+        mock_get.return_value = self._respuesta_ok()
+        r = self.cliente.get(self.URL)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['venta'], 1540)
+        self.assertEqual(r.data['compra'], 1500)
+        # Segunda consulta: sale de la cache, sin pegarle de nuevo a DolarAPI.
+        self.cliente.get(self.URL)
+        self.assertEqual(mock_get.call_count, 1)
+
+    @patch('precios_service.views.requests.get', side_effect=requests.ConnectionError)
+    def test_si_dolarapi_no_responde_503_legible(self, _mock):
+        r = self.cliente.get(self.URL)
+        self.assertEqual(r.status_code, 503)
+        self.assertIn('DolarAPI', r.data['detail'])
+
+    def test_requiere_autenticacion(self):
+        self.assertEqual(APIClient().get(self.URL).status_code, 401)
 
 
 class SeccionSerializerTests(TestCase):

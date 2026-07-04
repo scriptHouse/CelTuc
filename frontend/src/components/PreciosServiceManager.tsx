@@ -34,6 +34,7 @@ import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { AyudaInfo } from '@/components/ui/AyudaInfo'
 import { AyudaServiceManager } from '@/components/AyudaContenidos'
+import { GestorDolar } from '@/components/GestorDolar'
 import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
 
@@ -180,6 +181,7 @@ export function PreciosServiceManager({ open, onClose }: { open: boolean; onClos
           <EquiposEditor dispositivos={dispositivos} onListo={invalidar} />
         ) : (
           <>
+            <GestorDolar />
             <ConfigEditor config={config} onListo={invalidar} />
 
             {/* Selector de sección */}
@@ -267,29 +269,24 @@ function ConfigEditor({
   onListo: () => void
 }) {
   const toast = useToast()
-  const [dolar, setDolar] = useState(aTexto(config.dolar))
   const [descuento, setDescuento] = useState(aTexto(config.descuento_cash_pct))
   const [redondeo, setRedondeo] = useState(aTexto(config.redondeo_ars))
 
   useEffect(() => {
-    setDolar(aTexto(config.dolar))
     setDescuento(aTexto(config.descuento_cash_pct))
     setRedondeo(aTexto(config.redondeo_ars))
   }, [config])
 
   const sucio =
-    dolar !== aTexto(config.dolar) ||
     descuento !== aTexto(config.descuento_cash_pct) ||
     redondeo !== aTexto(config.redondeo_ars)
 
   const guardar = useMutation({
     mutationFn: () => {
       const valores = {
-        dolar: aNumero(dolar),
         descuento_cash_pct: aNumero(descuento),
         redondeo_ars: aNumero(redondeo),
       }
-      if (valores.dolar === null || valores.dolar <= 0) throw new ApiError(0, 'Poné un dólar válido.', null)
       if (valores.descuento_cash_pct === null || valores.descuento_cash_pct < 0 || valores.descuento_cash_pct > 100) {
         throw new ApiError(0, 'El descuento tiene que estar entre 0 y 100.', null)
       }
@@ -297,7 +294,6 @@ function ConfigEditor({
         throw new ApiError(0, 'Poné un redondeo válido (ej: 1000).', null)
       }
       return actualizarConfiguracion({
-        dolar: valores.dolar,
         descuento_cash_pct: valores.descuento_cash_pct,
         redondeo_ars: Math.trunc(valores.redondeo_ars),
       })
@@ -314,14 +310,13 @@ function ConfigEditor({
       <p className="mb-2.5 flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-ink-400">
         <Settings2 className="h-3.5 w-3.5" /> Parámetros de la lista
       </p>
-      <div className="grid grid-cols-3 gap-2">
-        <CampoNumero etiqueta="Dólar del negocio" valor={dolar} onChange={setDolar} prefijo="$" />
+      <div className="grid grid-cols-2 gap-2">
         <CampoNumero etiqueta="Desc. cash" valor={descuento} onChange={setDescuento} sufijo="%" />
         <CampoNumero etiqueta="Redondeo $" valor={redondeo} onChange={setRedondeo} />
       </div>
       <div className="mt-2.5 flex items-center justify-between gap-3">
         <p className="text-xs leading-relaxed text-ink-400">
-          El dólar es compartido con Productos: cambiarlo recalcula las dos listas.
+          El dólar se cambia arriba, en el Gestor de dólar (compartido con Productos).
         </p>
         <Button size="sm" onClick={() => guardar.mutate()} disabled={!sucio || guardar.isPending}>
           {guardar.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Guardar'}

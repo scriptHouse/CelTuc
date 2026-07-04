@@ -31,6 +31,7 @@ import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { AyudaInfo } from '@/components/ui/AyudaInfo'
 import { AyudaProductosManager } from '@/components/AyudaContenidos'
+import { GestorDolar } from '@/components/GestorDolar'
 import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
 
@@ -230,6 +231,7 @@ export function ProductosManager({ open, onClose }: { open: boolean; onClose: ()
           </>
         ) : (
           <>
+            <GestorDolar />
             <ConfigEditor config={config} onListo={invalidar} />
 
             <div>
@@ -320,20 +322,17 @@ function ConfigEditor({
   onListo: () => void
 }) {
   const toast = useToast()
-  const [dolar, setDolar] = useState(aTexto(config.dolar))
   const [descuento, setDescuento] = useState(aTexto(config.descuento_cash_pct))
   const [redLista, setRedLista] = useState(aTexto(config.redondeo_lista_ars))
   const [redCash, setRedCash] = useState(aTexto(config.redondeo_cash_ars))
 
   useEffect(() => {
-    setDolar(aTexto(config.dolar))
     setDescuento(aTexto(config.descuento_cash_pct))
     setRedLista(aTexto(config.redondeo_lista_ars))
     setRedCash(aTexto(config.redondeo_cash_ars))
   }, [config])
 
   const sucio =
-    dolar !== aTexto(config.dolar) ||
     descuento !== aTexto(config.descuento_cash_pct) ||
     redLista !== aTexto(config.redondeo_lista_ars) ||
     redCash !== aTexto(config.redondeo_cash_ars)
@@ -341,12 +340,10 @@ function ConfigEditor({
   const guardar = useMutation({
     mutationFn: () => {
       const valores = {
-        dolar: aNumero(dolar),
         descuento_cash_pct: aNumero(descuento),
         redondeo_lista_ars: aNumero(redLista),
         redondeo_cash_ars: aNumero(redCash),
       }
-      if (valores.dolar === null || valores.dolar <= 0) throw new ApiError(0, 'Poné un dólar válido.', null)
       if (
         valores.descuento_cash_pct === null ||
         valores.descuento_cash_pct < 0 ||
@@ -358,14 +355,13 @@ function ConfigEditor({
         throw new ApiError(0, 'Poné redondeos válidos (ej: 100 y 1000).', null)
       }
       return actualizarConfiguracionCatalogo({
-        dolar: valores.dolar,
         descuento_cash_pct: valores.descuento_cash_pct,
         redondeo_lista_ars: Math.trunc(valores.redondeo_lista_ars),
         redondeo_cash_ars: Math.trunc(valores.redondeo_cash_ars),
       })
     },
     onSuccess: () => {
-      toast.success('Parámetros guardados', 'Productos y Service quedaron recalculados.')
+      toast.success('Parámetros guardados', 'El catálogo quedó recalculado.')
       onListo()
     },
     onError: (e) => toast.error('No se pudo guardar', e instanceof ApiError ? e.message : undefined),
@@ -376,15 +372,14 @@ function ConfigEditor({
       <p className="mb-2.5 flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-ink-400">
         <Settings2 className="h-3.5 w-3.5" /> Parámetros del catálogo
       </p>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <CampoNumero etiqueta="Dólar del negocio" valor={dolar} onChange={setDolar} prefijo="$" />
+      <div className="grid grid-cols-3 gap-2">
         <CampoNumero etiqueta="Desc. cash" valor={descuento} onChange={setDescuento} sufijo="%" />
         <CampoNumero etiqueta="Redondeo lista $" valor={redLista} onChange={setRedLista} />
         <CampoNumero etiqueta="Redondeo cash $" valor={redCash} onChange={setRedCash} />
       </div>
       <div className="mt-2.5 flex items-center justify-between gap-3">
         <p className="text-xs leading-relaxed text-ink-400">
-          El dólar es compartido con Service: cambiarlo recalcula las dos listas.
+          El dólar se cambia arriba, en el Gestor de dólar (compartido con Service).
         </p>
         <Button size="sm" onClick={() => guardar.mutate()} disabled={!sucio || guardar.isPending}>
           {guardar.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Guardar'}

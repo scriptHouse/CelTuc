@@ -4,6 +4,7 @@ from .views import (
     ConfiguracionServiceView,
     DispositivoDetailView,
     DispositivoListCreateView,
+    DolarBlueView,
     ItemDetailView,
     ItemListCreateView,
     SeccionDetailView,
@@ -14,6 +15,7 @@ app_name = 'precios_service'
 
 urlpatterns = [
     path('configuracion/', ConfiguracionServiceView.as_view(), name='configuracion'),
+    path('dolar-blue/', DolarBlueView.as_view(), name='dolar_blue'),
     path('secciones/', SeccionListCreateView.as_view(), name='secciones'),
     path('secciones/<int:pk>/', SeccionDetailView.as_view(), name='seccion'),
     path('items/', ItemListCreateView.as_view(), name='items'),
