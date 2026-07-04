@@ -39,6 +39,8 @@ import { Badge } from '@/components/ui/Badge'
 import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { AyudaInfo } from '@/components/ui/AyudaInfo'
+import { AyudaServicePagina } from '@/components/AyudaContenidos'
 import { PreciosServiceManager } from '@/components/PreciosServiceManager'
 
 /** Ícono para el chip de cada sección, por palabra clave del nombre.
@@ -179,12 +181,17 @@ export function PreciosServicePage() {
         subtitle="Lista de precios del service técnico: lista y cash, en dólares y pesos."
         className="ct-rise"
         actions={
-          admin ? (
-            <Button variant="outline" onClick={() => setConfigOpen(true)}>
-              <SlidersHorizontal className="h-4 w-4" />
-              Configurar
-            </Button>
-          ) : undefined
+          <div className="flex items-center gap-2">
+            <AyudaInfo titulo="Cómo usar Service">
+              <AyudaServicePagina />
+            </AyudaInfo>
+            {admin && (
+              <Button variant="outline" onClick={() => setConfigOpen(true)}>
+                <SlidersHorizontal className="h-4 w-4" />
+                Configurar
+              </Button>
+            )}
+          </div>
         }
       />
 

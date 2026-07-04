@@ -23,6 +23,8 @@ import { Badge } from '@/components/ui/Badge'
 import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { AyudaInfo } from '@/components/ui/AyudaInfo'
+import { AyudaFichaEquipo } from '@/components/AyudaContenidos'
 import { useToast } from '@/components/ToastProvider'
 import { opcionesDeEquipo } from '@/pages/PreciosServicePage'
 import { PrecioLineasCatalogo } from '@/pages/ProductosPage'
@@ -183,6 +185,11 @@ export function FichaEquipoPage() {
         title="Ficha de equipo"
         subtitle="Elegí un equipo y mirá todo junto: venta, toma de usado, service y accesorios."
         className="ct-rise"
+        actions={
+          <AyudaInfo titulo="Cómo usar la Ficha de equipo">
+            <AyudaFichaEquipo />
+          </AyudaInfo>
+        }
       />
 
       {/* Selector (sin overflow-hidden: el desplegable es absolute) */}

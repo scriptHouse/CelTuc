@@ -21,6 +21,11 @@ const sizes = {
   xl: 'sm:max-w-2xl',
 } as const
 
+// Pila de modales abiertos (soporta modales anidados, ej: la ayuda ⓘ dentro
+// de un editor). Escape cierra SOLO el de más arriba, sin importar dónde esté
+// el foco: cada instancia consulta si es el tope antes de cerrarse.
+const pilaModales: symbol[] = []
+
 interface ModalProps {
   open: boolean
   onClose: () => void
@@ -46,6 +51,9 @@ export function Modal({
   const [entered, setEntered] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
   const lastFocused = useRef<HTMLElement | null>(null)
+  const idModal = useRef(Symbol('modal'))
+
+  const esTope = () => pilaModales[pilaModales.length - 1] === idModal.current
 
   useEffect(() => {
     if (open) {
@@ -73,6 +81,24 @@ export function Modal({
     }
   }, [mounted])
 
+  // Registro en la pila de modales + Escape a nivel documento (cubre el caso
+  // en que el foco quedó fuera del panel de este modal, ej: modales anidados).
+  useEffect(() => {
+    if (!mounted) return
+    const id = idModal.current
+    pilaModales.push(id)
+    const onDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && dismissable && esTope()) onClose()
+    }
+    document.addEventListener('keydown', onDocumentKeyDown)
+    return () => {
+      const indice = pilaModales.indexOf(id)
+      if (indice >= 0) pilaModales.splice(indice, 1)
+      document.removeEventListener('keydown', onDocumentKeyDown)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted, dismissable, onClose])
+
   useEffect(() => {
     if (open) {
       lastFocused.current = (document.activeElement as HTMLElement | null) ?? null
@@ -96,8 +122,12 @@ export function Modal({
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.key === 'Escape') {
-      event.stopPropagation()
-      onClose()
+      // Solo cierra si este modal es el de más arriba; si no, deja que el
+      // evento llegue al listener de documento del modal superior.
+      if (dismissable && esTope()) {
+        event.stopPropagation()
+        onClose()
+      }
       return
     }
     if (event.key !== 'Tab') return

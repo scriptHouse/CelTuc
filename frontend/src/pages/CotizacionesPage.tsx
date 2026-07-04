@@ -12,6 +12,8 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { AyudaInfo } from '@/components/ui/AyudaInfo'
+import { AyudaCotizacionesPagina } from '@/components/AyudaContenidos'
 import { useToast } from '@/components/ToastProvider'
 import { CotizacionesManager } from '@/components/CotizacionesManager'
 
@@ -102,12 +104,17 @@ export function CotizacionesPage() {
         subtitle="Cuánto tomamos cada equipo usado y cuánto cuesta cada service. Valores en dólares."
         className="ct-rise"
         actions={
-          admin ? (
-            <Button variant="outline" onClick={() => setConfigOpen(true)}>
-              <SlidersHorizontal className="h-4 w-4" />
-              Configurar
-            </Button>
-          ) : undefined
+          <div className="flex items-center gap-2">
+            <AyudaInfo titulo="Cómo cotizar usados">
+              <AyudaCotizacionesPagina />
+            </AyudaInfo>
+            {admin && (
+              <Button variant="outline" onClick={() => setConfigOpen(true)}>
+                <SlidersHorizontal className="h-4 w-4" />
+                Configurar
+              </Button>
+            )}
+          </div>
         }
       />
 

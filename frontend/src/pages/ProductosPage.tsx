@@ -38,6 +38,8 @@ import { Badge } from '@/components/ui/Badge'
 import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { AyudaInfo } from '@/components/ui/AyudaInfo'
+import { AyudaProductosPagina } from '@/components/AyudaContenidos'
 import { ProductosManager } from '@/components/ProductosManager'
 
 /**
@@ -171,12 +173,17 @@ export function ProductosPage() {
         subtitle="El catálogo central: accesorios, audio, consolas y equipos, con lista y cash."
         className="ct-rise"
         actions={
-          admin ? (
-            <Button variant="outline" onClick={() => setConfigOpen(true)}>
-              <SlidersHorizontal className="h-4 w-4" />
-              Configurar
-            </Button>
-          ) : undefined
+          <div className="flex items-center gap-2">
+            <AyudaInfo titulo="Cómo usar Productos">
+              <AyudaProductosPagina />
+            </AyudaInfo>
+            {admin && (
+              <Button variant="outline" onClick={() => setConfigOpen(true)}>
+                <SlidersHorizontal className="h-4 w-4" />
+                Configurar
+              </Button>
+            )}
+          </div>
         }
       />
 

@@ -32,6 +32,8 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { AyudaInfo } from '@/components/ui/AyudaInfo'
+import { AyudaServiceManager } from '@/components/AyudaContenidos'
 import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
 
@@ -130,14 +132,19 @@ export function PreciosServiceManager({ open, onClose }: { open: boolean; onClos
             <p className="text-xs text-ink-400">Dólar, secciones, ítems y overrides.</p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Cerrar"
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-ink-400 transition-colors hover:bg-ink-100 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
-        >
-          <X className="h-5 w-5" />
-        </button>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <AyudaInfo titulo="Cómo cargar precios de service">
+            <AyudaServiceManager />
+          </AyudaInfo>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Cerrar"
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-ink-400 transition-colors hover:bg-ink-100 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
       </div>
 
       {/* Pestañas */}
