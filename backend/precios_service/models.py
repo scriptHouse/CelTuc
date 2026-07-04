@@ -24,11 +24,12 @@ Estructura (todo dato, nada hardcodeado):
   texto libre porque la hoja mezcla iPhone, iPad, Mac y Apple Watch).
 - `PrecioItemService`: los precios de una fila x variante.
 """
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 import math
 
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.utils.dateparse import parse_datetime
 
 from comun.models import ModeloBase
 
@@ -72,6 +73,62 @@ class ConfiguracionService(ModeloBase):
 
     def __str__(self):
         return f'dolar {self.dolar} · cash -{self.descuento_cash_pct} % · redondeo {self.redondeo_ars}'
+
+
+class CotizacionDolarBlue(ModeloBase):
+    """Ultima cotizacion del blue traida de DolarAPI (fila unica, pk=1).
+
+    Cada consulta exitosa del proxy la pisa. Es el RESPALDO del gestor de
+    dolar: si DolarAPI no responde, se muestra esta (marcada como
+    desactualizada) en vez de "no disponible". NUNCA alimenta los precios:
+    esos se calculan siempre con `ConfiguracionService.dolar`.
+    """
+
+    compra = models.DecimalField('compra', max_digits=10, decimal_places=2, null=True, blank=True)
+    venta = models.DecimalField('venta', max_digits=10, decimal_places=2, null=True, blank=True)
+    fecha = models.DateTimeField(
+        'fecha de la cotizacion',
+        null=True,
+        blank=True,
+        help_text='La fecha que informa DolarAPI para esta cotizacion.',
+    )
+
+    class Meta:
+        db_table = 'precios_service_dolar_blue'
+        verbose_name = 'cotizacion dolar blue'
+        verbose_name_plural = 'cotizacion dolar blue'
+
+    @classmethod
+    def guardar(cls, compra, venta, fecha_iso):
+        """Pisa la fila unica con la cotizacion recien obtenida."""
+
+        def _decimal(valor):
+            try:
+                return None if valor is None else Decimal(str(valor))
+            except (InvalidOperation, ValueError):
+                return None
+
+        try:
+            fecha = parse_datetime(fecha_iso) if fecha_iso else None
+        except ValueError:
+            fecha = None
+        fila, _ = cls.todos.update_or_create(pk=1, defaults={
+            'compra': _decimal(compra),
+            'venta': _decimal(venta),
+            'fecha': fecha,
+            'borrado': False,
+            'fecha_borrado': None,
+        })
+        return fila
+
+    @classmethod
+    def ultima(cls):
+        """La ultima cotizacion guardada, o None si nunca se obtuvo una."""
+        fila = cls.todos.filter(pk=1).first()
+        return fila if fila is not None and fila.venta is not None else None
+
+    def __str__(self):
+        return f'blue compra {self.compra} · venta {self.venta}'
 
 
 class Dispositivo(ModeloBase):

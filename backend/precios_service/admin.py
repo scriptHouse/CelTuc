@@ -5,6 +5,7 @@ from comun.admin import ModeloBaseAdminMixin
 
 from .models import (
     ConfiguracionService,
+    CotizacionDolarBlue,
     Dispositivo,
     ItemService,
     PrecioItemService,
@@ -26,6 +27,16 @@ class ConfiguracionServiceAdmin(ModeloBaseAdminMixin, ModelAdmin):
     def has_add_permission(self, request):
         # Fila unica: se crea sola via obtener(); no tiene sentido agregar mas.
         return not ConfiguracionService.todos.exists()
+
+
+@admin.register(CotizacionDolarBlue)
+class CotizacionDolarBlueAdmin(ModeloBaseAdminMixin, ModelAdmin):
+    list_display = ('compra', 'venta', 'fecha', 'actualizado')
+    readonly_fields = _AUDITORIA
+
+    def has_add_permission(self, request):
+        # Fila unica: la escribe el proxy de DolarAPI en cada consulta exitosa.
+        return not CotizacionDolarBlue.todos.exists()
 
 
 @admin.register(Dispositivo)

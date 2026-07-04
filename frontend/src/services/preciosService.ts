@@ -71,6 +71,11 @@ export interface DolarBlue {
   compra: number | null
   venta: number | null
   fecha: string | null
+  /** true = DolarAPI no respondió y estos valores son la última cotización
+   * que quedó guardada en la base (respaldo). */
+  desactualizado?: boolean
+  /** Cuándo se guardó ese respaldo (ISO). Solo viene con `desactualizado`. */
+  guardado?: string | null
 }
 
 export function obtenerDolarBlue(): Promise<DolarBlue> {

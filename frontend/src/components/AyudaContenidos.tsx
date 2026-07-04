@@ -363,7 +363,9 @@ export function AyudaDolar() {
       <AyudaTip>
         Este mismo gestor está en el <b>Panel</b> (inicio) y dentro de Configurar en Service y
         Productos: es uno solo, mires donde lo mires. El botón ↻ refresca la cotización del blue
-        (se actualiza sola cada 2 minutos).
+        (se actualiza sola cada 2 minutos). Cada cotización queda <b>guardada</b>: si DolarAPI
+        alguna vez no responde, vas a ver la última guardada con un aviso ⚠ de cuándo se obtuvo
+        — nunca te quedás sin referencia.
       </AyudaTip>
     </>
   )

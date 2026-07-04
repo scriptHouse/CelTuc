@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { DollarSign, Loader2, RefreshCw, TrendingUp } from 'lucide-react'
+import { AlertTriangle, DollarSign, Loader2, RefreshCw, TrendingUp } from 'lucide-react'
 import {
   actualizarConfiguracion,
   obtenerConfiguracion,
@@ -148,7 +148,8 @@ export function GestorDolar({ soloLectura = false }: { soloLectura?: boolean }) 
             <Skeleton className="h-20 w-full" />
           ) : errorBlue || venta === null ? (
             <p className="py-4 text-sm text-ink-400">
-              No disponible ahora — DolarAPI no respondió. Probá refrescar en un rato.
+              No disponible — DolarAPI no respondió y todavía no hay una cotización guardada.
+              Probá refrescar en un rato.
             </p>
           ) : (
             <>
@@ -158,9 +159,19 @@ export function GestorDolar({ soloLectura = false }: { soloLectura?: boolean }) 
               <p className="tnum mt-0.5 text-xs text-ink-500">
                 compra {money0(Number(blue!.compra))} · actualizado {tiempoRelativo(blue!.fecha)}
               </p>
-              <p className="mt-2 text-[0.7rem] leading-snug text-ink-400">
-                Solo referencia de mercado — no modifica el dólar del negocio.
-              </p>
+              {blue!.desactualizado ? (
+                <p className="mt-2 flex items-start gap-1.5 text-[0.7rem] font-medium leading-snug text-ink-600">
+                  <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />
+                  <span>
+                    DolarAPI no responde ahora: esta es la última cotización que quedó guardada
+                    ({tiempoRelativo(blue!.guardado ?? blue!.fecha)}).
+                  </span>
+                </p>
+              ) : (
+                <p className="mt-2 text-[0.7rem] leading-snug text-ink-400">
+                  Solo referencia de mercado — no modifica el dólar del negocio.
+                </p>
+              )}
             </>
           )}
         </div>

@@ -8,7 +8,13 @@ from rest_framework.views import APIView
 from comun.mixins import AuditoriaMixin
 from usuarios.permissions import LecturaConPermisoEscrituraAdmin
 
-from .models import ConfiguracionService, Dispositivo, ItemService, SeccionService
+from .models import (
+    ConfiguracionService,
+    CotizacionDolarBlue,
+    Dispositivo,
+    ItemService,
+    SeccionService,
+)
 from .serializers import (
     ConfiguracionServiceSerializer,
     DispositivoSerializer,
@@ -78,8 +84,11 @@ class DolarBlueView(_BaseService, APIView):
 
     El backend hace de proxy (evita CORS y centraliza el manejo de errores) y
     cachea la respuesta 2 minutos para no golpear la API en cada apertura del
-    gestor. Es SOLO una referencia: el dolar del negocio sigue siendo manual y
-    se actualiza desde Configurar (con el boton "Usar venta" del gestor).
+    gestor. Cada cotizacion exitosa se GUARDA en `CotizacionDolarBlue`: si
+    DolarAPI no responde se devuelve esa ultima guardada (con
+    `desactualizado=True` para que la UI lo avise); el 503 queda solo para el
+    caso de que nunca se haya podido obtener ninguna. Es SOLO una referencia:
+    el dolar del negocio sigue siendo manual y se edita en el gestor.
     """
 
     URL = 'https://dolarapi.com/v1/dolares/blue'
@@ -91,23 +100,44 @@ class DolarBlueView(_BaseService, APIView):
 
     def get(self, request):
         datos = cache.get(self.CACHE_KEY)
-        if datos is None:
-            try:
-                respuesta = requests.get(self.URL, timeout=6)
-                respuesta.raise_for_status()
-                cuerpo = respuesta.json()
-                datos = {
-                    'compra': cuerpo.get('compra'),
-                    'venta': cuerpo.get('venta'),
-                    'fecha': cuerpo.get('fechaActualizacion'),
-                }
-            except (requests.RequestException, ValueError):
-                return Response(
-                    {'detail': 'No se pudo consultar DolarAPI. Probá de nuevo en un rato.'},
-                    status=503,
-                )
-            cache.set(self.CACHE_KEY, datos, self.CACHE_SEGUNDOS)
+        if datos is not None:
+            return Response(datos)
+        try:
+            respuesta = requests.get(self.URL, timeout=6)
+            respuesta.raise_for_status()
+            cuerpo = respuesta.json()
+            datos = {
+                'compra': cuerpo.get('compra'),
+                'venta': cuerpo.get('venta'),
+                'fecha': cuerpo.get('fechaActualizacion'),
+                'desactualizado': False,
+                'guardado': None,
+            }
+        except (requests.RequestException, ValueError):
+            return self._ultima_guardada()
+        CotizacionDolarBlue.guardar(datos['compra'], datos['venta'], datos['fecha'])
+        cache.set(self.CACHE_KEY, datos, self.CACHE_SEGUNDOS)
         return Response(datos)
+
+    def _ultima_guardada(self):
+        """Respaldo cuando DolarAPI no responde: la ultima cotizacion guardada.
+
+        No se cachea, asi la proxima consulta vuelve a intentar contra la API.
+        """
+        fila = CotizacionDolarBlue.ultima()
+        if fila is None:
+            return Response(
+                {'detail': 'No se pudo consultar DolarAPI y todavía no hay ninguna '
+                           'cotización guardada. Probá de nuevo en un rato.'},
+                status=503,
+            )
+        return Response({
+            'compra': fila.compra,
+            'venta': fila.venta,
+            'fecha': fila.fecha.isoformat() if fila.fecha else None,
+            'desactualizado': True,
+            'guardado': fila.actualizado.isoformat() if fila.actualizado else None,
+        })
 
 
 class DispositivoListCreateView(_BaseService, AuditoriaMixin, generics.ListCreateAPIView):

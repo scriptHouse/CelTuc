@@ -8,6 +8,7 @@ from rest_framework.test import APIClient
 
 from .models import (
     ConfiguracionService,
+    CotizacionDolarBlue,
     Dispositivo,
     ItemService,
     PrecioItemService,
@@ -107,12 +108,40 @@ class DolarBlueTests(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.data['venta'], 1540)
         self.assertEqual(r.data['compra'], 1500)
+        self.assertFalse(r.data['desactualizado'])
         # Segunda consulta: sale de la cache, sin pegarle de nuevo a DolarAPI.
         self.cliente.get(self.URL)
         self.assertEqual(mock_get.call_count, 1)
 
+    @patch('precios_service.views.requests.get')
+    def test_guarda_la_cotizacion_en_base_de_datos(self, mock_get):
+        mock_get.return_value = self._respuesta_ok()
+        self.cliente.get(self.URL)
+        fila = CotizacionDolarBlue.ultima()
+        self.assertIsNotNone(fila)
+        self.assertEqual(fila.venta, Decimal('1540'))
+        self.assertEqual(fila.compra, Decimal('1500'))
+        self.assertEqual(fila.fecha.isoformat(), '2026-07-04T12:00:00+00:00')
+
+    @patch('precios_service.views.requests.get')
+    def test_si_dolarapi_cae_devuelve_la_ultima_guardada(self, mock_get):
+        # Primera consulta OK: queda guardada en la base.
+        mock_get.return_value = self._respuesta_ok()
+        self.cliente.get(self.URL)
+        cache.delete('dolar_blue')
+        # DolarAPI se cae: se responde la guardada, marcada como desactualizada.
+        mock_get.side_effect = requests.ConnectionError
+        r = self.cliente.get(self.URL)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(float(r.data['venta']), 1540)
+        self.assertEqual(float(r.data['compra']), 1500)
+        self.assertTrue(r.data['desactualizado'])
+        self.assertIsNotNone(r.data['guardado'])
+        # El respaldo NO se cachea: la proxima consulta reintenta contra la API.
+        self.assertIsNone(cache.get('dolar_blue'))
+
     @patch('precios_service.views.requests.get', side_effect=requests.ConnectionError)
-    def test_si_dolarapi_no_responde_503_legible(self, _mock):
+    def test_si_no_responde_y_no_hay_guardada_503_legible(self, _mock):
         r = self.cliente.get(self.URL)
         self.assertEqual(r.status_code, 503)
         self.assertIn('DolarAPI', r.data['detail'])
