@@ -91,6 +91,9 @@ export function PreciosServiceManager({ open, onClose }: { open: boolean; onClos
     queryClient.invalidateQueries({ queryKey: ['service-secciones'] })
     queryClient.invalidateQueries({ queryKey: ['service-config'] })
     queryClient.invalidateQueries({ queryKey: ['service-dispositivos'] })
+    // El dólar es compartido: el catálogo de Productos también queda viejo.
+    queryClient.invalidateQueries({ queryKey: ['productos-items'] })
+    queryClient.invalidateQueries({ queryKey: ['productos-config'] })
   }
 
   const dispositivosActivos = useMemo(
@@ -305,13 +308,13 @@ function ConfigEditor({
         <Settings2 className="h-3.5 w-3.5" /> Parámetros de la lista
       </p>
       <div className="grid grid-cols-3 gap-2">
-        <CampoNumero etiqueta="Dólar service" valor={dolar} onChange={setDolar} prefijo="$" />
+        <CampoNumero etiqueta="Dólar del negocio" valor={dolar} onChange={setDolar} prefijo="$" />
         <CampoNumero etiqueta="Desc. cash" valor={descuento} onChange={setDescuento} sufijo="%" />
         <CampoNumero etiqueta="Redondeo $" valor={redondeo} onChange={setRedondeo} />
       </div>
       <div className="mt-2.5 flex items-center justify-between gap-3">
         <p className="text-xs leading-relaxed text-ink-400">
-          Los precios sin override se recalculan solos al guardar.
+          El dólar es compartido con Productos: cambiarlo recalcula las dos listas.
         </p>
         <Button size="sm" onClick={() => guardar.mutate()} disabled={!sucio || guardar.isPending}>
           {guardar.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Guardar'}

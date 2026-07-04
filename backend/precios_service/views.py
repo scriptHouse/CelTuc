@@ -70,8 +70,11 @@ class ItemDetailView(_BaseService, AuditoriaMixin, generics.RetrieveUpdateDestro
 class DispositivoListCreateView(_BaseService, AuditoriaMixin, generics.ListCreateAPIView):
     queryset = Dispositivo.objects.all()
     serializer_class = DispositivoSerializer
+    # El catalogo de equipos tambien alimenta la Ficha de equipo.
+    permiso_requerido = ('ver_precios_service', 'ver_equipos')
 
 
 class DispositivoDetailView(_BaseService, AuditoriaMixin, generics.RetrieveUpdateDestroyAPIView):
     queryset = Dispositivo.objects.all()
     serializer_class = DispositivoSerializer
+    permiso_requerido = ('ver_precios_service', 'ver_equipos')

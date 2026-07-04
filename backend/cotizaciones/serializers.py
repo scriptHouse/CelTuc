@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from precios_service.models import Dispositivo
+
 from .models import CotizacionEquipo, ModeloEquipo, PrecioServicio, TipoServicio
 
 
@@ -54,11 +56,14 @@ class ModeloEquipoSerializer(serializers.ModelSerializer):
     cotizaciones = CotizacionEquipoSerializer(many=True, required=False)
     servicios = PrecioServicioSerializer(many=True, required=False)
     nombre_completo = serializers.ReadOnlyField()
+    dispositivo = serializers.PrimaryKeyRelatedField(
+        queryset=Dispositivo.objects.all(), required=False, allow_null=True,
+    )
 
     class Meta:
         model = ModeloEquipo
         fields = (
-            'id', 'marca', 'nombre', 'nombre_completo', 'orden', 'activo',
+            'id', 'marca', 'nombre', 'nombre_completo', 'dispositivo', 'orden', 'activo',
             'cotizaciones', 'servicios', 'creado', 'actualizado',
         )
         read_only_fields = ('creado', 'actualizado')
@@ -124,6 +129,14 @@ class ModeloEquipoSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         cotizaciones = validated_data.pop('cotizaciones', [])
         servicios = validated_data.pop('servicios', [])
+        # Puente automatico al catalogo de equipos: si no vino explicito y hay
+        # un Dispositivo con el mismo nombre, se vincula solo (asi el modelo
+        # nuevo aparece en la Ficha de equipo sin tocar el editor).
+        if 'dispositivo' not in validated_data:
+            nombre_completo = f"{validated_data.get('marca', 'iPhone')} {validated_data['nombre']}".strip()
+            validated_data['dispositivo'] = Dispositivo.objects.filter(
+                nombre__iexact=nombre_completo,
+            ).first()
         modelo = ModeloEquipo.objects.create(**validated_data)
         self._reemplazar_cotizaciones(modelo, cotizaciones)
         self._reemplazar_servicios(modelo, servicios)

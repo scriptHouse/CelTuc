@@ -24,6 +24,16 @@ class ModeloEquipo(ModeloBase):
 
     marca = models.CharField('marca', max_length=60, default='iPhone', blank=True)
     nombre = models.CharField('nombre', max_length=120)
+    dispositivo = models.ForeignKey(
+        'precios_service.Dispositivo',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='modelos_cotizacion',
+        verbose_name='equipo del catalogo',
+        help_text='Puente al catalogo unico de equipos (alimenta la Ficha de equipo). '
+                  'Se completa solo si el nombre coincide.',
+    )
     orden = models.PositiveSmallIntegerField('orden', default=0)
     activo = models.BooleanField('activo', default=True)
 

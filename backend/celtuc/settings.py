@@ -118,6 +118,7 @@ INSTALLED_APPS = [
     'simulador',
     'cotizaciones',
     'precios_service',
+    'productos',
     'facturacion',
 ]
 

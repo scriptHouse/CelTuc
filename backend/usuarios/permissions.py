@@ -52,9 +52,11 @@ class LecturaConPermisoEscrituraSuperadmin(permissions.BasePermission):
 class LecturaConPermisoEscrituraAdmin(permissions.BasePermission):
     """Lectura: requiere el permiso de modulo declarado por la vista.
 
-    La vista declara `permiso_requerido = '<codigo>'`. Para metodos seguros
-    (GET/HEAD/OPTIONS) la cuenta necesita ese permiso (o ser admin). Para
-    escribir (POST/PUT/PATCH/DELETE) hace falta ser administrador.
+    La vista declara `permiso_requerido = '<codigo>'` (o una tupla de codigos:
+    alcanza con tener CUALQUIERA, para recursos compartidos entre modulos, como
+    el catalogo de equipos que usan Service y la Ficha de equipo). Para metodos
+    seguros (GET/HEAD/OPTIONS) la cuenta necesita ese permiso (o ser admin).
+    Para escribir (POST/PUT/PATCH/DELETE) hace falta ser administrador.
     """
 
     message = 'No tenes permiso para acceder a este modulo.'
@@ -67,5 +69,9 @@ class LecturaConPermisoEscrituraAdmin(permissions.BasePermission):
             return True
         if request.method in permissions.SAFE_METHODS:
             codigo = getattr(view, 'permiso_requerido', None)
-            return codigo is None or codigo in user.codigos_permisos()
+            if codigo is None:
+                return True
+            codigos = (codigo,) if isinstance(codigo, str) else tuple(codigo)
+            del_usuario = user.codigos_permisos()
+            return any(c in del_usuario for c in codigos)
         return False

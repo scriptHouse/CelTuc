@@ -322,6 +322,8 @@ export interface ModeloEquipo {
   nombre: string
   /** "iPhone 13 Pro" (marca + nombre); lo arma el backend. */
   nombre_completo: string
+  /** Puente al catálogo único de equipos (DispositivoService), o null. */
+  dispositivo: number | null
   orden: number
   activo: boolean
   cotizaciones: CotizacionCapacidad[]
@@ -399,6 +401,60 @@ export interface ItemPrecioService {
   orden: number
   activo: boolean
   precios: PrecioItemService[]
+}
+
+// ===== Productos (catálogo central de venta) =====
+/** Parámetros del catálogo. El dólar es el MISMO del negocio que usa Service. */
+export interface ConfiguracionCatalogo {
+  dolar: number
+  descuento_cash_pct: number
+  redondeo_lista_ars: number
+  redondeo_cash_ars: number
+  actualizado: string // ISO
+}
+
+/** Una categoría del catálogo; con `padre` es un subgrupo (máx. 2 niveles). */
+export interface CategoriaCatalogo {
+  id: number
+  padre: number | null
+  nombre: string
+  nota: string
+  /** Descuento cash propio (auriculares/smartwatch 30); null = global. */
+  descuento_cash_pct: number | null
+  /** Redondeo propio de la lista $ (Samsung/Apple $1.000); null = global. */
+  redondeo_ars: number | null
+  /** Samsung/Apple no tienen precio cash. */
+  muestra_cash: boolean
+  /** Qué tabla del simulador de cuotas aplica. */
+  tarifa_cuotas: 'accesorios' | 'equipos'
+  /** En la Ficha de equipo sus productos salen como VENTA, no como accesorio. */
+  es_equipo: boolean
+  orden: number
+  activo: boolean
+  creado: string // ISO
+  actualizado: string // ISO
+}
+
+/** Un producto vendible del catálogo central. */
+export interface ProductoCatalogo {
+  id: number
+  categoria: number
+  nombre: string
+  marca: string
+  calidad: string
+  nota: string
+  a_pedido: boolean
+  nuevo: boolean
+  /** Equipos vinculados (para la Ficha): el que ES o con los que es compatible. */
+  dispositivos: number[]
+  precio_lista_usd: number | null
+  precio_cash_usd: number | null
+  precio_lista_ars: number | null
+  precio_cash_ars: number | null
+  /** Los 4 precios resueltos (override si hay, fórmula si no). */
+  efectivo: PrecioEfectivoService
+  orden: number
+  activo: boolean
 }
 
 /** Un bloque de la lista de precios (Baterías, Módulos, ...). */

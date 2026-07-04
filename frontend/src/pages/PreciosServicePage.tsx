@@ -245,7 +245,7 @@ export function PreciosServicePage() {
             {config ? (
               <div className="space-y-1.5 text-sm text-ink-700">
                 <p className="tnum">
-                  Dólar service <b className="text-ink-950">$ {num(Number(config.dolar))}</b>
+                  Dólar del negocio <b className="text-ink-950">$ {num(Number(config.dolar))}</b>
                 </p>
                 <p className="tnum">
                   Cash <b className="text-ink-950">−{num(Number(config.descuento_cash_pct))} %</b>
