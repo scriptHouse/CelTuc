@@ -179,3 +179,12 @@ class ActualizarComprobanteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Comprobante
         fields = ('estado_cobro', 'observaciones')
+
+
+class EnviarEmailSerializer(serializers.Serializer):
+    """Entrada para enviar un comprobante por email. El PDF lo genera el front y
+    lo manda en base64 (asi el email adjunta el mismo PDF que se descarga)."""
+
+    email = serializers.EmailField()
+    pdf_base64 = serializers.CharField()
+    mensaje = serializers.CharField(required=False, allow_blank=True)

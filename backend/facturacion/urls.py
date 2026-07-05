@@ -6,6 +6,7 @@ from .views import (
     EmisorDetailView,
     EmisorListCreateView,
     EmisorProbarConexionView,
+    EnviarComprobanteEmailView,
 )
 
 app_name = 'facturacion'
@@ -16,4 +17,5 @@ urlpatterns = [
     path('emisores/<int:pk>/probar/', EmisorProbarConexionView.as_view(), name='emisor-probar'),
     path('comprobantes/', ComprobanteListCreateView.as_view(), name='comprobante-list'),
     path('comprobantes/<int:pk>/', ComprobanteDetailView.as_view(), name='comprobante-detail'),
+    path('comprobantes/<int:pk>/enviar-email/', EnviarComprobanteEmailView.as_view(), name='comprobante-email'),
 ]

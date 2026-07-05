@@ -6,6 +6,7 @@
 - La emision real la hace `arca.servicio.emitir`; si ARCA falla, devolvemos 502
   con un mensaje claro en `detail`.
 """
+import base64
 import logging
 
 from django.shortcuts import get_object_or_404
@@ -18,6 +19,7 @@ from usuarios.permissions import LecturaConPermisoEscrituraSuperadmin
 
 from .arca import servicio
 from .arca.errores import ErrorARCA
+from .email import EmailNoConfigurado, enviar_comprobante
 from .models import Comprobante, Emisor
 from .permissions import PuedeFacturar
 from .serializers import (
@@ -26,6 +28,7 @@ from .serializers import (
     ComprobanteListSerializer,
     CrearComprobanteSerializer,
     EmisorSerializer,
+    EnviarEmailSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,15 +36,24 @@ logger = logging.getLogger(__name__)
 
 # ===== Emisores =====
 
-class EmisorListCreateView(AuditoriaMixin, generics.ListCreateAPIView):
-    queryset = Emisor.objects.all()
+class _EmisoresVisiblesMixin:
+    """Los facturadores ven SOLO emisores activos; el superadmin ve todos
+    (incluidos los inactivos, para poder reactivarlos)."""
+
+    def get_queryset(self):
+        qs = Emisor.objects.all()
+        if not self.request.user.is_superuser:
+            qs = qs.filter(activo=True)
+        return qs
+
+
+class EmisorListCreateView(_EmisoresVisiblesMixin, AuditoriaMixin, generics.ListCreateAPIView):
     serializer_class = EmisorSerializer
     permission_classes = [LecturaConPermisoEscrituraSuperadmin]
     permiso_requerido = 'ver_facturacion'
 
 
-class EmisorDetailView(AuditoriaMixin, generics.RetrieveUpdateDestroyAPIView):
-    queryset = Emisor.objects.all()
+class EmisorDetailView(_EmisoresVisiblesMixin, AuditoriaMixin, generics.RetrieveUpdateDestroyAPIView):
     serializer_class = EmisorSerializer
     permission_classes = [LecturaConPermisoEscrituraSuperadmin]
     permiso_requerido = 'ver_facturacion'
@@ -117,3 +129,37 @@ class ComprobanteDetailView(AuditoriaMixin, generics.RetrieveUpdateDestroyAPIVie
         instance.refresh_from_db()
         detalle = ComprobanteDetailSerializer(instance, context=self.get_serializer_context())
         return Response(detalle.data)
+
+
+class EnviarComprobanteEmailView(APIView):
+    """Envia por email el PDF de un comprobante. El PDF lo genera el front (mismo
+    que se descarga) y lo manda en base64; aca solo se adjunta y se envia por SMTP.
+    Es una funcionalidad aparte: no afecta la emision ni el resto del modulo."""
+
+    permission_classes = [PuedeFacturar]
+
+    def post(self, request, pk):
+        comprobante = get_object_or_404(Comprobante, pk=pk)
+        entrada = EnviarEmailSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        datos = entrada.validated_data
+
+        crudo = datos['pdf_base64']
+        if ',' in crudo:  # tolera un data URL "data:application/pdf;base64,XXXX"
+            crudo = crudo.split(',', 1)[1]
+        try:
+            pdf_bytes = base64.b64decode(crudo, validate=True)
+        except Exception:
+            return Response({'detail': 'El PDF adjunto no es válido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            enviar_comprobante(comprobante, datos['email'], pdf_bytes, datos.get('mensaje'))
+        except EmailNoConfigurado as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        except Exception as exc:  # SMTP caido, credenciales mal, etc.
+            logger.exception('Error enviando comprobante por email')
+            return Response(
+                {'detail': f'No se pudo enviar el email: {exc}'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        return Response({'detail': f'Factura enviada a {datos["email"]}.'})

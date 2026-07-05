@@ -7,6 +7,7 @@ import {
   Download,
   Eye,
   FileText,
+  Mail,
   Pencil,
   Plus,
   PlugZap,
@@ -33,6 +34,7 @@ import {
   crearEmisor,
   eliminarComprobante,
   emitirComprobante,
+  enviarComprobanteEmail,
   listarComprobantes,
   listarEmisores,
   obtenerComprobante,
@@ -100,13 +102,18 @@ function estadoComprobante(c: Comprobante): EstadoEfectivo {
   return 'pendiente'
 }
 
-/** Genera el PDF de la factura (carga react-pdf en diferido) y lo descarga. */
-async function descargarFacturaPdf(c: Comprobante) {
+/** Genera el PDF de la factura (carga react-pdf en diferido) y devuelve el Blob. */
+async function generarFacturaPdfBlob(c: Comprobante): Promise<Blob> {
   const [{ pdf }, { FacturaPdf }] = await Promise.all([
     import('@react-pdf/renderer'),
     import('@/documentos/FacturaPdf'),
   ])
-  const blob = await pdf(<FacturaPdf c={c} />).toBlob()
+  return pdf(<FacturaPdf c={c} />).toBlob()
+}
+
+/** Genera el PDF y lo descarga. */
+async function descargarFacturaPdf(c: Comprobante) {
+  const blob = await generarFacturaPdfBlob(c)
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -115,6 +122,19 @@ async function descargarFacturaPdf(c: Comprobante) {
   a.click()
   a.remove()
   URL.revokeObjectURL(url)
+}
+
+/** Blob (PDF) → base64 sin el prefijo "data:...;base64,". */
+function blobABase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const res = String(reader.result)
+      resolve(res.includes(',') ? res.slice(res.indexOf(',') + 1) : res)
+    }
+    reader.onerror = () => reject(new Error('No se pudo leer el PDF.'))
+    reader.readAsDataURL(blob)
+  })
 }
 
 export function FacturacionPage() {
@@ -332,6 +352,7 @@ export function FacturacionPage() {
                     </span>
                     <span className={cn('tnum block truncate text-xs', activa ? 'text-on-ink/70' : 'text-ink-400')}>
                       {CONDICION_CORTA[e.condicion]} · PV {pad(e.punto_venta, 4)}
+                      {!e.activo && ' · Inactivo'}
                     </span>
                   </span>
                 </button>
@@ -346,6 +367,7 @@ export function FacturacionPage() {
                 <Badge tone={emisor.produccion ? 'solid' : 'outline'}>
                   {emisor.produccion ? 'Producción' : 'Homologación'}
                 </Badge>
+                {!emisor.activo && <Badge tone="outline">Inactivo</Badge>}
                 {emisor.tiene_credenciales ? (
                   <span className="inline-flex items-center gap-1.5 font-medium text-ink-600">
                     <ShieldCheck className="h-3.5 w-3.5" /> Credenciales cargadas
@@ -492,6 +514,8 @@ export function FacturacionPage() {
 function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void }) {
   const toast = useToast()
   const [descargando, setDescargando] = useState(false)
+  const [email, setEmail] = useState('')
+  const [enviando, setEnviando] = useState(false)
   const { data: c, isLoading } = useQuery({
     queryKey: ['comprobante', id],
     queryFn: () => obtenerComprobante(id as number),
@@ -507,6 +531,22 @@ function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void 
       toast.error('No se pudo generar el PDF', (e as Error).message)
     } finally {
       setDescargando(false)
+    }
+  }
+
+  async function enviarEmail() {
+    if (!c || !email.trim()) return
+    setEnviando(true)
+    try {
+      const blob = await generarFacturaPdfBlob(c)
+      const base64 = await blobABase64(blob)
+      const r = await enviarComprobanteEmail(c.id, email.trim(), base64)
+      toast.success('Factura enviada', r.detail)
+      setEmail('')
+    } catch (e) {
+      toast.error('No se pudo enviar', (e as Error).message)
+    } finally {
+      setEnviando(false)
     }
   }
 
@@ -625,14 +665,29 @@ function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void 
             )}
           </div>
 
-          <div className="flex justify-end gap-2.5 border-t border-line px-5 py-4">
-            <Button variant="outline" onClick={onClose}>
-              Cerrar
-            </Button>
-            <Button onClick={descargar} disabled={descargando}>
-              <Download className="h-4 w-4" />
-              {descargando ? 'Generando…' : 'Descargar PDF'}
-            </Button>
+          <div className="space-y-3 border-t border-line px-5 py-4">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Enviar por email a… (cliente@correo.com)"
+                className="flex-1"
+              />
+              <Button variant="outline" onClick={enviarEmail} disabled={enviando || !email.trim()}>
+                <Mail className="h-4 w-4" />
+                {enviando ? 'Enviando…' : 'Enviar'}
+              </Button>
+            </div>
+            <div className="flex justify-end gap-2.5">
+              <Button variant="outline" onClick={onClose}>
+                Cerrar
+              </Button>
+              <Button onClick={descargar} disabled={descargando}>
+                <Download className="h-4 w-4" />
+                {descargando ? 'Generando…' : 'Descargar PDF'}
+              </Button>
+            </div>
           </div>
         </>
       )}

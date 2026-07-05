@@ -243,3 +243,18 @@ CORS_ALLOWED_ORIGINS = env_list(
     'CORS_ALLOWED_ORIGINS',
     'http://localhost:5173,http://127.0.0.1:5173',
 )
+
+
+# --- Email (SMTP) ------------------------------------------------------------
+# OPCIONAL y AISLADO: solo se usa para "Enviar comprobante por email". Si no se
+# configura (EMAIL_HOST vacio), el envio queda deshabilitado y el endpoint lo
+# informa; NADA mas del sistema depende de esto.
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = os.environ.get('EMAIL_HOST', '')
+EMAIL_PORT = env_int('EMAIL_PORT', 587)
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+EMAIL_USE_TLS = env_bool('EMAIL_USE_TLS', True)
+EMAIL_USE_SSL = env_bool('EMAIL_USE_SSL', False)
+EMAIL_TIMEOUT = env_int('EMAIL_TIMEOUT', 20)
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER or 'no-reply@celtuc.local')

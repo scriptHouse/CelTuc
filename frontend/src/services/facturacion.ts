@@ -95,3 +95,17 @@ export function cambiarEstadoCobro(id: number, estado: EstadoCobro): Promise<Com
 export function eliminarComprobante(id: number): Promise<void> {
   return api.del<void>(`/facturacion/comprobantes/${id}/`, token())
 }
+
+/** Envía por email el PDF (ya generado en el front, en base64) de un comprobante. */
+export function enviarComprobanteEmail(
+  id: number,
+  email: string,
+  pdfBase64: string,
+  mensaje?: string,
+): Promise<{ detail: string }> {
+  return api.post<{ detail: string }>(
+    `/facturacion/comprobantes/${id}/enviar-email/`,
+    { email, pdf_base64: pdfBase64, mensaje },
+    token(),
+  )
+}
