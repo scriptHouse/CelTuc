@@ -8,12 +8,14 @@ import { usePresencia } from '@/lib/usePresencia'
 import { useInactividad } from '@/lib/useInactividad'
 import { useConfirm } from '@/components/ConfirmProvider'
 import { BrandMark, BrandWordmark } from '@/components/Brand'
+import { MobileNav } from '@/components/MobileNav'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { navItems } from '@/components/navItems'
 
 /**
  * Layout responsive:
- *  - Móvil (< lg): cabecera superior + navegación fija inferior.
+ *  - Móvil (< lg): cabecera superior + barra inferior adaptativa (con más de
+ *    5 módulos muestra 4 fijos + hoja «Más»; ver <MobileNav />).
  *  - Escritorio (>= lg): sidebar compacto (íconos) que se expande en xl.
  */
 export function Layout() {
@@ -176,47 +178,8 @@ export function Layout() {
         </main>
       </div>
 
-      {/* ===== Bottom nav (móvil) ===== */}
-      <nav
-        className="fixed inset-x-0 bottom-0 z-30 px-3 pb-3 lg:hidden"
-        style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
-        aria-label="Principal"
-      >
-        <div
-          className="mx-auto grid max-w-md rounded-[1.35rem] border border-line bg-surface/92 p-1.5 shadow-[0_18px_45px_rgba(10,10,11,0.16)] backdrop-blur-xl"
-          style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
-        >
-          {items.map(({ to, label, icon: Icon }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={to === '/'}
-              aria-label={label}
-              className={({ isActive }) =>
-                cn(
-                  'relative z-10 flex min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-1 py-1.5 text-[10px] font-medium leading-none outline-none transition-colors duration-200',
-                  'focus-visible:ring-2 focus-visible:ring-ink-900',
-                  isActive ? 'text-ink-950' : 'text-ink-400 hover:text-ink-700',
-                )
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <span
-                    className={cn(
-                      'grid h-9 w-9 place-items-center rounded-2xl transition-all duration-200',
-                      isActive ? 'bg-ink-950 text-on-ink shadow-[0_8px_18px_rgba(10,10,11,0.22)]' : 'text-ink-400',
-                    )}
-                  >
-                    <Icon className="h-5 w-5" strokeWidth={1.85} />
-                  </span>
-                  <span className="block max-w-full truncate">{label}</span>
-                </>
-              )}
-            </NavLink>
-          ))}
-        </div>
-      </nav>
+      {/* ===== Bottom nav (móvil): barra adaptativa + hoja «Más» ===== */}
+      <MobileNav items={items} />
     </div>
   )
 }

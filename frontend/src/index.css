@@ -345,6 +345,22 @@ h6 {
   }
 }
 
+/* Slot «Más» de la barra móvil: el ícono aparece con un mini salto cuando
+   el módulo activo cambia (la key del span reinicia la animación). */
+.ct-slot-pop {
+  animation: ct-slot-pop 0.3s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+@keyframes ct-slot-pop {
+  from {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
 /* Modal / diálogo -> aura pulsante (sutil) detrás del ícono del encabezado. */
 .ct-modal-halo {
   animation: ct-modal-halo 2.8s ease-in-out infinite;
@@ -421,6 +437,7 @@ h6 {
   .ct-count,
   .ct-bar,
   .ct-dropdown,
+  .ct-slot-pop,
   .ct-modal-halo,
   .ct-toast-progress,
   .brand-wordmark span {
