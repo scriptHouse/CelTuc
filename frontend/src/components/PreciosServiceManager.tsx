@@ -26,7 +26,7 @@ import {
   type PrecioInput,
 } from '@/services/preciosService'
 import { ApiError } from '@/lib/api'
-import { cn } from '@/lib/utils'
+import { cn, normalizarBusqueda } from '@/lib/utils'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -394,10 +394,10 @@ function SeccionPanel({
   )
 
   const items = useMemo(() => {
-    const q = busqueda.trim().toLowerCase()
+    const q = normalizarBusqueda(busqueda.trim())
     const ordenados = [...seccion.items].sort((a, b) => a.orden - b.orden || a.id - b.id)
     if (!q) return ordenados
-    return ordenados.filter((i) => `${i.etiqueta} ${i.nota}`.toLowerCase().includes(q))
+    return ordenados.filter((i) => normalizarBusqueda(`${i.etiqueta} ${i.nota}`).includes(q))
   }, [seccion.items, busqueda])
 
   return (

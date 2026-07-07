@@ -31,7 +31,7 @@ import { listarDispositivos, listarSecciones, obtenerConfiguracion } from '@/ser
 import { useAuth } from '@/store/auth'
 import { esAdmin } from '@/lib/permisos'
 import { money0, num, usd } from '@/lib/format'
-import { cn, ctStagger } from '@/lib/utils'
+import { cn, ctStagger, normalizarBusqueda } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -123,7 +123,7 @@ export function PreciosServicePage() {
     [secciones],
   )
 
-  const query = busqueda.trim().toLowerCase()
+  const query = normalizarBusqueda(busqueda.trim())
 
   const dispositivosActivos = useMemo(
     () =>
@@ -162,7 +162,7 @@ export function PreciosServicePage() {
         items: seccion.items.filter(
           (item) =>
             item.activo &&
-            (!query || `${item.etiqueta} ${item.nota}`.toLowerCase().includes(query)) &&
+            (!query || normalizarBusqueda(`${item.etiqueta} ${item.nota}`).includes(query)) &&
             (idsEquipo === null || item.dispositivos.some((id) => idsEquipo.has(id))),
         ),
       }))

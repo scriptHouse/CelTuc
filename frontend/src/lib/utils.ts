@@ -24,3 +24,15 @@ export function ctStagger(index: number, cap = 14): CSSProperties {
 export function ctDelay(ms: number): CSSProperties {
   return { '--ct-delay': `${ms}ms` } as CSSProperties
 }
+
+/**
+ * Normaliza texto para búsqueda: minúsculas y sin acentos/diacríticos.
+ * Se aplica tanto al término buscado como al texto donde se busca, así
+ * "Linea" encuentra "Línea" (y viceversa) en todos los buscadores.
+ */
+export function normalizarBusqueda(texto: string): string {
+  return texto
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+}

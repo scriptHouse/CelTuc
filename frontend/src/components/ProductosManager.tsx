@@ -23,7 +23,7 @@ import {
 } from '@/services/productos'
 import { listarDispositivos } from '@/services/preciosService'
 import { ApiError } from '@/lib/api'
-import { cn } from '@/lib/utils'
+import { cn, normalizarBusqueda } from '@/lib/utils'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -409,13 +409,13 @@ function CategoriaPanel({
   const [creando, setCreando] = useState(false)
 
   const filas = useMemo(() => {
-    const q = busqueda.trim().toLowerCase()
+    const q = normalizarBusqueda(busqueda.trim())
     const propios = productos
       .filter((p) => p.categoria === categoria.id)
       .sort((a, b) => a.orden - b.orden || a.id - b.id)
     if (!q) return propios
     return propios.filter((p) =>
-      `${p.nombre} ${p.marca} ${p.calidad} ${p.nota}`.toLowerCase().includes(q),
+      normalizarBusqueda(`${p.nombre} ${p.marca} ${p.calidad} ${p.nota}`).includes(q),
     )
   }, [productos, categoria, busqueda])
 

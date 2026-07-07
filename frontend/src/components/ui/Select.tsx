@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, Search } from 'lucide-react'
 import { Input } from '@/components/ui/Input'
-import { cn } from '@/lib/utils'
+import { cn, normalizarBusqueda } from '@/lib/utils'
 
 export interface SelectOption {
   value: string
@@ -46,9 +46,9 @@ export function Select({
 
   const filteredOptions = useMemo(() => {
     if (!searchable) return options
-    const normalized = search.trim().toLowerCase()
+    const normalized = normalizarBusqueda(search.trim())
     if (!normalized) return options
-    return options.filter((option) => option.label.toLowerCase().includes(normalized))
+    return options.filter((option) => normalizarBusqueda(option.label).includes(normalized))
   }, [options, search, searchable])
 
   useEffect(() => {
