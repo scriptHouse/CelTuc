@@ -14,7 +14,7 @@ import {
   type ModeloEquipoInput,
 } from '@/services/cotizaciones'
 import { ApiError } from '@/lib/api'
-import { cn, normalizarBusqueda } from '@/lib/utils'
+import { cn, coincideBusqueda } from '@/lib/utils'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -83,9 +83,9 @@ export function CotizacionesManager({ open, onClose }: { open: boolean; onClose:
   )
 
   const visibles = useMemo(() => {
-    const q = normalizarBusqueda(busqueda.trim())
+    const q = busqueda.trim()
     if (!q) return ordenados
-    return ordenados.filter((m) => normalizarBusqueda(m.nombre_completo).includes(q))
+    return ordenados.filter((m) => coincideBusqueda(m.nombre_completo, q))
   }, [ordenados, busqueda])
 
   const tiposActivos = useMemo(

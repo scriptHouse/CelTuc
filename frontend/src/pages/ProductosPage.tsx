@@ -30,7 +30,7 @@ import {
 import { useAuth } from '@/store/auth'
 import { esAdmin } from '@/lib/permisos'
 import { money0, num, usd } from '@/lib/format'
-import { cn, ctStagger, normalizarBusqueda } from '@/lib/utils'
+import { cn, ctStagger, coincideBusqueda } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -111,7 +111,7 @@ export function ProductosPage() {
   }, [categorias])
   const categoriaPorId = useMemo(() => new Map(categorias.map((c) => [c.id, c])), [categorias])
 
-  const query = normalizarBusqueda(busqueda.trim())
+  const query = busqueda.trim()
   const filtrando = Boolean(query) || Boolean(filtroMarca) || Boolean(filtroCalidad)
 
   const seleccionada = useMemo(() => {
@@ -131,7 +131,7 @@ export function ProductosPage() {
 
   function pasaFiltros(p: ProductoCatalogo): boolean {
     if (!p.activo) return false
-    if (query && !normalizarBusqueda(`${p.nombre} ${p.marca} ${p.calidad} ${p.nota}`).includes(query)) {
+    if (query && !coincideBusqueda(`${p.nombre} ${p.marca} ${p.calidad} ${p.nota}`, query)) {
       return false
     }
     if (filtroMarca && p.marca !== filtroMarca) return false

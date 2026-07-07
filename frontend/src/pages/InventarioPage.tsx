@@ -25,7 +25,7 @@ import {
   type ProductoInput,
 } from '@/services/inventario'
 import { money, num } from '@/lib/format'
-import { ctStagger, normalizarBusqueda } from '@/lib/utils'
+import { ctStagger, coincideBusqueda } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatCard } from '@/components/ui/StatCard'
 import { Card } from '@/components/ui/Card'
@@ -103,13 +103,9 @@ export function InventarioPage() {
   })
 
   const filtrados = useMemo(() => {
-    const term = normalizarBusqueda(q.trim())
+    const term = q.trim()
     return productos.filter((p) => {
-      const matchTerm =
-        !term ||
-        normalizarBusqueda(p.nombre).includes(term) ||
-        normalizarBusqueda(p.sku).includes(term) ||
-        normalizarBusqueda(p.marca).includes(term)
+      const matchTerm = !term || coincideBusqueda(`${p.nombre} ${p.sku} ${p.marca}`, term)
       const matchCat = !cat || p.categoria === cat
       return matchTerm && matchCat
     })

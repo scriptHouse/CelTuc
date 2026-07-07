@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
 import { Check, ChevronDown, Search } from 'lucide-react'
 import { Input } from '@/components/ui/Input'
-import { cn, normalizarBusqueda } from '@/lib/utils'
+import { cn, coincideBusqueda, rangosBusqueda } from '@/lib/utils'
 
 export interface SelectOption {
   value: string
@@ -21,9 +22,32 @@ interface SelectProps {
   triggerClassName?: string
 }
 
+/** Etiqueta de opción con las coincidencias de la búsqueda resaltadas. */
+function EtiquetaResaltada({ label, termino }: { label: string; termino: string }) {
+  const rangos = rangosBusqueda(label, termino)
+  if (!rangos.length) return <>{label}</>
+  const partes: ReactNode[] = []
+  let cursor = 0
+  rangos.forEach(([inicio, fin], indice) => {
+    if (inicio > cursor) partes.push(label.slice(cursor, inicio))
+    partes.push(
+      <mark key={indice} className="bg-transparent font-semibold text-ink-900">
+        {label.slice(inicio, fin)}
+      </mark>,
+    )
+    cursor = fin
+  })
+  if (cursor < label.length) partes.push(label.slice(cursor))
+  return <>{partes}</>
+}
+
 /**
  * Select de selección única con buscador opcional. El panel es `absolute`
  * (left-0/right-0), así se adapta al ancho del disparador y es 100% responsive.
+ *
+ * Teclado: ↓/↑ recorre opciones, Enter selecciona la resaltada, Escape cierra
+ * (solo el desplegable: no burbujea al Modal). La búsqueda tolera acentos y
+ * palabras en cualquier orden, y resalta las coincidencias.
  */
 export function Select({
   label,
@@ -39,16 +63,19 @@ export function Select({
 }: SelectProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [search, setSearch] = useState('')
+  const [resaltada, setResaltada] = useState(0)
   const wrapperRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
 
   const selectedOption = options.find((option) => option.value === value)
 
   const filteredOptions = useMemo(() => {
     if (!searchable) return options
-    const normalized = normalizarBusqueda(search.trim())
-    if (!normalized) return options
-    return options.filter((option) => normalizarBusqueda(option.label).includes(normalized))
+    const termino = search.trim()
+    if (!termino) return options
+    return options.filter((option) => coincideBusqueda(option.label, termino))
   }, [options, search, searchable])
 
   useEffect(() => {
@@ -69,19 +96,71 @@ export function Select({
     return () => window.cancelAnimationFrame(frame)
   }, [isOpen, searchable])
 
+  // Mantiene visible la opción resaltada al navegar con el teclado (y al
+  // abrir, si la seleccionada quedó fuera del área visible de la lista).
+  useEffect(() => {
+    if (!isOpen || !filteredOptions.length) return
+    const activa = listRef.current?.children[resaltada]
+    if (activa instanceof HTMLElement) activa.scrollIntoView({ block: 'nearest' })
+  }, [isOpen, resaltada, filteredOptions.length])
+
+  function abrir() {
+    // Al abrir, el buscador está vacío: las opciones filtradas son todas.
+    const indiceSeleccionada = options.findIndex((option) => option.value === value)
+    setResaltada(indiceSeleccionada >= 0 ? indiceSeleccionada : 0)
+    setIsOpen(true)
+  }
+
+  function cerrar() {
+    setIsOpen(false)
+    triggerRef.current?.focus()
+  }
+
   function selectValue(next: string) {
     onChange(next)
-    setIsOpen(false)
+    cerrar()
+  }
+
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (disabled) return
+    if (!isOpen) {
+      // Enter/Espacio sobre el disparador ya abren vía su click nativo.
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        abrir()
+      }
+      return
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      setResaltada((actual) => Math.min(actual + 1, filteredOptions.length - 1))
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      setResaltada((actual) => Math.max(actual - 1, 0))
+    } else if (event.key === 'Enter') {
+      event.preventDefault()
+      const opcion = filteredOptions[resaltada] ?? filteredOptions[0]
+      if (opcion) selectValue(opcion.value)
+    } else if (event.key === 'Escape') {
+      // Cierra SOLO el desplegable: sin stopPropagation, un Select dentro
+      // de un Modal cerraría también el modal.
+      event.preventDefault()
+      event.stopPropagation()
+      cerrar()
+    } else if (event.key === 'Tab') {
+      setIsOpen(false)
+    }
   }
 
   return (
-    <div ref={wrapperRef} className={cn('relative min-w-0', className)}>
+    <div ref={wrapperRef} onKeyDown={handleKeyDown} className={cn('relative min-w-0', className)}>
       {label && (
         <label className="mb-1.5 block text-xs font-medium text-ink-500">{label}</label>
       )}
       <button
+        ref={triggerRef}
         type="button"
-        onClick={() => setIsOpen((current) => !current)}
+        onClick={() => (isOpen ? setIsOpen(false) : abrir())}
         disabled={disabled}
         className={cn(
           'flex h-11 w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-line-strong bg-surface px-3.5 text-left text-sm text-ink-900 transition-colors hover:border-ink-300 focus:outline-none focus:ring-2 focus:ring-ink-900/12 disabled:cursor-not-allowed disabled:opacity-50',
@@ -107,7 +186,10 @@ export function Select({
                 <Input
                   ref={searchInputRef}
                   value={search}
-                  onChange={(event) => setSearch(event.target.value)}
+                  onChange={(event) => {
+                    setSearch(event.target.value)
+                    setResaltada(0)
+                  }}
                   placeholder={searchPlaceholder}
                   className="h-10 pl-9"
                 />
@@ -115,10 +197,11 @@ export function Select({
             </div>
           )}
 
-          <div className="max-h-64 overflow-y-auto p-1.5" role="listbox">
+          <div ref={listRef} className="max-h-64 overflow-y-auto p-1.5" role="listbox">
             {filteredOptions.length ? (
-              filteredOptions.map((option) => {
+              filteredOptions.map((option, indice) => {
                 const isSelected = option.value === value
+                const isActive = indice === resaltada
                 return (
                   <button
                     type="button"
@@ -126,12 +209,16 @@ export function Select({
                     role="option"
                     aria-selected={isSelected}
                     onClick={() => selectValue(option.value)}
+                    onMouseEnter={() => setResaltada(indice)}
                     className={cn(
-                      'flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors hover:bg-ink-50',
+                      'flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors',
+                      isActive && 'bg-ink-50',
                       isSelected ? 'bg-ink-100 font-medium text-ink-900' : 'text-ink-700',
                     )}
                   >
-                    <span className="min-w-0 truncate">{option.label}</span>
+                    <span className="min-w-0 truncate">
+                      <EtiquetaResaltada label={option.label} termino={search} />
+                    </span>
                     {isSelected && <Check className="h-4 w-4 shrink-0 text-ink-900" />}
                   </button>
                 )

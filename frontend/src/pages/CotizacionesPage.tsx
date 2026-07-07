@@ -6,7 +6,7 @@ import { listarModelos } from '@/services/cotizaciones'
 import { useAuth } from '@/store/auth'
 import { esAdmin } from '@/lib/permisos'
 import { num, usd0 } from '@/lib/format'
-import { cn, ctStagger, normalizarBusqueda } from '@/lib/utils'
+import { cn, ctStagger, coincideBusqueda } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -69,9 +69,9 @@ export function CotizacionesPage() {
   )
 
   const visibles = useMemo(() => {
-    const q = normalizarBusqueda(busqueda.trim())
+    const q = busqueda.trim()
     if (!q) return activos
-    return activos.filter((m) => normalizarBusqueda(m.nombre_completo).includes(q))
+    return activos.filter((m) => coincideBusqueda(m.nombre_completo, q))
   }, [activos, busqueda])
 
   // Chips de generación (11, 12, 13...) derivados de los modelos cargados.
