@@ -345,6 +345,36 @@ h6 {
   }
 }
 
+/* Pasos de un asistente (Caja → cierre en 3 actos): el contenido entra
+   deslizándose en el sentido de la navegación (la key reinicia la animación).
+   Avanzar entra desde la derecha; volver, desde la izquierda. */
+.ct-step-fwd {
+  animation: ct-step-fwd 0.4s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+.ct-step-back {
+  animation: ct-step-back 0.4s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+@keyframes ct-step-fwd {
+  from {
+    opacity: 0;
+    transform: translateX(26px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes ct-step-back {
+  from {
+    opacity: 0;
+    transform: translateX(-26px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
 /* Slot «Más» de la barra móvil: el ícono aparece con un mini salto cuando
    el módulo activo cambia (la key del span reinicia la animación). */
 .ct-slot-pop {
@@ -438,6 +468,8 @@ h6 {
   .ct-bar,
   .ct-dropdown,
   .ct-slot-pop,
+  .ct-step-fwd,
+  .ct-step-back,
   .ct-modal-halo,
   .ct-toast-progress,
   .brand-wordmark span {

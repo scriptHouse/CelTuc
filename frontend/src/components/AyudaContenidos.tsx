@@ -420,3 +420,67 @@ export function AyudaFichaEquipo() {
     </>
   )
 }
+
+// ============================================================ CAJA ====
+
+export function AyudaCaja() {
+  return (
+    <>
+      <AyudaSeccion titulo="Qué es esta pantalla">
+        <p>
+          Es el <b>control del efectivo y de los cobros del día</b>, con el mismo modelo que usan
+          los POS profesionales (Square, Shopify, Odoo, Fudo): se <b>abre un turno</b> declarando el
+          fondo, se registran los <b>movimientos</b> (ventas, ingresos, egresos, retiros) y al final
+          se hace el <b>arqueo</b>: contás lo que hay, el sistema lo compara con lo que debería
+          haber y emite un <b>comprobante Z</b> inmutable.
+        </p>
+      </AyudaSeccion>
+
+      <AyudaSeccion titulo="Abrir el turno">
+        <AyudaPasos
+          pasos={[
+            <>Tocá <b>«Abrir caja»</b> y declará el <b>fondo inicial</b> (el efectivo que queda en el cajón para dar vuelto). Se sugiere el fondo que dejó el último cierre.</>,
+            <>Si querés precisión total, usá <b>«Contar el fondo por billetes»</b>: la grilla arma el monto sola.</>,
+            <>Durante el día, cargá cada movimiento con <b>«Nuevo»</b>: ventas con su medio de pago, egresos con motivo, y <b>retiros a bóveda</b> para no acumular efectivo (la mejor práctica antirrobo).</>,
+          ]}
+        />
+      </AyudaSeccion>
+
+      <AyudaSeccion titulo="Cerrar la caja (3 pasos)">
+        <AyudaPasos
+          pasos={[
+            <><b>Revisar:</b> el checklist confirma que no quede nada afuera (si hubo tarjetas, te pide el <b>cierre de lote</b> de la terminal).</>,
+            <><b>Contar:</b> el efectivo con la grilla de billetes (+ «Sueltos» para monedas) y los otros medios contra el ticket de lote y los extractos.</>,
+            <><b>Confirmar:</b> ves la diferencia por medio (sobrante / faltante), definís cuánto queda de <b>fondo para el próximo turno</b> — el sistema calcula cuánto retirar — y se emite el <b>Z</b>.</>,
+          ]}
+        />
+        <AyudaEjemplo titulo="la caja no cuadra">
+          <p>
+            Esperado <span className="tnum">$ 153.500</span>, contado <span className="tnum">$ 152.500</span> →
+            el paso 3 muestra <b>«Faltante $ 1.000»</b>. Si está dentro de la tolerancia, confirmás
+            y listo; si la supera, tenés que recontar o dejar <b>motivo y nota</b>, que quedan en el
+            comprobante para siempre.
+          </p>
+        </AyudaEjemplo>
+      </AyudaSeccion>
+
+      <AyudaSeccion titulo="Funciones que podés prender y apagar (Configurar)">
+        <AyudaCampos
+          campos={[
+            ['Cierre ciego', 'Quien cuenta no ve el «esperado» del efectivo hasta confirmar. Evita conteos acomodados y muestra las diferencias reales.'],
+            ['Tolerancia', 'Si la diferencia supera el monto configurado, el cierre exige motivo + nota (patrón Toast/Fudo).'],
+            ['Retiros a bóveda', 'Habilita el movimiento de retiro parcial durante el turno.'],
+            ['Multi-caja', 'Varias cajas nombradas (Mostrador, Service…), cada una con su turno y su arqueo.'],
+            ['Billetes de la grilla', 'Qué denominaciones muestra el arqueo; lo que no está en la grilla va por «Sueltos».'],
+          ]}
+        />
+      </AyudaSeccion>
+
+      <AyudaTip>
+        Los cierres son <b>inmutables</b>: si algo quedó mal cargado, se corrige con un movimiento
+        en el turno siguiente, nunca editando un Z. Tocá cualquier fila del historial para ver el
+        comprobante completo, con el detalle de billetes contados.
+      </AyudaTip>
+    </>
+  )
+}

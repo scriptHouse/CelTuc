@@ -471,3 +471,145 @@ export interface SeccionPreciosService {
   creado: string // ISO
   actualizado: string // ISO
 }
+
+// ===== Caja (turnos, arqueo y cierre) =====
+// Modelo tomado de los POS de referencia (Square, Shopify, Lightspeed, Toast,
+// Odoo, Fudo): la SESIÓN de caja es la entidad central; el cierre es su último
+// evento y queda inmutable como comprobante Z numerado.
+
+/** Medio de pago con el que entra plata a la caja. */
+export type MedioPagoCaja = 'efectivo' | 'debito' | 'credito' | 'transferencia' | 'mercadopago'
+
+/** Catálogo de medios para selectores y desgloses (orden de la UI). */
+export const MEDIOS_PAGO_CAJA: { value: MedioPagoCaja; label: string }[] = [
+  { value: 'efectivo', label: 'Efectivo' },
+  { value: 'debito', label: 'Tarjeta débito' },
+  { value: 'credito', label: 'Tarjeta crédito' },
+  { value: 'transferencia', label: 'Transferencia' },
+  { value: 'mercadopago', label: 'Mercado Pago QR' },
+]
+
+/** Los medios que se concilian contra el cierre de lote de la terminal. */
+export const MEDIOS_CON_LOTE: MedioPagoCaja[] = ['debito', 'credito']
+
+export type TipoMovimientoCaja = 'venta' | 'ingreso' | 'egreso' | 'retiro'
+
+/** Desglose de billetes: denominación (en pesos) -> cantidad contada. */
+export type ConteoBilletes = Record<number, number>
+
+/** Billetes ARS en circulación (BCRA); la config elige cuáles mostrar. */
+export const DENOMINACIONES_ARS = [20000, 10000, 2000, 1000, 500, 200, 100, 50, 20, 10]
+
+/** Preferencias del módulo: cada función pro se puede prender o apagar. */
+export interface CajaConfig {
+  /** Ocultar el esperado del efectivo durante el conteo (se revela al confirmar). */
+  cierreCiego: boolean
+  /** Exigir motivo + nota cuando la diferencia supera la tolerancia. */
+  toleranciaActiva: boolean
+  /** Tolerancia de diferencia en pesos (solo si `toleranciaActiva`). */
+  toleranciaMonto: number
+  /** Habilita el movimiento "retiro a bóveda" durante el turno. */
+  retirosHabilitados: boolean
+  /** Varias cajas nombradas, cada una con su propio turno. */
+  multiCaja: boolean
+  /** El pre-cierre pide confirmar el cierre de lote de tarjetas. */
+  exigirLote: boolean
+  /** Fondo que se sugiere al abrir y como "dejar en caja" al cerrar. */
+  fondoSugerido: number
+  /** Billetes que muestra la grilla de arqueo (subconjunto de DENOMINACIONES_ARS). */
+  denominaciones: number[]
+}
+
+/** Una caja física del local ("Mostrador", "Service"...). */
+export interface CajaRegistradora {
+  id: string
+  nombre: string
+  activa: boolean
+  creadaEn: string // ISO
+}
+
+/** Todo lo que mueve plata durante un turno (las ventas también son movimientos). */
+export interface MovimientoCaja {
+  id: string
+  cajaId: string
+  sesionId: string
+  tipo: TipoMovimientoCaja
+  /** Ingresos/egresos/retiros son siempre en efectivo; las ventas llevan su medio. */
+  medio: MedioPagoCaja
+  /** Siempre positivo: el signo lo da el tipo. */
+  monto: number
+  motivo: string
+  detalle?: string
+  usuario: string
+  fecha: string // ISO
+}
+
+/** Un turno de caja: se abre con fondo declarado y se cierra con arqueo. */
+export interface SesionCaja {
+  id: string
+  cajaId: string
+  numero: number // correlativo global de turnos
+  estado: 'abierta' | 'cerrada'
+  abiertaPor: string
+  abiertaEn: string // ISO
+  fondoInicial: number
+  /** Desglose de billetes del fondo, si se contó al abrir. */
+  conteoApertura?: ConteoBilletes
+  notaApertura?: string
+}
+
+/** Comprobante Z: el cierre inmutable de un turno, con todo el detalle. */
+export interface CierreCaja {
+  id: string
+  /** Correlativo global del comprobante (se muestra "Z-0142"). */
+  numero: number
+  cajaId: string
+  /** Nombre de la caja al momento del cierre (sobrevive renombres). */
+  cajaNombre: string
+  sesionId: string
+  sesionNumero: number
+  abiertaEn: string // ISO
+  cerradaEn: string // ISO
+  abiertaPor: string
+  cerradoPor: string
+  fondoInicial: number
+  ventasPorMedio: Record<MedioPagoCaja, number>
+  operacionesPorMedio: Record<MedioPagoCaja, number>
+  ingresos: number
+  egresos: number
+  retiros: number
+  esperadoPorMedio: Record<MedioPagoCaja, number>
+  contadoPorMedio: Record<MedioPagoCaja, number>
+  /** Desglose de billetes del arqueo, si se contó con la grilla. */
+  conteoCierre?: ConteoBilletes
+  diferenciaPorMedio: Record<MedioPagoCaja, number>
+  /** Positivo = sobrante, negativo = faltante. */
+  diferenciaTotal: number
+  motivoDiferencia?: string
+  notaDiferencia?: string
+  /** Si el arqueo se hizo sin ver el esperado. */
+  cierreCiego: boolean
+  /** Efectivo que quedó como fondo del próximo turno. */
+  fondoSiguiente: number
+  /** Efectivo retirado a bóveda/depósito al cerrar. */
+  retiroFinal: number
+  /** Snapshot de los movimientos del turno (el Z es autocontenido). */
+  movimientos: MovimientoCaja[]
+}
+
+/** Motivos predefinidos cuando la diferencia supera la tolerancia (patrón Fudo). */
+export const MOTIVOS_DIFERENCIA_CAJA = [
+  'Faltante de efectivo',
+  'Sobrante de efectivo',
+  'Divergencia de terminal de tarjeta',
+  'Error de carga de movimientos',
+  'Vuelto mal dado',
+  'Otro',
+]
+
+/** Motivos sugeridos por tipo de movimiento manual. */
+export const MOTIVOS_MOVIMIENTO_CAJA: Record<'ingreso' | 'egreso' | 'retiro', string[]> = {
+  ingreso: ['Aporte de cambio', 'Cobro de deuda', 'Ajuste de fondo', 'Otro'],
+  egreso: ['Pago a proveedor', 'Gasto del local', 'Envíos / viáticos', 'Adelanto a empleado', 'Otro'],
+  retiro: ['Retiro a bóveda', 'Depósito bancario', 'Retiro del dueño'],
+}

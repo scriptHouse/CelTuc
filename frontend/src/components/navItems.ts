@@ -1,4 +1,4 @@
-import { Boxes, CreditCard, DollarSign, FileText, LayoutDashboard, ReceiptText, ScanSearch, ShoppingBag, Smartphone, UserCog, Users, Wrench } from 'lucide-react'
+import { Boxes, CreditCard, DollarSign, FileText, LayoutDashboard, ReceiptText, ScanSearch, ShoppingBag, Smartphone, UserCog, Users, Wallet, Wrench } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 export interface NavItem {
@@ -16,6 +16,9 @@ export const navItems: NavItem[] = [
   { to: '/dolar', label: 'Dólar', icon: DollarSign, permiso: 'ver_dolar' },
   { to: '/inventario', label: 'Inventario', icon: Boxes, permiso: 'ver_inventario' },
   { to: '/facturacion', label: 'Facturación', icon: ReceiptText, permiso: 'ver_facturacion' },
+  // Caja: por ahora es 100 % front (datos demo locales), por eso queda visible a
+  // toda cuenta autenticada. Al sumar el backend, asignarle 'ver_caja' acá y en la ruta.
+  { to: '/caja', label: 'Caja', icon: Wallet },
   { to: '/empleados', label: 'Empleados', icon: Users, permiso: 'ver_empleados' },
   { to: '/simulador', label: 'Simulador', icon: CreditCard, permiso: 'ver_simulador' },
   { to: '/cotizaciones', label: 'Cotizaciones', icon: Smartphone, permiso: 'ver_cotizaciones' },
