@@ -27,6 +27,43 @@ services:
       # Puerto interno del contenedor (nginx)
       - "traefik.http.services.celtuc.loadbalancer.server.port=80"
 
+  # --------------------------------------------------------------------
+  # GitHub Actions self-hosted runner — SOLO PRODUCCIÓN (VPS Contabo).
+  # Perfil "prod": en dev local no arranca nunca (además requiere
+  # GITHUB_RUNNER_TOKEN, que vive solo en el .env del servidor).
+  #
+  # ¿Por qué existe? El deploy corre ADENTRO del servidor, sin SSH desde
+  # afuera: el puerto 22 está rate-limitado (ufw LIMIT) + fail2ban, y las
+  # IPs de los runners de GitHub (rangos de Azure) terminaban bloqueadas
+  # → "Connection timed out". Mismo esquema que el resto de los proyectos
+  # ScriptHouse (pipa-web, panel, alliance, etc.).
+  #
+  # En el VPS se levanta UNA sola vez con:
+  #   docker compose --profile prod up -d github-runner
+  # --------------------------------------------------------------------
+  github-runner:
+    image: myoung34/github-runner:latest
+    container_name: celtuc-runner
+    restart: unless-stopped
+    profiles: ["prod"]
+    environment:
+      - REPO_URL=https://github.com/scriptHouse/CelTuc
+      - ACCESS_TOKEN=${GITHUB_RUNNER_TOKEN:-}
+      - EPHEMERAL=true
+      - RUNNER_NAME=celtuc-runner
+      - RUNNER_WORKDIR=/tmp/runner/work
+      - LABELS=self-hosted,linux,x64,celtuc
+      - DISABLE_AUTO_UPDATE=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/www/celtuc:/var/www/celtuc
+      - runner-data:/tmp/runner
+    networks:
+      - web
+
+volumes:
+  runner-data:
+
 networks:
   web:
     external: true

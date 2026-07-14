@@ -14,15 +14,19 @@ permissions:
   contents: read
 
 env:
-  DEPLOY_HOST: 38.105.209.147
-  DEPLOY_USER: root
   DEPLOY_PATH: /var/www/celtuc
   DEPLOY_URL: https://celtuc.scripthouse.com.ar
 
 jobs:
   deploy:
     name: Deploy production
-    runs-on: ubuntu-latest
+    # Runner self-hosted DENTRO del VPS (contenedor `celtuc-runner`, ver
+    # docker-compose.yml, perfil "prod"): el deploy corre en el propio
+    # servidor, sin SSH desde afuera. El esquema anterior (SSH desde
+    # ubuntu-latest) daba "Connection timed out" porque el puerto 22 está
+    # rate-limitado (ufw LIMIT) + fail2ban, y las IPs de los runners de
+    # GitHub (Azure) terminaban filtradas.
+    runs-on: [self-hosted, celtuc]
     environment:
       name: production
       url: https://celtuc.scripthouse.com.ar
@@ -31,35 +35,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure SSH
-        shell: bash
-        run: |
-          set -euo pipefail
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "${{ secrets.CONTABO_SSH_PRIVATE_KEY }}" > ~/.ssh/contabo-deploy
-          chmod 600 ~/.ssh/contabo-deploy
-          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
-          # Keepalive: el build remoto (docker build → npm install) puede quedarse
-          # callado varios minutos. Sin esto la conexión SSH se cae con
-          # "client_loop: send disconnect: Broken pipe" (exit 255). Estas opciones
-          # mantienen viva la sesión y aplican a TODAS las conexiones (también rsync).
-          printf '%s\n' \
-            'Host *' \
-            '  ServerAliveInterval 30' \
-            '  ServerAliveCountMax 20' \
-            '  TCPKeepAlive yes' \
-            '  ConnectTimeout 30' \
-            > ~/.ssh/config
-          chmod 600 ~/.ssh/config
-
-      - name: Preflight server
+      - name: Preflight
         shell: bash
         run: |
           set -euo pipefail
           # El .env (secretos + DATABASE_URL) vive solo en el servidor. Si falta,
           # cortamos antes de desplegar un backend que no podria arrancar.
-          ssh -i ~/.ssh/contabo-deploy "$DEPLOY_USER@$DEPLOY_HOST" \
-            "test -d '$DEPLOY_PATH' && test -f '$DEPLOY_PATH/.env' && docker compose version"
+          test -d "$DEPLOY_PATH"
+          test -f "$DEPLOY_PATH/.env"
+          docker compose version
 
       - name: Sync project files
         shell: bash
@@ -67,7 +51,7 @@ jobs:
           set -euo pipefail
           # --delete mantiene el server igual al repo, pero excluimos lo que solo
           # vive en el servidor (.env) o se genera en runtime, para no borrarlo.
-          rsync -az --delete \
+          rsync -a --delete \
             --exclude='.git/' \
             --exclude='.github/' \
             --exclude='.vscode/' \
@@ -80,32 +64,31 @@ jobs:
             --exclude='frontend/dist/' \
             --exclude='frontend/*.tsbuildinfo' \
             --exclude='*.log' \
-            -e "ssh -i ~/.ssh/contabo-deploy" \
-            ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+            ./ "$DEPLOY_PATH/"
 
       - name: Build and restart
         shell: bash
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/contabo-deploy "$DEPLOY_USER@$DEPLOY_HOST" \
-            "cd '$DEPLOY_PATH' && chmod +x deploy.sh deploy/entrypoint.sh && ./deploy.sh"
+          cd "$DEPLOY_PATH"
+          chmod +x deploy.sh deploy/entrypoint.sh
+          ./deploy.sh
 
       - name: Verify container
         shell: bash
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/contabo-deploy "$DEPLOY_USER@$DEPLOY_HOST" \
-            "for i in \$(seq 1 24); do
-              status=\$(docker inspect -f '{{.State.Health.Status}}' celtuc 2>/dev/null || true)
-              docker ps --filter name=celtuc --format 'table {{.Names}}\t{{.Status}}'
-              if [ \"\$status\" = healthy ]; then
-                docker exec celtuc curl -fsS http://127.0.0.1/api/health/
-                exit 0
-              fi
-              sleep 5
-            done
-            docker logs --tail=120 celtuc
-            exit 1"
+          for i in $(seq 1 24); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' celtuc 2>/dev/null || true)
+            docker ps --filter name=celtuc --format 'table {{.Names}}\t{{.Status}}'
+            if [ "$status" = healthy ]; then
+              docker exec celtuc curl -fsS http://127.0.0.1/api/health/
+              exit 0
+            fi
+            sleep 5
+          done
+          docker logs --tail=120 celtuc
+          exit 1
 
       - name: Verify public URL
         shell: bash
