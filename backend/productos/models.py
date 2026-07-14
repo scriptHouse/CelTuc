@@ -192,6 +192,12 @@ class Producto(ModeloBase):
         verbose_name='equipos vinculados',
         help_text='Para la Ficha de equipo: el equipo que ES o con los que es compatible.',
     )
+    costo_usd = models.DecimalField(
+        'costo (USD)',
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        validators=[MinValueValidator(0)],
+        help_text='Costo de reposicion. Solo lo ven los administradores.',
+    )
     precio_lista_usd = models.DecimalField(
         'precio de lista (USD)',
         max_digits=12, decimal_places=2, null=True, blank=True,

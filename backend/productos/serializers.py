@@ -94,6 +94,7 @@ class ProductoSerializer(serializers.ModelSerializer):
     dispositivos = serializers.PrimaryKeyRelatedField(
         queryset=Dispositivo.objects.all(), many=True, required=False,
     )
+    costo_usd = _campo_precio()
     precio_lista_usd = _campo_precio()
     precio_cash_usd = _campo_precio()
     precio_lista_ars = _campo_precio()
@@ -103,7 +104,7 @@ class ProductoSerializer(serializers.ModelSerializer):
         model = Producto
         fields = (
             'id', 'categoria', 'nombre', 'marca', 'calidad', 'nota',
-            'a_pedido', 'nuevo', 'dispositivos',
+            'a_pedido', 'nuevo', 'dispositivos', 'costo_usd',
             'precio_lista_usd', 'precio_cash_usd', 'precio_lista_ars', 'precio_cash_ars',
             'orden', 'activo',
         )
@@ -120,6 +121,10 @@ class ProductoSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         data = super().to_representation(instance)
         data['efectivo'] = resolver_precio_producto(instance, self._config())
+        # El costo es informacion sensible del negocio: solo para admins.
+        request = self.context.get('request')
+        if not (request and getattr(request.user, 'es_administrador', False)):
+            data.pop('costo_usd', None)
         return data
 
     def create(self, validated_data):

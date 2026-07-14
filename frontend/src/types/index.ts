@@ -447,6 +447,8 @@ export interface ProductoCatalogo {
   nuevo: boolean
   /** Equipos vinculados (para la Ficha): el que ES o con los que es compatible. */
   dispositivos: number[]
+  /** Costo de reposición (USD). El backend solo se lo manda a administradores. */
+  costo_usd?: number | null
   precio_lista_usd: number | null
   precio_cash_usd: number | null
   precio_lista_ars: number | null

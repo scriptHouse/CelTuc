@@ -49,6 +49,31 @@ class LecturaConPermisoEscrituraSuperadmin(permissions.BasePermission):
         return bool(user.is_superuser)
 
 
+class LecturaYEscrituraConPermiso(permissions.BasePermission):
+    """Lectura Y escritura con el permiso de modulo (o admin).
+
+    Para operaciones de mostrador del dia a dia (ej: ajustar stock en
+    Inventario) que los empleados con acceso al modulo tienen que poder hacer
+    sin ser administradores. La vista declara `permiso_requerido` igual que en
+    `LecturaConPermisoEscrituraAdmin` (string o tupla: alcanza cualquiera).
+    """
+
+    message = 'No tenes permiso para acceder a este modulo.'
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not (user and user.is_authenticated):
+            return False
+        if user.es_administrador:
+            return True
+        codigo = getattr(view, 'permiso_requerido', None)
+        if codigo is None:
+            return True
+        codigos = (codigo,) if isinstance(codigo, str) else tuple(codigo)
+        del_usuario = user.codigos_permisos()
+        return any(c in del_usuario for c in codigos)
+
+
 class LecturaConPermisoEscrituraAdmin(permissions.BasePermission):
     """Lectura: requiere el permiso de modulo declarado por la vista.
 

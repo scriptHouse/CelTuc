@@ -14,12 +14,13 @@ from .serializers import (
 class _BaseProductos:
     """Permisos comunes: leer con el permiso del modulo, escribir solo admin.
 
-    `ver_equipos` tambien habilita la lectura: la Ficha de equipo necesita los
-    productos vinculados aunque la cuenta no tenga acceso a la pagina Productos.
+    `ver_equipos` y `ver_inventario` tambien habilitan la lectura: la Ficha de
+    equipo y el Inventario necesitan el catalogo (productos y categorias)
+    aunque la cuenta no tenga acceso a la pagina Productos.
     """
 
     permission_classes = [LecturaConPermisoEscrituraAdmin]
-    permiso_requerido = ('ver_productos', 'ver_equipos')
+    permiso_requerido = ('ver_productos', 'ver_equipos', 'ver_inventario')
 
     def get_serializer_context(self):
         contexto = super().get_serializer_context()

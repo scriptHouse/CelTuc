@@ -1,10 +1,22 @@
-import type { Cuenta, Factura, Producto } from '@/types'
+import type { Cuenta, Factura } from '@/types'
 import { getDB, wait } from '@/lib/db'
 import { estadoEfectivo } from '@/lib/afip'
 import { listarEmpleados } from '@/services/empleados'
+import { listarProductos as listarCatalogo } from '@/services/productos'
+import { listarStock, listarSucursales } from '@/services/inventario'
 
 export interface FacturaConCuenta extends Factura {
   cuenta?: Cuenta
+}
+
+/** Fila de "Reposición" del Panel: producto bajo mínimo en una sucursal. */
+export interface ReposicionItem {
+  id: number
+  nombre: string
+  /** Se muestra como subtítulo: acá va la sucursal. */
+  categoria: string
+  stock: number
+  stockMinimo: number
 }
 
 export interface ResumenDashboard {
@@ -13,7 +25,7 @@ export interface ResumenDashboard {
     unidades: number
     valorVenta: number
     valorCosto: number
-    bajoStock: Producto[]
+    bajoStock: ReposicionItem[]
   }
   facturacion: {
     facturadoMes: number
@@ -41,13 +53,58 @@ export async function obtenerResumen(): Promise<ResumenDashboard> {
   const db = getDB()
   const hoy = new Date()
 
-  // --- Inventario ---
-  const unidades = db.productos.reduce((acc, p) => acc + p.stock, 0)
-  const valorVenta = db.productos.reduce((acc, p) => acc + p.stock * p.precio, 0)
-  const valorCosto = db.productos.reduce((acc, p) => acc + p.stock * p.costo, 0)
-  const bajoStock = db.productos
-    .filter((p) => p.stock <= p.stockMinimo)
-    .sort((a, b) => a.stock - b.stock)
+  // --- Inventario (REAL: backend por sucursal) ---
+  // Sin permiso de inventario/productos o sin conexión, el panel no se rompe:
+  // los contadores quedan en 0 y la lista de reposición vacía.
+  let inventario = {
+    totalProductos: 0,
+    unidades: 0,
+    valorVenta: 0,
+    valorCosto: 0,
+    bajoStock: [] as ReposicionItem[],
+  }
+  try {
+    const [catalogo, stock, sucursales] = await Promise.all([
+      listarCatalogo(),
+      listarStock(),
+      listarSucursales(),
+    ])
+    const productoPorId = new Map(catalogo.map((p) => [p.id, p]))
+    const sucursalPorId = new Map(sucursales.map((s) => [s.id, s.nombre]))
+    let unidades = 0
+    let valorVenta = 0
+    let valorCosto = 0
+    const bajoStock: ReposicionItem[] = []
+    for (const fila of stock) {
+      const producto = productoPorId.get(fila.producto)
+      unidades += fila.cantidad
+      if (producto?.efectivo?.lista_ars != null) {
+        valorVenta += fila.cantidad * Number(producto.efectivo.lista_ars)
+      }
+      if (producto?.costo_usd != null) {
+        valorCosto += fila.cantidad * Number(producto.costo_usd)
+      }
+      if (producto && fila.stock_minimo !== null && fila.cantidad <= fila.stock_minimo) {
+        bajoStock.push({
+          id: fila.id,
+          nombre: producto.nombre,
+          categoria: sucursalPorId.get(fila.sucursal) ?? '',
+          stock: fila.cantidad,
+          stockMinimo: fila.stock_minimo,
+        })
+      }
+    }
+    bajoStock.sort((a, b) => a.stock - b.stock)
+    inventario = {
+      totalProductos: catalogo.filter((p) => p.activo).length,
+      unidades,
+      valorVenta,
+      valorCosto, // en USD (costos del catálogo); hoy casi sin cargar
+      bajoStock,
+    }
+  } catch {
+    /* sin permiso o sin conexión: contadores en 0 */
+  }
 
   // --- Facturación ---
   const facturadoMes = db.facturas
@@ -101,7 +158,7 @@ export async function obtenerResumen(): Promise<ResumenDashboard> {
   }
 
   return {
-    inventario: { totalProductos: db.productos.length, unidades, valorVenta, valorCosto, bajoStock },
+    inventario,
     facturacion: {
       facturadoMes,
       cobradoMes,

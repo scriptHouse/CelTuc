@@ -1,52 +1,113 @@
-import type { Producto } from '@/types'
-import { getDB, persist, uid, wait } from '@/lib/db'
+import { api } from '@/lib/api'
+import { useAuth } from '@/store/auth'
 
-export type ProductoInput = Omit<Producto, 'id' | 'creadoEn' | 'actualizadoEn'>
+/**
+ * Inventario REAL (backend): stock por sucursal sobre el catálogo central de
+ * productos. No hay catálogo propio — cada fila referencia un `ProductoCatalogo`
+ * por id y el front los cruza. Leer y AJUSTAR stock requiere `ver_inventario`
+ * (los ajustes son trabajo de mostrador, no hace falta ser admin); crear o
+ * editar sucursales sí es solo-admin.
+ */
 
-export async function listarProductos(): Promise<Producto[]> {
-  await wait()
-  // Copia para que React Query maneje su propia referencia inmutable.
-  return getDB().productos.map((p) => ({ ...p }))
+const token = () => useAuth.getState().access
+
+export interface Sucursal {
+  id: number
+  nombre: string
+  orden: number
+  activa: boolean
 }
 
-export async function crearProducto(input: ProductoInput): Promise<Producto> {
-  await wait()
-  const db = getDB()
-  const ahora = new Date().toISOString()
-  const producto: Producto = { ...input, id: uid('prod'), creadoEn: ahora, actualizadoEn: ahora }
-  db.productos.unshift(producto)
-  persist()
-  return { ...producto }
+export interface StockRow {
+  id: number
+  producto: number
+  sucursal: number
+  cantidad: number
+  /** null = sin alerta configurada. */
+  stock_minimo: number | null
+  actualizado: string // ISO
 }
 
-export async function actualizarProducto(
-  id: string,
-  patch: Partial<ProductoInput>,
-): Promise<Producto> {
-  await wait()
-  const db = getDB()
-  const producto = db.productos.find((p) => p.id === id)
-  if (!producto) throw new Error('Producto no encontrado')
-  Object.assign(producto, patch, { actualizadoEn: new Date().toISOString() })
-  persist()
-  return { ...producto }
+export type TipoMovimiento = 'ingreso' | 'egreso' | 'ajuste' | 'transferencia'
+
+export interface MovimientoStock {
+  id: number
+  producto: number
+  sucursal: number
+  tipo: TipoMovimiento
+  /** Firmado: positivo entra, negativo sale. */
+  delta: number
+  resultante: number
+  nota: string
+  usuario: string | null
+  creado: string // ISO
 }
 
-export async function eliminarProducto(id: string): Promise<void> {
-  await wait()
-  const db = getDB()
-  db.productos = db.productos.filter((p) => p.id !== id)
-  persist()
+export interface AjusteInput {
+  producto: number
+  sucursal: number
+  /** Suma/resta unidades (excluyente con `cantidad`). */
+  delta?: number
+  /** Fija la cantidad final (excluyente con `delta`). */
+  cantidad?: number
+  tipo?: Exclude<TipoMovimiento, 'transferencia'>
+  /** null borra la alerta. Si no viene, no se toca. */
+  stock_minimo?: number | null
+  nota?: string
 }
 
-/** Suma/resta unidades de stock (no baja de 0). */
-export async function ajustarStock(id: string, delta: number): Promise<Producto> {
-  await wait(90)
-  const db = getDB()
-  const producto = db.productos.find((p) => p.id === id)
-  if (!producto) throw new Error('Producto no encontrado')
-  producto.stock = Math.max(0, producto.stock + delta)
-  producto.actualizadoEn = new Date().toISOString()
-  persist()
-  return { ...producto }
+export interface TransferenciaInput {
+  producto: number
+  origen: number
+  destino: number
+  cantidad: number
+  nota?: string
+}
+
+export function listarSucursales(): Promise<Sucursal[]> {
+  return api.get<Sucursal[]>('/inventario/sucursales/', token())
+}
+
+export function crearSucursal(input: { nombre: string; orden?: number }): Promise<Sucursal> {
+  return api.post<Sucursal>('/inventario/sucursales/', input, token())
+}
+
+export function actualizarSucursal(
+  id: number,
+  input: Partial<{ nombre: string; orden: number; activa: boolean }>,
+): Promise<Sucursal> {
+  return api.patch<Sucursal>(`/inventario/sucursales/${id}/`, input, token())
+}
+
+export function eliminarSucursal(id: number): Promise<void> {
+  return api.del<void>(`/inventario/sucursales/${id}/`, token())
+}
+
+export function listarStock(): Promise<StockRow[]> {
+  return api.get<StockRow[]>('/inventario/stock/', token())
+}
+
+export function ajustarStock(
+  input: AjusteInput,
+): Promise<{ stock: StockRow; movimiento: MovimientoStock | null }> {
+  return api.post('/inventario/stock/ajustar/', input, token())
+}
+
+export function transferirStock(
+  input: TransferenciaInput,
+): Promise<{ origen: StockRow; destino: StockRow }> {
+  return api.post('/inventario/stock/transferir/', input, token())
+}
+
+export function listarMovimientos(params: {
+  producto?: number
+  sucursal?: number
+  limite?: number
+}): Promise<MovimientoStock[]> {
+  const query = new URLSearchParams()
+  if (params.producto) query.set('producto', String(params.producto))
+  if (params.sucursal) query.set('sucursal', String(params.sucursal))
+  if (params.limite) query.set('limite', String(params.limite))
+  const sufijo = query.toString() ? `?${query.toString()}` : ''
+  return api.get<MovimientoStock[]>(`/inventario/movimientos/${sufijo}`, token())
 }

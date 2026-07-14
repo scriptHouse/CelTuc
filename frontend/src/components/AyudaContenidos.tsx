@@ -371,6 +371,71 @@ export function AyudaDolar() {
   )
 }
 
+// =========================================================== INVENTARIO ====
+
+export function AyudaInventario() {
+  return (
+    <>
+      <AyudaSeccion titulo="Qué es esta pantalla">
+        <p>
+          El <b>stock real de cada sucursal</b>, conectado al catálogo central: los productos y
+          sus precios son los mismos de la pantalla Productos (se mueven solos con el dólar).
+          Acá solo se manejan <b>cantidades</b>: cuántas unidades hay, dónde, y cuándo reponer.
+        </p>
+        <AyudaCampos
+          campos={[
+            [<>Pestañas de sucursal</>, <>Elegís qué local estás mirando (Solar, Centro…). <b>Todas</b> muestra las dos columnas juntas con el total.</>],
+            [<>Vistas</>, <>«Con stock» es el día a día; «Todo el catálogo» muestra también lo que está en 0; «Bajo mínimo» es la lista de reposición.</>],
+            [<>Botones − / +</>, <>Restan o suman de a una unidad (vendí una / encontré una). Quedan registrados con tu usuario.</>],
+            [<>El lápiz ✎</>, <>Abre el detalle: cantidad exacta, stock mínimo, transferencia a otra sucursal y los últimos movimientos.</>],
+          ]}
+        />
+      </AyudaSeccion>
+
+      <AyudaSeccion titulo="Cómo cargar mercadería que llegó">
+        <AyudaPasos
+          pasos={[
+            <>Pará en la pestaña de la sucursal donde entró (ej: <b>Solar</b>).</>,
+            <>Buscá el producto (ej: <b>funda Spigen Liquid Air</b>). La búsqueda recorre todo el catálogo, tenga stock o no.</>,
+            <>Tocá <b>+</b> por cada unidad, o el <b>✎</b> para poner la cantidad exacta (ej: llegaron 10) y una nota tipo «pedido del mayorista».</>,
+          ]}
+        />
+        <AyudaEjemplo titulo="llegaron 5 cargadores 20W a Centro">
+          <p className="tnum">
+            Pestaña Centro → buscar «fuente 20» → ✎ → cantidad 8 (había 3) → nota «llegó pedido»
+            → Guardar. El movimiento queda registrado: +5, quién y cuándo.
+          </p>
+        </AyudaEjemplo>
+      </AyudaSeccion>
+
+      <AyudaSeccion titulo="Transferir entre sucursales">
+        <AyudaPasos
+          pasos={[
+            <>Abrí el <b>✎</b> del producto parado en la sucursal de <b>origen</b>.</>,
+            <>En «Transferir a otra sucursal» poné la cantidad y el destino.</>,
+            <>Listo: sale de una y entra en la otra <b>en una sola operación</b> (nunca queda por la mitad).</>,
+          ]}
+        />
+      </AyudaSeccion>
+
+      <AyudaSeccion titulo="El stock mínimo (alertas de reposición)">
+        <p>
+          Si a un producto le ponés un mínimo (ej: <b>2</b>), cuando la cantidad llega a ese
+          número la fila se marca y el producto aparece en la vista «Bajo mínimo» y en el bloque
+          «Reposición» del Panel. Sin mínimo cargado, no hay alerta.
+        </p>
+      </AyudaSeccion>
+
+      <AyudaTip>
+        Todo cambio de stock queda en el historial con usuario, fecha, cantidad y nota (lo ves
+        abajo del detalle ✎). Los administradores además pueden gestionar las sucursales desde el
+        botón de arriba y ver el <b>costo</b> de cada producto. Los precios NO se editan acá:
+        eso vive en Productos.
+      </AyudaTip>
+    </>
+  )
+}
+
 // ================================================================ FICHA ====
 
 export function AyudaFichaEquipo() {

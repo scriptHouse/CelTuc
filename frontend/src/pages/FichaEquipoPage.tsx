@@ -14,6 +14,7 @@ import type { ItemPrecioService, ModeloEquipo, ProductoCatalogo } from '@/types'
 import { listarDispositivos, listarSecciones } from '@/services/preciosService'
 import { listarModelos } from '@/services/cotizaciones'
 import { listarCategorias, listarProductos } from '@/services/productos'
+import { listarStock, listarSucursales } from '@/services/inventario'
 import { useAuth } from '@/store/auth'
 import { money0, num, usd, usd0 } from '@/lib/format'
 import { cn, ctStagger } from '@/lib/utils'
@@ -51,6 +52,7 @@ export function FichaEquipoPage() {
   const puedeService = tienePermiso(usuario?.permisos, 'ver_precios_service', usuario?.es_administrador)
   const puedeProductos = tienePermiso(usuario?.permisos, 'ver_productos', usuario?.es_administrador)
     || tienePermiso(usuario?.permisos, 'ver_equipos', usuario?.es_administrador)
+  const puedeInventario = tienePermiso(usuario?.permisos, 'ver_inventario', usuario?.es_administrador)
 
   const { data: dispositivos = [], isLoading } = useQuery({
     queryKey: ['service-dispositivos'],
@@ -80,6 +82,31 @@ export function FichaEquipoPage() {
     enabled: puedeProductos,
     retry: false,
   })
+  // Stock por sucursal (Inventario): suma contexto a Venta y Accesorios.
+  const { data: stock = [] } = useQuery({
+    queryKey: ['inv-stock'],
+    queryFn: listarStock,
+    enabled: puedeInventario,
+    retry: false,
+  })
+  const { data: sucursales = [] } = useQuery({
+    queryKey: ['inv-sucursales'],
+    queryFn: listarSucursales,
+    enabled: puedeInventario,
+    retry: false,
+  })
+  const stockDe = useMemo(() => {
+    const porProducto = new Map<number, Array<{ sucursal: string; cantidad: number }>>()
+    if (!puedeInventario) return porProducto
+    const nombreSucursal = new Map(sucursales.map((s) => [s.id, s.nombre]))
+    for (const fila of stock) {
+      if (fila.cantidad <= 0) continue
+      const lista = porProducto.get(fila.producto) ?? []
+      lista.push({ sucursal: nombreSucursal.get(fila.sucursal) ?? '', cantidad: fila.cantidad })
+      porProducto.set(fila.producto, lista)
+    }
+    return porProducto
+  }, [stock, sucursales, puedeInventario])
 
   const activos = useMemo(
     () =>
@@ -254,6 +281,7 @@ export function FichaEquipoPage() {
                         <p className="text-sm font-semibold text-ink-900">{p.nombre}</p>
                         {p.nuevo && <Badge tone="solid">Nuevo</Badge>}
                         {p.a_pedido && <Badge tone="outline">A pedido</Badge>}
+                        {puedeInventario && <StockChips filas={stockDe.get(p.id)} />}
                       </div>
                       {p.nota && <p className="mt-0.5 text-xs text-ink-400">{p.nota}</p>}
                     </div>
@@ -360,6 +388,7 @@ export function FichaEquipoPage() {
                       <div className="flex flex-wrap items-center gap-1.5">
                         <p className="text-sm font-semibold text-ink-900">{p.nombre}</p>
                         {p.calidad && <Badge tone="soft">{p.calidad}</Badge>}
+                        {puedeInventario && <StockChips filas={stockDe.get(p.id)} />}
                       </div>
                       {p.nota && <p className="mt-0.5 text-xs text-ink-400">{p.nota}</p>}
                     </div>
@@ -374,6 +403,18 @@ export function FichaEquipoPage() {
         </div>
       )}
     </div>
+  )
+}
+
+/** Stock por sucursal, del Inventario: "Solar 3 · Centro 1" (o "sin stock"). */
+function StockChips({ filas }: { filas?: Array<{ sucursal: string; cantidad: number }> }) {
+  if (!filas || filas.length === 0) {
+    return <Badge tone="outline">sin stock</Badge>
+  }
+  return (
+    <Badge tone="soft" className="tnum">
+      {filas.map((f) => `${f.sucursal} ${num(f.cantidad)}`).join(' · ')}
+    </Badge>
   )
 }
 

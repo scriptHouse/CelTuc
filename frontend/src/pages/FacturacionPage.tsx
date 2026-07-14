@@ -42,7 +42,7 @@ import {
   type EmisorInput,
   type NuevoComprobante,
 } from '@/services/facturacion'
-import { listarProductos } from '@/services/inventario'
+import { listarProductos } from '@/services/productos'
 import {
   calcularTotales,
   condicionesClientePara,
@@ -163,7 +163,19 @@ export function FacturacionPage() {
     enabled: emisorId != null,
   })
 
-  const { data: productos = [] } = useQuery({ queryKey: ['productos'], queryFn: listarProductos })
+  // Sugerencias de ítems para la factura: el catálogo REAL (precio de lista vivo).
+  const { data: catalogo = [] } = useQuery({ queryKey: ['productos-items'], queryFn: listarProductos })
+  const productos = useMemo(
+    () =>
+      catalogo
+        .filter((p) => p.activo && p.efectivo?.lista_ars != null)
+        .map((p) => ({
+          id: String(p.id),
+          nombre: [p.nombre, p.calidad].filter(Boolean).join(' · '),
+          precio: Number(p.efectivo.lista_ars),
+        })),
+    [catalogo],
+  )
 
   const [facturaModal, setFacturaModal] = useState(false)
   const [emisorModal, setEmisorModal] = useState(false)
