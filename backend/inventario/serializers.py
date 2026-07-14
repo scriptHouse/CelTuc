@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from productos.models import Producto
 
-from .models import MovimientoStock, StockProducto, Sucursal
+from .models import ItemVenta, MovimientoStock, StockProducto, Sucursal, Venta
 
 
 class SucursalSerializer(serializers.ModelSerializer):
@@ -80,6 +80,61 @@ class AjusteStockSerializer(serializers.Serializer):
         if not tiene_delta and not tiene_cantidad and 'stock_minimo' not in data:
             raise serializers.ValidationError('No hay nada para cambiar.')
         return data
+
+
+class ItemVentaSerializer(serializers.ModelSerializer):
+    producto = serializers.PrimaryKeyRelatedField(read_only=True)
+    nombre = serializers.CharField(source='producto.nombre', read_only=True)
+    precio_unitario = serializers.DecimalField(
+        max_digits=14, decimal_places=2, coerce_to_string=False,
+    )
+    subtotal = serializers.DecimalField(
+        max_digits=16, decimal_places=2, read_only=True, coerce_to_string=False,
+    )
+
+    class Meta:
+        model = ItemVenta
+        fields = ('producto', 'nombre', 'cantidad', 'precio_unitario', 'subtotal')
+
+
+class VentaSerializer(serializers.ModelSerializer):
+    sucursal = serializers.PrimaryKeyRelatedField(read_only=True)
+    sucursal_nombre = serializers.CharField(source='sucursal.nombre', read_only=True)
+    total = serializers.DecimalField(max_digits=14, decimal_places=2, coerce_to_string=False)
+    usuario = serializers.SerializerMethodField()
+    items = ItemVentaSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Venta
+        fields = (
+            'id', 'sucursal', 'sucursal_nombre', 'forma_pago', 'nota', 'total',
+            'usuario', 'items', 'creado',
+        )
+
+    def get_usuario(self, obj):
+        return obj.creado_por.username if obj.creado_por_id else None
+
+
+class ItemVentaInputSerializer(serializers.Serializer):
+    producto = serializers.PrimaryKeyRelatedField(queryset=Producto.objects.all())
+    cantidad = serializers.IntegerField(min_value=1)
+    precio_unitario = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0)
+
+
+class CrearVentaSerializer(serializers.Serializer):
+    """Entrada de POST /ventas/: la venta de mostrador que descuenta stock."""
+
+    sucursal = _campo_sucursal()
+    forma_pago = serializers.ChoiceField(
+        choices=Venta.FormaPago.choices, default=Venta.FormaPago.EFECTIVO,
+    )
+    nota = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    items = ItemVentaInputSerializer(many=True)
+
+    def validate_items(self, value):
+        if not value:
+            raise serializers.ValidationError('Agregá al menos un producto.')
+        return value
 
 
 class TransferenciaStockSerializer(serializers.Serializer):

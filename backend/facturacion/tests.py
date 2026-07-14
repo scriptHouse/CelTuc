@@ -9,6 +9,7 @@ import base64
 import datetime
 import json
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.core import mail
 from django.test import TestCase, override_settings
@@ -167,6 +168,100 @@ class EmisorPermisosTests(TestCase):
     def test_facturador_puede_listar_emisores(self):
         r = self._client(self.fact).get(reverse('facturacion:emisor-list'))
         self.assertEqual(r.status_code, 200)
+
+
+class EmitirDescuentaStockTests(TestCase):
+    """Al emitir con `sucursal_stock` + `producto` en los items, baja el stock.
+
+    La emision en ARCA se mockea (devuelve un comprobante ya creado); lo que se
+    prueba es el hook de stock: descuenta con nota "Factura ...", nunca deja
+    negativo y los problemas van como `avisos_stock` sin voltear la factura.
+    """
+
+    def setUp(self):
+        from inventario.models import Sucursal, aplicar_ajuste
+        from productos.models import CategoriaProducto, Producto
+
+        rol = Rol.objects.create(nombre='CajeroStock')
+        rol.permisos.set(Permiso.objects.filter(codigo='ver_facturacion'))
+        self.fact = Usuario.objects.create_user(
+            email='fs@celtuc.ar', username='facstock', password='x', rol=rol,
+        )
+        self.emisor = Emisor.objects.create(
+            nombre='Emisor Test', condicion='monotributista', cuit='20111111112', punto_venta=1,
+        )
+        categoria, _ = CategoriaProducto.objects.get_or_create(nombre='Categoria fact test')
+        self.producto = Producto.objects.create(categoria=categoria, nombre='Fuente fact test')
+        self.sucursal = Sucursal.objects.create(nombre='Solar fact test', orden=90)
+        aplicar_ajuste(self.producto, self.sucursal, delta=5)
+
+        self.cliente = APIClient()
+        self.cliente.force_authenticate(self.fact)
+
+    def _emitir_mock(self, emisor, datos, usuario=None):
+        comp = Comprobante.objects.create(
+            emisor=emisor, tipo='C', punto_venta=1,
+            numero=(Comprobante.objects.count() + 1),
+            cliente_nombre=datos['cliente_nombre'],
+            cliente_condicion=datos['cliente_condicion'],
+            neto=100, iva=0, total=100, cae='999',
+        )
+        return comp
+
+    def _payload(self, cantidad, con_producto=True, con_sucursal=True):
+        item = {'descripcion': 'Fuente', 'cantidad': cantidad, 'precio_unitario': 100}
+        if con_producto:
+            item['producto'] = self.producto.id
+        payload = {
+            'emisor': self.emisor.id,
+            'cliente_nombre': 'Cliente',
+            'cliente_condicion': 'consumidor_final',
+            'items': [item],
+        }
+        if con_sucursal:
+            payload['sucursal_stock'] = self.sucursal.id
+        return payload
+
+    @patch('facturacion.views.servicio.emitir')
+    def test_descuenta_stock_con_nota_de_factura(self, mock_emitir):
+        from inventario.models import MovimientoStock, StockProducto
+        mock_emitir.side_effect = self._emitir_mock
+        r = self.cliente.post(reverse('facturacion:comprobante-list'),
+                              self._payload(2), format='json')
+        self.assertEqual(r.status_code, 201)
+        self.assertNotIn('avisos_stock', r.data)
+        fila = StockProducto.objects.get(producto=self.producto, sucursal=self.sucursal)
+        self.assertEqual(fila.cantidad, 3)
+        mov = MovimientoStock.objects.get(tipo=MovimientoStock.Tipo.VENTA)
+        self.assertEqual(mov.delta, -2)
+        self.assertIn('Factura C', mov.nota)
+        # Lo que llego a ARCA no incluye el campo `producto`.
+        datos_emitidos = mock_emitir.call_args.args[1]
+        self.assertNotIn('producto', datos_emitidos['items'][0])
+
+    @patch('facturacion.views.servicio.emitir')
+    def test_sin_stock_avisa_pero_la_factura_sale(self, mock_emitir):
+        from inventario.models import StockProducto
+        mock_emitir.side_effect = self._emitir_mock
+        r = self.cliente.post(reverse('facturacion:comprobante-list'),
+                              self._payload(50), format='json')
+        self.assertEqual(r.status_code, 201)  # la factura salio igual
+        self.assertIn('avisos_stock', r.data)
+        self.assertIn('stock suficiente', r.data['avisos_stock'][0])
+        fila = StockProducto.objects.get(producto=self.producto, sucursal=self.sucursal)
+        self.assertEqual(fila.cantidad, 5)  # intacto, nunca negativo
+
+    @patch('facturacion.views.servicio.emitir')
+    def test_sin_sucursal_no_toca_stock(self, mock_emitir):
+        from inventario.models import MovimientoStock, StockProducto
+        mock_emitir.side_effect = self._emitir_mock
+        r = self.cliente.post(reverse('facturacion:comprobante-list'),
+                              self._payload(2, con_sucursal=False), format='json')
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(
+            StockProducto.objects.get(producto=self.producto, sucursal=self.sucursal).cantidad, 5,
+        )
+        self.assertEqual(MovimientoStock.objects.filter(tipo=MovimientoStock.Tipo.VENTA).count(), 0)
 
 
 @override_settings(

@@ -28,7 +28,7 @@ export interface StockRow {
   actualizado: string // ISO
 }
 
-export type TipoMovimiento = 'ingreso' | 'egreso' | 'ajuste' | 'transferencia'
+export type TipoMovimiento = 'ingreso' | 'egreso' | 'ajuste' | 'transferencia' | 'venta'
 
 export interface MovimientoStock {
   id: number
@@ -97,6 +97,48 @@ export function transferirStock(
   input: TransferenciaInput,
 ): Promise<{ origen: StockRow; destino: StockRow }> {
   return api.post('/inventario/stock/transferir/', input, token())
+}
+
+export type FormaPago = 'efectivo' | 'transferencia' | 'tarjeta' | 'otro'
+
+export interface ItemVenta {
+  producto: number
+  nombre: string
+  cantidad: number
+  precio_unitario: number
+  subtotal: number
+}
+
+/** Venta de mostrador: registrarla descuenta el stock (backend REAL). */
+export interface Venta {
+  id: number
+  sucursal: number
+  sucursal_nombre: string
+  forma_pago: FormaPago
+  nota: string
+  total: number
+  usuario: string | null
+  items: ItemVenta[]
+  creado: string // ISO
+}
+
+export interface VentaInput {
+  sucursal: number
+  forma_pago: FormaPago
+  nota?: string
+  items: Array<{ producto: number; cantidad: number; precio_unitario: number }>
+}
+
+export function registrarVenta(input: VentaInput): Promise<Venta> {
+  return api.post<Venta>('/inventario/ventas/', input, token())
+}
+
+export function listarVentas(params: { sucursal?: number; limite?: number } = {}): Promise<Venta[]> {
+  const query = new URLSearchParams()
+  if (params.sucursal) query.set('sucursal', String(params.sucursal))
+  if (params.limite) query.set('limite', String(params.limite))
+  const sufijo = query.toString() ? `?${query.toString()}` : ''
+  return api.get<Venta[]>(`/inventario/ventas/${sufijo}`, token())
 }
 
 export function listarMovimientos(params: {

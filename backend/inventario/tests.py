@@ -6,7 +6,15 @@ from rest_framework.test import APIClient
 from productos.models import CategoriaProducto, Producto
 from usuarios.models import Permiso, Rol, Usuario
 
-from .models import MovimientoStock, StockProducto, Sucursal, aplicar_ajuste, aplicar_transferencia
+from .models import (
+    MovimientoStock,
+    StockProducto,
+    Sucursal,
+    Venta,
+    aplicar_ajuste,
+    aplicar_transferencia,
+    registrar_venta,
+)
 
 
 def _producto(nombre='Fuente 20W test', **kwargs):
@@ -70,6 +78,86 @@ class OperacionesStockTests(TestCase):
         self.assertFalse(
             StockProducto.objects.filter(producto=self.producto, sucursal=self.centro).exists(),
         )
+
+
+class VentasTests(TestCase):
+    """La venta de mostrador: descuenta stock, registra kardex, todo o nada."""
+
+    def setUp(self):
+        self.fuente = _producto('Fuente venta test')
+        self.cable = _producto('Cable venta test')
+        self.solar = Sucursal.objects.create(nombre='Solar test', orden=1)
+        aplicar_ajuste(self.fuente, self.solar, delta=10)
+        aplicar_ajuste(self.cable, self.solar, delta=2)
+
+        from usuarios.models import Permiso, Rol, Usuario
+        rol = Rol.objects.create(nombre='Mostrador ventas test')
+        rol.permisos.set(Permiso.objects.filter(codigo='ver_inventario'))
+        self.empleado = Usuario.objects.create_user(
+            email='vtas@celtuc.test', username='vtas.inv', password='x', rol=rol,
+        )
+        self.cliente = APIClient()
+        self.cliente.force_authenticate(self.empleado)
+
+    def test_registrar_venta_descuenta_y_totaliza(self):
+        venta = registrar_venta(
+            self.solar,
+            [(self.fuente, 2, Decimal('38800')), (self.cable, 1, Decimal('11600'))],
+            forma_pago='efectivo',
+            usuario=self.empleado,
+        )
+        self.assertEqual(venta.total, Decimal('89200'))
+        self.assertEqual(StockProducto.objects.get(producto=self.fuente, sucursal=self.solar).cantidad, 8)
+        self.assertEqual(StockProducto.objects.get(producto=self.cable, sucursal=self.solar).cantidad, 1)
+        movs = MovimientoStock.objects.filter(tipo=MovimientoStock.Tipo.VENTA)
+        self.assertEqual(movs.count(), 2)
+        self.assertTrue(all(m.nota == f'Venta #{venta.pk}' for m in movs))
+
+    def test_venta_sin_stock_no_registra_nada(self):
+        from django.core.exceptions import ValidationError
+        with self.assertRaises(ValidationError):
+            registrar_venta(
+                self.solar,
+                [(self.fuente, 1, Decimal('38800')), (self.cable, 5, Decimal('11600'))],
+            )
+        # Atomica: ni la venta, ni items, ni el descuento de la fuente.
+        self.assertEqual(Venta.objects.count(), 0)
+        self.assertEqual(StockProducto.objects.get(producto=self.fuente, sucursal=self.solar).cantidad, 10)
+        self.assertEqual(MovimientoStock.objects.filter(tipo=MovimientoStock.Tipo.VENTA).count(), 0)
+
+    def test_api_post_y_get(self):
+        r = self.cliente.post('/api/inventario/ventas/', {
+            'sucursal': self.solar.id,
+            'forma_pago': 'tarjeta',
+            'nota': 'cliente del 13',
+            'items': [
+                {'producto': self.fuente.id, 'cantidad': 1, 'precio_unitario': 38800},
+            ],
+        }, format='json')
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(float(r.data['total']), 38800)
+        self.assertEqual(r.data['usuario'], 'vtas.inv')
+        self.assertEqual(r.data['items'][0]['nombre'], 'Fuente venta test')
+        r = self.cliente.get(f'/api/inventario/ventas/?sucursal={self.solar.id}')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(r.data), 1)
+
+    def test_api_sin_stock_400_legible(self):
+        r = self.cliente.post('/api/inventario/ventas/', {
+            'sucursal': self.solar.id,
+            'items': [{'producto': self.cable.id, 'cantidad': 99, 'precio_unitario': 100}],
+        }, format='json')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('stock suficiente', r.data['detail'])
+
+    def test_api_requiere_permiso(self):
+        from usuarios.models import Usuario
+        pelado = Usuario.objects.create_user(
+            email='pelado.v@celtuc.test', username='pelado.v', password='x',
+        )
+        cliente = APIClient()
+        cliente.force_authenticate(pelado)
+        self.assertEqual(cliente.get('/api/inventario/ventas/').status_code, 403)
 
 
 class ApiInventarioTests(TestCase):

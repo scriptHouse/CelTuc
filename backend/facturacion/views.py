@@ -34,6 +34,44 @@ from .serializers import (
 logger = logging.getLogger(__name__)
 
 
+def _descontar_stock(comprobante, sucursal, items, productos, usuario):
+    """Descuenta stock por los items facturados con producto del catalogo.
+
+    Devuelve la lista de avisos legibles por lo que NO se pudo descontar. La
+    factura ya esta emitida en ARCA, asi que aca nunca se levanta error.
+    """
+    if sucursal is None or not any(productos):
+        return []
+    from django.core.exceptions import ValidationError
+
+    from inventario.models import MovimientoStock, aplicar_ajuste
+
+    avisos = []
+    nota = f'Factura {comprobante.tipo} {comprobante.numero_formateado}'
+    for item, producto in zip(items, productos):
+        if producto is None:
+            continue
+        cantidad = item['cantidad']
+        if cantidad != int(cantidad):
+            avisos.append(f'"{item["descripcion"]}": la cantidad no es entera, '
+                          'el stock quedo sin descontar.')
+            continue
+        try:
+            aplicar_ajuste(
+                producto, sucursal,
+                delta=-int(cantidad),
+                tipo=MovimientoStock.Tipo.VENTA,
+                nota=nota,
+                usuario=usuario,
+            )
+        except ValidationError as exc:
+            avisos.append(' '.join(exc.messages))
+        except Exception:  # el stock jamas voltea una factura emitida
+            logger.exception('Error descontando stock del comprobante %s', comprobante.pk)
+            avisos.append(f'"{item["descripcion"]}": no se pudo descontar el stock.')
+    return avisos
+
+
 # ===== Emisores =====
 
 class _EmisoresVisiblesMixin:
@@ -94,6 +132,14 @@ class ComprobanteListCreateView(generics.ListCreateAPIView):
         entrada.is_valid(raise_exception=True)
         datos = dict(entrada.validated_data)
         emisor = datos.pop('emisor')
+        # Datos de stock: se separan ANTES de emitir (ARCA no los conoce).
+        sucursal_stock = datos.pop('sucursal_stock', None)
+        items_limpios, productos_stock = [], []
+        for item in datos['items']:
+            item = dict(item)
+            productos_stock.append(item.pop('producto', None))
+            items_limpios.append(item)
+        datos['items'] = items_limpios
         usuario = request.user if request.user.is_authenticated else None
         try:
             comprobante = servicio.emitir(emisor, datos, usuario=usuario)
@@ -105,8 +151,16 @@ class ComprobanteListCreateView(generics.ListCreateAPIView):
                 {'detail': f'Error inesperado al emitir: {exc}'},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
+        # La factura ya salio (tiene CAE): el stock se descuenta a continuacion y
+        # si algo no se puede (sin stock, cantidad no entera) se AVISA, jamas se
+        # anula la emision ni se deja stock negativo.
+        avisos_stock = _descontar_stock(comprobante, sucursal_stock, items_limpios,
+                                        productos_stock, usuario)
         salida = ComprobanteDetailSerializer(comprobante, context=self.get_serializer_context())
-        return Response(salida.data, status=status.HTTP_201_CREATED)
+        cuerpo = dict(salida.data)
+        if avisos_stock:
+            cuerpo['avisos_stock'] = avisos_stock
+        return Response(cuerpo, status=status.HTTP_201_CREATED)
 
 
 class ComprobanteDetailView(AuditoriaMixin, generics.RetrieveUpdateDestroyAPIView):

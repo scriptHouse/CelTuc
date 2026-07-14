@@ -3,7 +3,9 @@ from unfold.admin import ModelAdmin
 
 from comun.admin import ModeloBaseAdminMixin
 
-from .models import MovimientoStock, StockProducto, Sucursal
+from unfold.admin import TabularInline
+
+from .models import ItemVenta, MovimientoStock, StockProducto, Sucursal, Venta
 
 _AUDITORIA = (
     'creado', 'actualizado', 'creado_por', 'actualizado_por',
@@ -26,6 +28,22 @@ class StockProductoAdmin(ModeloBaseAdminMixin, ModelAdmin):
     list_filter = ('sucursal',)
     search_fields = ('producto__nombre',)
     autocomplete_fields = ('producto',)
+    readonly_fields = _AUDITORIA
+
+
+class ItemVentaInline(TabularInline):
+    model = ItemVenta
+    extra = 0
+    fields = ('producto', 'cantidad', 'precio_unitario')
+    autocomplete_fields = ('producto',)
+
+
+@admin.register(Venta)
+class VentaAdmin(ModeloBaseAdminMixin, ModelAdmin):
+    list_display = ('id', 'creado', 'sucursal', 'forma_pago', 'total', 'creado_por')
+    list_filter = ('sucursal', 'forma_pago')
+    search_fields = ('nota', 'items__producto__nombre')
+    inlines = (ItemVentaInline,)
     readonly_fields = _AUDITORIA
 
 

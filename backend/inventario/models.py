@@ -8,6 +8,8 @@ y para que, mas adelante, una venta descuente stock sola.
 Los precios NO viven aca: se leen del catalogo (`productos`), derivados del
 dolar del negocio como siempre.
 """
+from decimal import Decimal
+
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 
@@ -91,6 +93,7 @@ class MovimientoStock(ModeloBase):
         EGRESO = 'egreso', 'Egreso'
         AJUSTE = 'ajuste', 'Ajuste'
         TRANSFERENCIA = 'transferencia', 'Transferencia'
+        VENTA = 'venta', 'Venta'
 
     producto = models.ForeignKey(
         'productos.Producto',
@@ -117,6 +120,75 @@ class MovimientoStock(ModeloBase):
 
     def __str__(self):
         return f'{self.get_tipo_display()} {self.delta:+d} · {self.producto} en {self.sucursal}'
+
+
+class Venta(ModeloBase):
+    """Una venta de mostrador: productos del catalogo que salen de una sucursal.
+
+    Registrarla descuenta el stock (un `MovimientoStock` tipo VENTA por item,
+    con nota "Venta #N"). Es la version minima que hace mover el stock solo;
+    la caja diaria (arqueo) sigue siendo el modulo Caja, y la factura fiscal
+    sigue siendo Facturacion (que tambien puede descontar stock por su lado).
+    """
+
+    class FormaPago(models.TextChoices):
+        EFECTIVO = 'efectivo', 'Efectivo'
+        TRANSFERENCIA = 'transferencia', 'Transferencia'
+        TARJETA = 'tarjeta', 'Tarjeta'
+        OTRO = 'otro', 'Otro'
+
+    sucursal = models.ForeignKey(
+        Sucursal,
+        on_delete=models.PROTECT,
+        related_name='ventas',
+        verbose_name='sucursal',
+    )
+    forma_pago = models.CharField(
+        'forma de pago', max_length=20, choices=FormaPago.choices, default=FormaPago.EFECTIVO,
+    )
+    nota = models.CharField('nota', max_length=200, blank=True)
+    total = models.DecimalField('total ($)', max_digits=14, decimal_places=2, default=0)
+
+    class Meta:
+        db_table = 'inventario_ventas'
+        verbose_name = 'venta'
+        verbose_name_plural = 'ventas'
+        ordering = ('-creado', '-id')
+
+    def __str__(self):
+        return f'Venta #{self.pk} · {self.sucursal} · ${self.total}'
+
+
+class ItemVenta(models.Model):
+    """Un renglon de la venta, con el precio al momento de vender."""
+
+    venta = models.ForeignKey(
+        Venta,
+        on_delete=models.CASCADE,
+        related_name='items',
+        verbose_name='venta',
+    )
+    producto = models.ForeignKey(
+        'productos.Producto',
+        on_delete=models.PROTECT,
+        related_name='items_venta',
+        verbose_name='producto',
+    )
+    cantidad = models.PositiveIntegerField('cantidad', default=1)
+    precio_unitario = models.DecimalField('precio unitario ($)', max_digits=14, decimal_places=2)
+
+    class Meta:
+        db_table = 'inventario_ventas_items'
+        verbose_name = 'item de venta'
+        verbose_name_plural = 'items de venta'
+        ordering = ('id',)
+
+    def __str__(self):
+        return f'{self.producto} x{self.cantidad}'
+
+    @property
+    def subtotal(self):
+        return self.cantidad * self.precio_unitario
 
 
 # ===== Operaciones =====
@@ -166,6 +238,45 @@ def aplicar_ajuste(producto, sucursal, *, delta=None, cantidad=None, tipo='',
                 actualizado_por=usuario,
             )
         return fila, movimiento
+
+
+def registrar_venta(sucursal, items, *, forma_pago='', nota='', usuario=None):
+    """Crea la venta y descuenta el stock, todo o nada.
+
+    `items` es una lista de (producto, cantidad, precio_unitario). Si algun
+    producto no tiene stock suficiente en la sucursal, NO se registra nada
+    (ValidationError legible con el nombre del producto).
+    """
+    if not items:
+        raise ValidationError('La venta no tiene items.')
+    with transaction.atomic():
+        venta = Venta.objects.create(
+            sucursal=sucursal,
+            forma_pago=forma_pago or Venta.FormaPago.EFECTIVO,
+            nota=nota,
+            creado_por=usuario,
+            actualizado_por=usuario,
+        )
+        total = Decimal('0')
+        for producto, cantidad, precio_unitario in items:
+            cantidad = int(cantidad)
+            if cantidad <= 0:
+                raise ValidationError(f'Cantidad invalida para "{producto.nombre}".')
+            precio = Decimal(str(precio_unitario))
+            ItemVenta.objects.create(
+                venta=venta, producto=producto, cantidad=cantidad, precio_unitario=precio,
+            )
+            total += cantidad * precio
+            aplicar_ajuste(
+                producto, sucursal,
+                delta=-cantidad,
+                tipo=MovimientoStock.Tipo.VENTA,
+                nota=f'Venta #{venta.pk}',
+                usuario=usuario,
+            )
+        venta.total = total
+        venta.save(update_fields=['total'])
+    return venta
 
 
 def aplicar_transferencia(producto, origen, destino, cantidad, *, nota='', usuario=None):

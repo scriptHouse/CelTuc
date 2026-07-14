@@ -178,6 +178,8 @@ export interface Comprobante {
   emisor_nombre?: string
   emisor_cuit?: string
   emisor_condicion?: CondicionEmisor
+  /** Solo en la respuesta de emisión: qué stock NO se pudo descontar. */
+  avisos_stock?: string[]
   tipo: TipoComprobante
   concepto?: number
   punto_venta: number

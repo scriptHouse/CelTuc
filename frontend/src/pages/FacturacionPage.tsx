@@ -43,6 +43,7 @@ import {
   type NuevoComprobante,
 } from '@/services/facturacion'
 import { listarProductos } from '@/services/productos'
+import { listarSucursales } from '@/services/inventario'
 import {
   calcularTotales,
   condicionesClientePara,
@@ -191,9 +192,13 @@ export function FacturacionPage() {
     mutationFn: (input: NuevoComprobante) => emitirComprobante(input),
     onSuccess: (c) => {
       invalidarComprobantes()
+      queryClient.invalidateQueries({ queryKey: ['inv-stock'] })
+      queryClient.invalidateQueries({ queryKey: ['inv-movimientos'] })
       setFacturaModal(false)
       setDetalleId(c.id)
       toast.success(`Factura ${c.tipo} emitida`, c.cae ? `CAE ${c.cae}` : `Total ${money(c.total)}`)
+      // La factura salió igual: esto es solo lo que NO se pudo descontar.
+      if (c.avisos_stock?.length) toast.info('Stock sin descontar', c.avisos_stock.join(' '))
     },
     onError: (e: Error) => toast.error('No se pudo emitir', e.message),
   })
@@ -745,6 +750,23 @@ function NuevaFacturaModal({
   const [pagada, setPagada] = useState(false)
   const [observaciones, setObservaciones] = useState('')
   const [items, setItems] = useState<BorradorItem[]>([])
+  const [sucursalStock, setSucursalStock] = useState('')
+
+  // Sucursales del Inventario: si la cuenta no tiene permiso (403) el selector
+  // de stock directamente no se muestra y la factura sale como siempre.
+  const { data: sucursalesStock = [] } = useQuery({
+    queryKey: ['inv-sucursales'],
+    queryFn: listarSucursales,
+    enabled: open,
+    retry: false,
+  })
+  const opcionesSucursalStock = [
+    { value: '', label: 'No descontar stock' },
+    ...sucursalesStock
+      .filter((s) => s.activa)
+      .sort((a, b) => a.orden - b.orden)
+      .map((s) => ({ value: String(s.id), label: `Descontar de ${s.nombre}` })),
+  ]
 
   useEffect(() => {
     if (!open) return
@@ -759,6 +781,7 @@ function NuevaFacturaModal({
     setPagada(false)
     setObservaciones('')
     setItems([{ key: nextKey(), descripcion: '', cantidad: 1, precioUnitario: 0 }])
+    setSucursalStock('')
   }, [open, emisor])
 
   const tipo = tipoComprobante(emisor.condicion, condicion)
@@ -815,6 +838,8 @@ function NuevaFacturaModal({
         descripcion: i.descripcion.trim(),
         cantidad: i.cantidad,
         precio_unitario: i.precioUnitario,
+        // Con sucursal elegida, los ítems del catálogo descuentan stock.
+        producto: sucursalStock && i.productoId ? Number(i.productoId) : undefined,
       }))
     if (validos.length === 0) {
       toast.error('Sin ítems', 'Agregá al menos un ítem con descripción y cantidad.')
@@ -830,6 +855,7 @@ function NuevaFacturaModal({
       observaciones: observaciones.trim() || undefined,
       estado_cobro: pagada ? 'pagada' : 'pendiente',
       items: validos,
+      sucursal_stock: sucursalStock ? Number(sucursalStock) : undefined,
     })
   }
 
@@ -945,6 +971,20 @@ function NuevaFacturaModal({
             placeholder="Agregar producto del inventario…"
             onChange={(v) => v && addFromProducto(v)}
           />
+
+          {opcionesSucursalStock.length > 1 && (
+            <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
+              <Select
+                options={opcionesSucursalStock}
+                value={sucursalStock}
+                onChange={setSucursalStock}
+                className="sm:w-64"
+              />
+              <p className="text-xs text-ink-400">
+                Los ítems agregados desde el catálogo descuentan stock de esa sucursal al emitir.
+              </p>
+            </div>
+          )}
 
           <div className="space-y-2.5">
             {items.map((it) => (

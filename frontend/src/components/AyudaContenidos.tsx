@@ -501,6 +501,29 @@ export function AyudaCaja() {
         </p>
       </AyudaSeccion>
 
+      <AyudaSeccion titulo="La venta de mostrador (el botón VERDE)">
+        <p>
+          El bloque <b>«Venta de mostrador»</b> es la parte de Caja que ya está conectada al
+          sistema de verdad — por eso su botón es <b>verde</b>. Registrar una venta ahí
+          <b> descuenta el stock del Inventario al instante</b> y queda en el historial con tu
+          usuario ("Venta #N").
+        </p>
+        <AyudaPasos
+          pasos={[
+            <>Tocá <b>«Registrar venta»</b> y elegí la <b>sucursal</b> de la que sale la mercadería.</>,
+            <>Buscá los productos (el precio se sugiere solo: <b>cash</b> para efectivo/transferencia, <b>lista</b> para tarjeta) y ajustá cantidades o precios si hace falta.</>,
+            <>Elegí la forma de pago y confirmá: el stock baja al instante y la venta queda registrada.</>,
+          ]}
+        />
+        <AyudaEjemplo titulo="venden una funda y un templado en Solar">
+          <p className="tnum">
+            Registrar venta → Solar → «Silicone Case» (+1) y «Templado 9D» (+1) → Efectivo →
+            Registrar. En Inventario: Silicone Case y Templado bajan 1 en Solar, con el
+            movimiento «Venta #12» a tu nombre.
+          </p>
+        </AyudaEjemplo>
+      </AyudaSeccion>
+
       <AyudaSeccion titulo="Abrir el turno">
         <AyudaPasos
           pasos={[

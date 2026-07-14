@@ -6,15 +6,24 @@ from rest_framework.views import APIView
 from comun.mixins import AuditoriaMixin
 from usuarios.permissions import LecturaConPermisoEscrituraAdmin, LecturaYEscrituraConPermiso
 
-from .models import MovimientoStock, StockProducto, aplicar_ajuste, aplicar_transferencia
+from .models import (
+    MovimientoStock,
+    StockProducto,
+    Sucursal,
+    Venta,
+    aplicar_ajuste,
+    aplicar_transferencia,
+    registrar_venta,
+)
 from .serializers import (
     AjusteStockSerializer,
+    CrearVentaSerializer,
     MovimientoStockSerializer,
     StockProductoSerializer,
     SucursalSerializer,
     TransferenciaStockSerializer,
+    VentaSerializer,
 )
-from .models import Sucursal
 
 
 class _BaseInventario:
@@ -113,6 +122,44 @@ class TransferirStockView(_BaseInventario, APIView):
             'origen': StockProductoSerializer(salida).data,
             'destino': StockProductoSerializer(entrada_fila).data,
         })
+
+
+class VentasView(_BaseInventario, APIView):
+    """Ventas de mostrador: POST registra y descuenta stock; GET lista.
+
+    Como los ajustes, la puede usar cualquier cuenta con `ver_inventario`.
+    """
+
+    permission_classes = [LecturaYEscrituraConPermiso]
+
+    def get(self, request):
+        qs = Venta.objects.select_related('sucursal', 'creado_por').prefetch_related(
+            'items__producto',
+        )
+        sucursal = request.query_params.get('sucursal')
+        if sucursal:
+            qs = qs.filter(sucursal_id=sucursal)
+        try:
+            limite = min(int(request.query_params.get('limite', 50)), 500)
+        except ValueError:
+            limite = 50
+        return Response(VentaSerializer(qs[:limite], many=True).data)
+
+    def post(self, request):
+        entrada = CrearVentaSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        datos = entrada.validated_data
+        try:
+            venta = registrar_venta(
+                datos['sucursal'],
+                [(i['producto'], i['cantidad'], i['precio_unitario']) for i in datos['items']],
+                forma_pago=datos.get('forma_pago', ''),
+                nota=datos.get('nota', ''),
+                usuario=request.user,
+            )
+        except ValidationError as e:
+            return Response({'detail': ' '.join(e.messages)}, status=400)
+        return Response(VentaSerializer(venta).data, status=201)
 
 
 class MovimientoListView(_BaseInventario, generics.ListAPIView):

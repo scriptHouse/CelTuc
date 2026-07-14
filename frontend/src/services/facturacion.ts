@@ -80,7 +80,14 @@ export interface NuevoComprobante {
   alicuota_iva?: number
   observaciones?: string
   estado_cobro?: EstadoCobro
-  items: Array<Pick<ItemComprobante, 'descripcion' | 'cantidad' | 'precio_unitario'>>
+  items: Array<
+    Pick<ItemComprobante, 'descripcion' | 'cantidad' | 'precio_unitario'> & {
+      /** Producto del catálogo: junto con `sucursal_stock`, descuenta stock. */
+      producto?: number
+    }
+  >
+  /** Sucursal de la que descontar el stock de los ítems con `producto`. */
+  sucursal_stock?: number
 }
 
 /** Emite el comprobante: el backend pide el CAE a ARCA y lo guarda. */

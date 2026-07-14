@@ -570,6 +570,7 @@ const TIPO_LABEL: Record<MovimientoStock['tipo'], string> = {
   egreso: 'Egreso',
   ajuste: 'Ajuste',
   transferencia: 'Transferencia',
+  venta: 'Venta',
 }
 
 function DetalleStockModal({

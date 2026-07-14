@@ -13,6 +13,9 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
+from inventario.models import Sucursal
+from productos.models import Producto
+
 from .arca import qr
 from .models import Comprobante, Emisor, ItemComprobante
 
@@ -79,10 +82,15 @@ class ItemComprobanteSerializer(serializers.ModelSerializer):
     subtotal = serializers.DecimalField(
         max_digits=16, decimal_places=2, read_only=True, coerce_to_string=False,
     )
+    # Producto del catalogo (opcional, solo entrada): si ademas viene
+    # `sucursal_stock` en el comprobante, el item descuenta stock al emitir.
+    producto = serializers.PrimaryKeyRelatedField(
+        queryset=Producto.objects.all(), required=False, allow_null=True, write_only=True,
+    )
 
     class Meta:
         model = ItemComprobante
-        fields = ('id', 'descripcion', 'cantidad', 'precio_unitario', 'subtotal')
+        fields = ('id', 'descripcion', 'cantidad', 'precio_unitario', 'subtotal', 'producto')
         read_only_fields = ('id', 'subtotal')
 
     def validate_descripcion(self, value):
@@ -115,6 +123,11 @@ class CrearComprobanteSerializer(serializers.Serializer):
         choices=Comprobante.EstadoCobro.choices, default=Comprobante.EstadoCobro.PENDIENTE,
     )
     items = ItemComprobanteSerializer(many=True)
+    # Si viene, los items que traen `producto` descuentan stock de esta sucursal
+    # despues de emitir (la emision NUNCA falla por stock: se avisa aparte).
+    sucursal_stock = serializers.PrimaryKeyRelatedField(
+        queryset=Sucursal.objects.filter(activa=True), required=False, allow_null=True,
+    )
 
     def validate_cliente_nombre(self, value):
         value = value.strip()

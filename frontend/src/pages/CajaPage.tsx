@@ -47,6 +47,7 @@ import { useConfirm } from '@/components/ConfirmProvider'
 import { AyudaInfo } from '@/components/ui/AyudaInfo'
 import { AyudaCaja } from '@/components/AyudaContenidos'
 import { CierreWizard } from '@/components/caja/CierreWizard'
+import { VentaRapida } from '@/components/caja/VentaRapida'
 import { CajaManager } from '@/components/caja/CajaManager'
 import { AperturaModal, type AperturaValues } from '@/components/caja/AperturaModal'
 import { MovimientoModal, type MovimientoValues } from '@/components/caja/MovimientoModal'
@@ -281,6 +282,10 @@ export function CajaPage() {
           </>
         }
       />
+
+      {/* Venta de mostrador (backend REAL: descuenta stock). El resto de la
+          página sigue siendo front-only hasta que Caja tenga su backend. */}
+      <VentaRapida />
 
       {/* Selector multi-caja */}
       {config?.multiCaja && cajasVisibles.length > 1 && (
