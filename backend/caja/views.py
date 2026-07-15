@@ -189,7 +189,7 @@ class CierresView(_BaseCaja, APIView):
             'sesion', 'sesion__caja', 'sesion__creado_por', 'creado_por',
         ).prefetch_related('sesion__movimientos__creado_por')
         caja = request.query_params.get('caja')
-        if caja:
+        if caja and caja.isdigit():
             qs = qs.filter(sesion__caja_id=caja)
         try:
             limite = min(int(request.query_params.get('limite', 100)), 500)

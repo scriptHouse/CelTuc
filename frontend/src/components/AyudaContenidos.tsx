@@ -565,6 +565,15 @@ export function AyudaCaja() {
         />
       </AyudaSeccion>
 
+      <AyudaSeccion titulo="Modo práctica (para aprender sin miedo)">
+        <p>
+          El botón <b>«Práctica»</b> (el del matraz) abre una <b>caja de mentira</b> con una guía de
+          4 pasos que se tilda sola: abrir, vender, mover plata y cerrar con arqueo. Todo lo de ese
+          modo es de juguete — <b>no toca el stock, no se guarda nada</b> y desaparece al salir. Es
+          la forma ideal de enseñarle la caja a alguien nuevo antes de operar en serio.
+        </p>
+      </AyudaSeccion>
+
       <AyudaTip>
         Los cierres son <b>inmutables</b>: si algo quedó mal cargado, se corrige con un movimiento
         en el turno siguiente, nunca editando un Z. Tocá cualquier fila del historial para ver el

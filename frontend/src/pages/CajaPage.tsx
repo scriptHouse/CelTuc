@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Clock,
   EyeOff,
+  FlaskConical,
   Lock,
   LockOpen,
   Plus,
@@ -17,19 +18,10 @@ import {
   Wallet,
 } from 'lucide-react'
 import type { CajaRegistradora, CierreCaja, MovimientoCaja, SesionCaja } from '@/types'
-import {
-  abrirCaja,
-  cajasConTurnoAbierto,
-  calcularResumenSesion,
-  cerrarCaja,
-  eliminarMovimiento,
-  listarCajas,
-  listarCierres,
-  obtenerConfigCaja,
-  obtenerEstadoCaja,
-  registrarMovimiento,
-  ultimoCierreDeCaja,
-} from '@/services/caja'
+import * as cajaReal from '@/services/caja'
+import * as cajaPractica from '@/services/cajaPractica'
+import { calcularResumenSesion } from '@/services/caja'
+import { resetPractica } from '@/services/cajaPractica'
 import { fechaHora, money, money0, num } from '@/lib/format'
 import { cn, coincideBusqueda, ctDelay, ctStagger } from '@/lib/utils'
 import { esAdmin } from '@/lib/permisos'
@@ -48,6 +40,8 @@ import { AyudaInfo } from '@/components/ui/AyudaInfo'
 import { AyudaCaja } from '@/components/AyudaContenidos'
 import { CierreWizard } from '@/components/caja/CierreWizard'
 import { VentaRapida } from '@/components/caja/VentaRapida'
+import { GuiaPractica } from '@/components/caja/GuiaPractica'
+import { VentaPracticaModal, type VentaPracticaValues } from '@/components/caja/VentaPracticaModal'
 import { CajaManager } from '@/components/caja/CajaManager'
 import { AperturaModal, type AperturaValues } from '@/components/caja/AperturaModal'
 import { MovimientoModal, type MovimientoValues } from '@/components/caja/MovimientoModal'
@@ -58,8 +52,9 @@ import { MEDIOS_PAGO_CAJA } from '@/types'
 
 /**
  * Caja: turnos con fondo declarado, movimientos con motivo, arqueo guiado en
- * 3 pasos y comprobantes Z inmutables. Modelado sobre los POS de referencia
- * (Square, Shopify, Lightspeed, Toast, Odoo, Fudo). 100 % front por ahora.
+ * 3 pasos y comprobantes Z inmutables, todo contra el backend real. Incluye un
+ * MODO PRÁCTICA (patrón "test mode" de Stripe): mismo módulo, servicio sandbox
+ * en memoria — nada se crea ni se guarda, ideal para aprender el ciclo.
  */
 
 const zNum = (n: number) => `Z-${String(n).padStart(4, '0')}`
@@ -88,12 +83,20 @@ export function CajaPage() {
   const admin = esAdmin(usuario)
   const nombreUsuario = usuario?.username ?? 'operador'
 
+  // --- Modo práctica (sandbox en memoria, patrón "test mode" de Stripe) --------
+  // El mismo módulo con otro servicio detrás: nada de lo que pase acá llega al
+  // backend, y el prefijo de query keys separa las cachés real/práctica.
+
+  const [practica, setPractica] = useState(false)
+  const svc = practica ? cajaPractica : cajaReal
+  const kp = practica ? 'caja-practica' : 'caja'
+
   // --- Datos ------------------------------------------------------------------
 
-  const { data: config } = useQuery({ queryKey: ['caja', 'config'], queryFn: obtenerConfigCaja })
-  const { data: cajas = [], isLoading: cargandoCajas } = useQuery({ queryKey: ['caja', 'cajas'], queryFn: listarCajas })
-  const { data: abiertas = [] } = useQuery({ queryKey: ['caja', 'abiertas'], queryFn: cajasConTurnoAbierto })
-  const { data: cierres = [], isLoading: cargandoCierres } = useQuery({ queryKey: ['caja', 'cierres'], queryFn: listarCierres })
+  const { data: config } = useQuery({ queryKey: [kp, 'config'], queryFn: () => svc.obtenerConfigCaja() })
+  const { data: cajas = [], isLoading: cargandoCajas } = useQuery({ queryKey: [kp, 'cajas'], queryFn: () => svc.listarCajas() })
+  const { data: abiertas = [] } = useQuery({ queryKey: [kp, 'abiertas'], queryFn: () => svc.cajasConTurnoAbierto() })
+  const { data: cierres = [], isLoading: cargandoCierres } = useQuery({ queryKey: [kp, 'cierres'], queryFn: () => svc.listarCierres() })
 
   const cajasVisibles = useMemo(() => {
     const activas = cajas.filter((c) => c.activa)
@@ -110,13 +113,13 @@ export function CajaPage() {
   const cajaActual = cajasVisibles.find((c) => c.id === cajaId) ?? null
 
   const { data: estado, isLoading: cargandoEstado } = useQuery({
-    queryKey: ['caja', 'estado', cajaId],
-    queryFn: () => obtenerEstadoCaja(cajaId),
+    queryKey: [kp, 'estado', cajaId],
+    queryFn: () => svc.obtenerEstadoCaja(cajaId),
     enabled: Boolean(cajaId),
   })
   const { data: ultimoCierre = null } = useQuery({
-    queryKey: ['caja', 'ultimo', cajaId],
-    queryFn: () => ultimoCierreDeCaja(cajaId),
+    queryKey: [kp, 'ultimo', cajaId],
+    queryFn: () => svc.ultimoCierreDeCaja(cajaId),
     enabled: Boolean(cajaId),
   })
 
@@ -131,12 +134,12 @@ export function CajaPage() {
   // el cierre ciego está activo (en el arqueo no lo ve nadie).
   const ocultarEsperado = Boolean(config?.cierreCiego) && !admin
 
-  const invalidar = () => queryClient.invalidateQueries({ queryKey: ['caja'] })
+  const invalidar = () => queryClient.invalidateQueries({ queryKey: [kp] })
 
   // --- Mutaciones ---------------------------------------------------------------
 
   const abrir = useMutation({
-    mutationFn: abrirCaja,
+    mutationFn: (input: cajaReal.AbrirCajaInput) => svc.abrirCaja(input),
     onSuccess: (s: SesionCaja) => {
       invalidar()
       toast.success('Caja abierta', `Turno #${s.numero} con fondo de ${money0(s.fondoInicial)}.`)
@@ -144,7 +147,7 @@ export function CajaPage() {
     onError: (e: Error) => toast.error('No se pudo abrir la caja', e.message),
   })
   const registrar = useMutation({
-    mutationFn: registrarMovimiento,
+    mutationFn: (input: cajaReal.MovimientoInput) => svc.registrarMovimiento(input),
     onSuccess: () => {
       invalidar()
       toast.success('Movimiento registrado')
@@ -152,7 +155,7 @@ export function CajaPage() {
     onError: (e: Error) => toast.error('No se pudo registrar', e.message),
   })
   const borrarMov = useMutation({
-    mutationFn: eliminarMovimiento,
+    mutationFn: (id: string) => svc.eliminarMovimiento(id),
     onSuccess: () => {
       invalidar()
       toast.success('Movimiento eliminado')
@@ -160,7 +163,7 @@ export function CajaPage() {
     onError: (e: Error) => toast.error('No se pudo eliminar', e.message),
   })
   const cerrar = useMutation({
-    mutationFn: cerrarCaja,
+    mutationFn: (input: cajaReal.CerrarCajaInput) => svc.cerrarCaja(input),
     onSuccess: invalidar,
   })
 
@@ -168,10 +171,38 @@ export function CajaPage() {
 
   const [modalApertura, setModalApertura] = useState(false)
   const [modalMovimiento, setModalMovimiento] = useState(false)
+  const [modalVentaPractica, setModalVentaPractica] = useState(false)
   const [configAbierta, setConfigAbierta] = useState(false)
   const [detalle, setDetalle] = useState<CierreCaja | null>(null)
   const [q, setQ] = useState('')
   const [filtroCaja, setFiltroCaja] = useState('')
+
+  function entrarPractica() {
+    resetPractica()
+    queryClient.removeQueries({ queryKey: ['caja-practica'] })
+    // El id se fija en el mismo render: así ninguna query del sandbox sale con
+    // el id de una caja real (ni al revés, al salir).
+    setCajaId('practica')
+    setPractica(true)
+    toast.info('Modo práctica activado', 'Todo lo que hagas acá es de mentira y desaparece al salir.')
+  }
+
+  async function salirPractica(sinConfirmar = false) {
+    if (!sinConfirmar) {
+      const ok = await confirm({
+        title: '¿Salir del modo práctica?',
+        description: 'Todo lo que hiciste acá se descarta. La caja real está intacta.',
+        confirmLabel: 'Salir',
+        cancelLabel: 'Seguir practicando',
+      })
+      if (!ok) return
+    }
+    setPractica(false)
+    setModalVentaPractica(false)
+    setCajaId('') // el efecto elige la primera caja real
+    resetPractica()
+    queryClient.removeQueries({ queryKey: ['caja-practica'] })
+  }
 
   // El asistente de cierre trabaja sobre una foto del turno: así la pantalla de
   // éxito (comprobante Z) sobrevive al refetch que deja la sesión en null.
@@ -215,6 +246,21 @@ export function CajaPage() {
     }
   }
 
+  async function handleVentaPractica(values: VentaPracticaValues) {
+    if (!sesion) return
+    try {
+      await registrar.mutateAsync({
+        sesionId: sesion.id,
+        usuario: nombreUsuario,
+        tipo: 'venta',
+        ...values,
+      })
+      setModalVentaPractica(false)
+    } catch {
+      /* el toast sale del onError */
+    }
+  }
+
   async function handleEliminarMovimiento(m: MovimientoCaja) {
     const ok = await confirm({
       title: '¿Eliminar el movimiento?',
@@ -229,19 +275,29 @@ export function CajaPage() {
 
   if (ctxCierre && config) {
     return (
-      <CierreWizard
-        caja={ctxCierre.caja}
-        sesion={ctxCierre.sesion}
-        movimientos={ctxCierre.movimientos}
-        config={config}
-        onCerrar={(input) =>
-          cerrar.mutateAsync({ ...input, sesionId: ctxCierre.sesion.id, usuario: nombreUsuario })
-        }
-        onSalir={() => {
-          setCtxCierre(null)
-          invalidar()
-        }}
-      />
+      <>
+        {practica && (
+          <div className="animate-fade-in mx-auto mb-4 flex max-w-3xl items-center justify-center">
+            <span className="inline-flex items-center gap-2 rounded-full bg-amber-500/10 px-3.5 py-1.5 text-xs font-semibold text-amber-700 ring-1 ring-amber-500/30 dark:text-amber-400">
+              <FlaskConical className="h-3.5 w-3.5" aria-hidden />
+              Modo práctica — este cierre no se guarda
+            </span>
+          </div>
+        )}
+        <CierreWizard
+          caja={ctxCierre.caja}
+          sesion={ctxCierre.sesion}
+          movimientos={ctxCierre.movimientos}
+          config={config}
+          onCerrar={(input) =>
+            cerrar.mutateAsync({ ...input, sesionId: ctxCierre.sesion.id, usuario: nombreUsuario })
+          }
+          onSalir={() => {
+            setCtxCierre(null)
+            invalidar()
+          }}
+        />
+      </>
     )
   }
 
@@ -250,17 +306,27 @@ export function CajaPage() {
   return (
     <div className="animate-fade-in">
       <PageHeader
-        icon={Wallet}
-        eyebrow="Operación"
+        icon={practica ? FlaskConical : Wallet}
+        eyebrow={practica ? 'Modo práctica' : 'Operación'}
         title="Caja"
-        subtitle="Turnos con fondo declarado, movimientos con motivo y arqueo con comprobante Z."
+        subtitle={
+          practica
+            ? 'Caja de mentira para aprender el ciclo completo: nada de esto se guarda.'
+            : 'Turnos con fondo declarado, movimientos con motivo y arqueo con comprobante Z.'
+        }
         className="ct-rise"
         actions={
           <>
             <AyudaInfo titulo="Cómo usar Caja">
               <AyudaCaja />
             </AyudaInfo>
-            {admin && (
+            {!practica && (
+              <Button variant="outline" onClick={entrarPractica} title="Ensayá sin tocar los datos reales">
+                <FlaskConical className="h-4 w-4" />
+                <span className="hidden sm:inline">Práctica</span>
+              </Button>
+            )}
+            {admin && !practica && (
               <Button variant="outline" onClick={() => setConfigAbierta(true)}>
                 <SlidersHorizontal className="h-4 w-4" />
                 <span className="hidden sm:inline">Configurar</span>
@@ -283,9 +349,23 @@ export function CajaPage() {
         }
       />
 
-      {/* Venta de mostrador: descuenta stock Y entra sola al arqueo del turno
-          abierto de la caja seleccionada (una sola carga). */}
-      <VentaRapida cajaId={cajaId || undefined} />
+      {practica ? (
+        /* La guía del sandbox: 4 pasos que se tildan solos a medida que ensayás. */
+        <GuiaPractica
+          sesion={sesion}
+          movimientos={movimientos}
+          cierres={cierres}
+          onAbrir={() => setModalApertura(true)}
+          onVenta={() => setModalVentaPractica(true)}
+          onMovimiento={() => setModalMovimiento(true)}
+          onCerrar={() => cajaActual && sesion && setCtxCierre({ caja: cajaActual, sesion, movimientos })}
+          onSalir={() => salirPractica()}
+        />
+      ) : (
+        /* Venta de mostrador: descuenta stock Y entra sola al arqueo del turno
+           abierto de la caja seleccionada (una sola carga). */
+        <VentaRapida cajaId={cajaId || undefined} />
+      )}
 
       {/* Selector multi-caja */}
       {config?.multiCaja && cajasVisibles.length > 1 && (
@@ -494,7 +574,8 @@ export function CajaPage() {
           <div>
             <h2 className="text-lg font-bold tracking-[-0.02em] text-ink-950">Historial de cierres</h2>
             <p className="text-xs text-ink-400">
-              {num(cierres.length)} comprobantes Z · inmutables, con arqueo completo
+              {num(cierres.length)} {cierres.length === 1 ? 'comprobante' : 'comprobantes'} Z ·{' '}
+              {practica ? 'de práctica — se descartan al salir' : 'inmutables, con arqueo completo'}
             </p>
           </div>
         </div>
@@ -632,8 +713,16 @@ export function CajaPage() {
           onSubmit={handleMovimiento}
         />
       )}
+      {practica && (
+        <VentaPracticaModal
+          open={modalVentaPractica}
+          saving={registrar.isPending}
+          onClose={() => setModalVentaPractica(false)}
+          onSubmit={handleVentaPractica}
+        />
+      )}
       <CierreDetalleModal open={Boolean(detalle)} cierre={detalle} onClose={() => setDetalle(null)} />
-      {admin && <CajaManager open={configAbierta} onClose={() => setConfigAbierta(false)} />}
+      {admin && !practica && <CajaManager open={configAbierta} onClose={() => setConfigAbierta(false)} />}
     </div>
   )
 }
