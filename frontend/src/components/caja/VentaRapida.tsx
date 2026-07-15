@@ -21,11 +21,10 @@ import { Modal } from '@/components/ui/Modal'
 import { useToast } from '@/components/ToastProvider'
 
 /**
- * Venta rápida (mostrador): el "modulito" con BACKEND REAL dentro de Caja.
- * Registrar una venta descuenta el stock del Inventario al instante (kardex
- * "Venta #N" con usuario y hora). El resto de Caja (turnos, arqueo, Z) sigue
- * siendo front-only — por eso el botón va en VERDE: distingue lo que ya está
- * conectado de verdad.
+ * Venta rápida (mostrador), todo backend real: registrar una venta descuenta
+ * el stock del Inventario al instante (kardex "Venta #N") Y entra sola al
+ * arqueo del turno abierto de la caja seleccionada — una sola carga para las
+ * dos cosas. El botón va en VERDE: es la puerta de entrada de la plata.
  */
 
 interface Linea {
@@ -45,7 +44,7 @@ const FORMAS: Array<{ value: FormaPago; label: string }> = [
   { value: 'otro', label: 'Otro' },
 ]
 
-export function VentaRapida() {
+export function VentaRapida({ cajaId }: { cajaId?: string }) {
   const [abierta, setAbierta] = useState(false)
 
   // Sin permiso de inventario (la API responde 403) el modulito no se muestra:
@@ -92,7 +91,7 @@ export function VentaRapida() {
             <p className="text-sm font-semibold text-ink-900">
               Venta de mostrador
               <span className="ml-2 align-middle text-[0.65rem] font-semibold uppercase tracking-[0.08em] text-emerald-700 dark:text-emerald-400">
-                descuenta stock · en vivo
+                descuenta stock · entra al arqueo
               </span>
             </p>
             <p className="tnum truncate text-xs text-ink-400">
@@ -113,7 +112,12 @@ export function VentaRapida() {
         </div>
       </Card>
 
-      <VentaModal abierta={abierta} onCerrar={() => setAbierta(false)} sucursales={sucursales} />
+      <VentaModal
+        abierta={abierta}
+        onCerrar={() => setAbierta(false)}
+        sucursales={sucursales}
+        cajaId={cajaId}
+      />
     </>
   )
 }
@@ -122,10 +126,12 @@ function VentaModal({
   abierta,
   onCerrar,
   sucursales,
+  cajaId,
 }: {
   abierta: boolean
   onCerrar: () => void
   sucursales: Array<{ id: number; nombre: string; activa: boolean; orden: number }>
+  cajaId?: string
 }) {
   const toast = useToast()
   const queryClient = useQueryClient()
@@ -227,6 +233,7 @@ function VentaModal({
         sucursal: sucursalId,
         forma_pago: formaPago,
         nota: nota.trim(),
+        caja: cajaId ? Number(cajaId) : undefined,
         items: lineas.map((l) => ({
           producto: l.producto.id,
           cantidad: l.cantidad,
@@ -238,10 +245,14 @@ function VentaModal({
       queryClient.invalidateQueries({ queryKey: ['inv-stock'] })
       queryClient.invalidateQueries({ queryKey: ['inv-ventas'] })
       queryClient.invalidateQueries({ queryKey: ['inv-movimientos'] })
+      queryClient.invalidateQueries({ queryKey: ['caja'] })
       toast.success(
         `Venta #${venta.id} registrada`,
-        `${money0(Number(venta.total))} en ${venta.sucursal_nombre} — stock descontado.`,
+        `${money0(Number(venta.total))} en ${venta.sucursal_nombre} — stock descontado${venta.movimiento_caja ? ' y anotada en el arqueo' : ''}.`,
       )
+      if (!venta.movimiento_caja) {
+        toast.info('La venta no entró en ningún arqueo', venta.aviso_caja ?? 'No hay un turno de caja abierto.')
+      }
       onCerrar()
     },
     onError: (e) =>

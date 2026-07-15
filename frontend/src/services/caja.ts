@@ -8,82 +8,228 @@ import type {
   SesionCaja,
   TipoMovimientoCaja,
 } from '@/types'
-import { getCajaDB, mediosEnCero, persistCaja } from '@/lib/cajaDb'
-import { uid, wait } from '@/lib/db'
+import { MEDIOS_PAGO_CAJA } from '@/types'
+import { api } from '@/lib/api'
+import { useAuth } from '@/store/auth'
 
 /**
- * Servicio del módulo Caja. 100 % front por ahora: lee/escribe la base local
- * (`lib/cajaDb.ts`) detrás de promesas, con la misma forma que tendrá la API
- * real cuando se conecte el backend.
+ * Servicio de Caja contra el backend (Django REST, app `caja`). Mantiene las
+ * mismas firmas que tenía la versión demo en localStorage, así los componentes
+ * no cambian: acá adentro se traduce snake_case ↔ camelCase y los ids
+ * numéricos del backend viajan como string hacia la UI.
  */
+
+const token = () => useAuth.getState().access
+
+function mediosEnCero(): Record<MedioPagoCaja, number> {
+  const r = {} as Record<MedioPagoCaja, number>
+  for (const m of MEDIOS_PAGO_CAJA) r[m.value] = 0
+  return r
+}
+
+/** Normaliza un dict por medio del backend: todas las claves, valores numéricos. */
+function porMedio(dto: Record<string, number> | null | undefined): Record<MedioPagoCaja, number> {
+  const r = mediosEnCero()
+  for (const m of MEDIOS_PAGO_CAJA) r[m.value] = Number(dto?.[m.value] ?? 0)
+  return r
+}
+
+// ===== DTOs del backend ======================================================
+
+interface ConfigDTO {
+  cierre_ciego: boolean
+  tolerancia_activa: boolean
+  tolerancia_monto: number
+  retiros_habilitados: boolean
+  multi_caja: boolean
+  exigir_lote: boolean
+  fondo_sugerido: number
+  denominaciones: number[]
+}
+
+interface CajaDTO {
+  id: number
+  nombre: string
+  orden: number
+  activa: boolean
+  creado: string
+}
+
+interface SesionDTO {
+  id: number
+  caja: number
+  numero: number
+  estado: 'abierta' | 'cerrada'
+  abierta_por: string | null
+  abierta_en: string
+  fondo_inicial: number
+  conteo_apertura: Record<string, number> | null
+  nota_apertura: string
+}
+
+interface MovimientoDTO {
+  id: number
+  caja: number
+  sesion: number
+  tipo: TipoMovimientoCaja
+  medio: MedioPagoCaja
+  monto: number
+  motivo: string
+  detalle: string
+  venta: number | null
+  usuario: string | null
+  fecha: string
+}
+
+interface CierreDTO {
+  id: number
+  numero: number
+  caja: number
+  caja_nombre: string
+  sesion: number
+  sesion_numero: number
+  abierta_en: string
+  cerrada_en: string
+  abierta_por: string | null
+  cerrado_por: string | null
+  fondo_inicial: number
+  ventas_por_medio: Record<string, number>
+  operaciones_por_medio: Record<string, number>
+  ingresos: number
+  egresos: number
+  retiros: number
+  esperado_por_medio: Record<string, number>
+  contado_por_medio: Record<string, number>
+  conteo_cierre: Record<string, number> | null
+  diferencia_por_medio: Record<string, number>
+  diferencia_total: number
+  motivo_diferencia: string
+  nota_diferencia: string
+  cierre_ciego: boolean
+  fondo_siguiente: number
+  retiro_final: number
+  movimientos: MovimientoDTO[]
+}
+
+// ===== Mapeos DTO → tipos de la UI ==========================================
+
+function mapConfig(dto: ConfigDTO): CajaConfig {
+  return {
+    cierreCiego: dto.cierre_ciego,
+    toleranciaActiva: dto.tolerancia_activa,
+    toleranciaMonto: Number(dto.tolerancia_monto),
+    retirosHabilitados: dto.retiros_habilitados,
+    multiCaja: dto.multi_caja,
+    exigirLote: dto.exigir_lote,
+    fondoSugerido: Number(dto.fondo_sugerido),
+    denominaciones: dto.denominaciones.map(Number),
+  }
+}
+
+function mapCaja(dto: CajaDTO): CajaRegistradora {
+  return { id: String(dto.id), nombre: dto.nombre, activa: dto.activa, creadaEn: dto.creado }
+}
+
+function mapSesion(dto: SesionDTO): SesionCaja {
+  return {
+    id: String(dto.id),
+    cajaId: String(dto.caja),
+    numero: dto.numero,
+    estado: dto.estado,
+    abiertaPor: dto.abierta_por ?? '—',
+    abiertaEn: dto.abierta_en,
+    fondoInicial: Number(dto.fondo_inicial),
+    conteoApertura: (dto.conteo_apertura as ConteoBilletes | null) ?? undefined,
+    notaApertura: dto.nota_apertura || undefined,
+  }
+}
+
+function mapMovimiento(dto: MovimientoDTO): MovimientoCaja {
+  return {
+    id: String(dto.id),
+    cajaId: String(dto.caja),
+    sesionId: String(dto.sesion),
+    tipo: dto.tipo,
+    medio: dto.medio,
+    monto: Number(dto.monto),
+    motivo: dto.motivo,
+    detalle: dto.detalle || undefined,
+    usuario: dto.usuario ?? '—',
+    fecha: dto.fecha,
+  }
+}
+
+function mapCierre(dto: CierreDTO): CierreCaja {
+  return {
+    id: String(dto.id),
+    numero: dto.numero,
+    cajaId: String(dto.caja),
+    cajaNombre: dto.caja_nombre,
+    sesionId: String(dto.sesion),
+    sesionNumero: dto.sesion_numero,
+    abiertaEn: dto.abierta_en,
+    cerradaEn: dto.cerrada_en,
+    abiertaPor: dto.abierta_por ?? '—',
+    cerradoPor: dto.cerrado_por ?? '—',
+    fondoInicial: Number(dto.fondo_inicial),
+    ventasPorMedio: porMedio(dto.ventas_por_medio),
+    operacionesPorMedio: porMedio(dto.operaciones_por_medio),
+    ingresos: Number(dto.ingresos),
+    egresos: Number(dto.egresos),
+    retiros: Number(dto.retiros),
+    esperadoPorMedio: porMedio(dto.esperado_por_medio),
+    contadoPorMedio: porMedio(dto.contado_por_medio),
+    conteoCierre: (dto.conteo_cierre as ConteoBilletes | null) ?? undefined,
+    diferenciaPorMedio: porMedio(dto.diferencia_por_medio),
+    diferenciaTotal: Number(dto.diferencia_total),
+    motivoDiferencia: dto.motivo_diferencia || undefined,
+    notaDiferencia: dto.nota_diferencia || undefined,
+    cierreCiego: dto.cierre_ciego,
+    fondoSiguiente: Number(dto.fondo_siguiente),
+    retiroFinal: Number(dto.retiro_final),
+    movimientos: dto.movimientos.map(mapMovimiento),
+  }
+}
 
 // ===== Config =================================================================
 
 export async function obtenerConfigCaja(): Promise<CajaConfig> {
-  await wait()
-  return { ...getCajaDB().config, denominaciones: [...getCajaDB().config.denominaciones] }
+  return mapConfig(await api.get<ConfigDTO>('/caja/config/', token()))
 }
 
 export async function guardarConfigCaja(input: Partial<CajaConfig>): Promise<CajaConfig> {
-  await wait()
-  const db = getCajaDB()
-  const denominaciones = (input.denominaciones ?? db.config.denominaciones)
-    .slice()
-    .sort((a, b) => b - a)
-  if (denominaciones.length === 0) throw new Error('Dejá al menos una denominación activa.')
-  db.config = { ...db.config, ...input, denominaciones }
-  persistCaja()
-  return { ...db.config }
+  const body: Partial<ConfigDTO> = {}
+  if (input.cierreCiego !== undefined) body.cierre_ciego = input.cierreCiego
+  if (input.toleranciaActiva !== undefined) body.tolerancia_activa = input.toleranciaActiva
+  if (input.toleranciaMonto !== undefined) body.tolerancia_monto = input.toleranciaMonto
+  if (input.retirosHabilitados !== undefined) body.retiros_habilitados = input.retirosHabilitados
+  if (input.multiCaja !== undefined) body.multi_caja = input.multiCaja
+  if (input.exigirLote !== undefined) body.exigir_lote = input.exigirLote
+  if (input.fondoSugerido !== undefined) body.fondo_sugerido = input.fondoSugerido
+  if (input.denominaciones !== undefined) body.denominaciones = input.denominaciones
+  return mapConfig(await api.patch<ConfigDTO>('/caja/config/', body, token()))
 }
 
 // ===== Cajas ==================================================================
 
 export async function listarCajas(): Promise<CajaRegistradora[]> {
-  await wait()
-  return getCajaDB().cajas.map((c) => ({ ...c }))
+  const cajas = await api.get<CajaDTO[]>('/caja/cajas/', token())
+  return cajas.map(mapCaja)
 }
 
 export async function crearCaja(nombre: string): Promise<CajaRegistradora> {
-  await wait()
-  const db = getCajaDB()
-  const limpio = nombre.trim()
-  if (!limpio) throw new Error('El nombre no puede estar vacío.')
-  if (db.cajas.some((c) => c.nombre.toLowerCase() === limpio.toLowerCase())) {
-    throw new Error('Ya existe una caja con ese nombre.')
-  }
-  const caja: CajaRegistradora = { id: uid('caja'), nombre: limpio, activa: true, creadaEn: new Date().toISOString() }
-  db.cajas.push(caja)
-  persistCaja()
-  return { ...caja }
+  return mapCaja(await api.post<CajaDTO>('/caja/cajas/', { nombre: nombre.trim() }, token()))
 }
 
 export async function actualizarCaja(
   id: string,
   input: Partial<Pick<CajaRegistradora, 'nombre' | 'activa'>>,
 ): Promise<CajaRegistradora> {
-  await wait()
-  const db = getCajaDB()
-  const caja = db.cajas.find((c) => c.id === id)
-  if (!caja) throw new Error('La caja no existe.')
-  if (input.nombre !== undefined) {
-    const limpio = input.nombre.trim()
-    if (!limpio) throw new Error('El nombre no puede estar vacío.')
-    caja.nombre = limpio
-  }
-  if (input.activa !== undefined) caja.activa = input.activa
-  persistCaja()
-  return { ...caja }
+  return mapCaja(await api.patch<CajaDTO>(`/caja/cajas/${id}/`, input, token()))
 }
 
 export async function eliminarCaja(id: string): Promise<void> {
-  await wait()
-  const db = getCajaDB()
-  if (db.cajas.length <= 1) throw new Error('Tiene que quedar al menos una caja.')
-  if (db.sesiones.some((s) => s.cajaId === id && s.estado === 'abierta')) {
-    throw new Error('Cerrá el turno de esa caja antes de eliminarla.')
-  }
-  db.cajas = db.cajas.filter((c) => c.id !== id)
-  persistCaja()
+  await api.del<void>(`/caja/cajas/${id}/`, token())
 }
 
 // ===== Turno (sesión) =========================================================
@@ -95,23 +241,20 @@ export interface EstadoCaja {
 
 /** Turno abierto de una caja (o null) con sus movimientos ordenados por hora. */
 export async function obtenerEstadoCaja(cajaId: string): Promise<EstadoCaja> {
-  await wait()
-  const db = getCajaDB()
-  const sesion = db.sesiones.find((s) => s.cajaId === cajaId && s.estado === 'abierta') ?? null
-  if (!sesion) return { sesion: null, movimientos: [] }
-  const movimientos = db.movimientos
-    .filter((m) => m.sesionId === sesion.id)
-    .sort((a, b) => a.fecha.localeCompare(b.fecha))
-    .map((m) => ({ ...m }))
-  return { sesion: { ...sesion }, movimientos }
+  const dto = await api.get<{ sesion: SesionDTO | null; movimientos: MovimientoDTO[] }>(
+    `/caja/cajas/${cajaId}/estado/`,
+    token(),
+  )
+  return {
+    sesion: dto.sesion ? mapSesion(dto.sesion) : null,
+    movimientos: dto.movimientos.map(mapMovimiento),
+  }
 }
 
 /** Ids de las cajas que tienen un turno abierto (para el selector multi-caja). */
 export async function cajasConTurnoAbierto(): Promise<string[]> {
-  await wait(60)
-  return getCajaDB()
-    .sesiones.filter((s) => s.estado === 'abierta')
-    .map((s) => s.cajaId)
+  const ids = await api.get<number[]>('/caja/abiertas/', token())
+  return ids.map(String)
 }
 
 export interface AbrirCajaInput {
@@ -119,30 +262,22 @@ export interface AbrirCajaInput {
   fondoInicial: number
   conteoApertura?: ConteoBilletes
   notaApertura?: string
+  /** Lo determina el backend con la sesión; queda por compatibilidad de firma. */
   usuario: string
 }
 
 export async function abrirCaja(input: AbrirCajaInput): Promise<SesionCaja> {
-  await wait()
-  const db = getCajaDB()
-  if (db.sesiones.some((s) => s.cajaId === input.cajaId && s.estado === 'abierta')) {
-    throw new Error('Esa caja ya tiene un turno abierto.')
-  }
-  if (input.fondoInicial < 0) throw new Error('El fondo no puede ser negativo.')
-  const sesion: SesionCaja = {
-    id: uid('ses'),
-    cajaId: input.cajaId,
-    numero: db.proximoTurno++,
-    estado: 'abierta',
-    abiertaPor: input.usuario,
-    abiertaEn: new Date().toISOString(),
-    fondoInicial: input.fondoInicial,
-    conteoApertura: input.conteoApertura,
-    notaApertura: input.notaApertura?.trim() || undefined,
-  }
-  db.sesiones.push(sesion)
-  persistCaja()
-  return { ...sesion }
+  const dto = await api.post<SesionDTO>(
+    '/caja/abrir/',
+    {
+      caja: Number(input.cajaId),
+      fondo_inicial: input.fondoInicial,
+      conteo_apertura: input.conteoApertura ?? null,
+      nota_apertura: input.notaApertura ?? '',
+    },
+    token(),
+  )
+  return mapSesion(dto)
 }
 
 // ===== Movimientos ============================================================
@@ -154,54 +289,28 @@ export interface MovimientoInput {
   monto: number
   motivo: string
   detalle?: string
+  /** Lo determina el backend; queda por compatibilidad de firma. */
   usuario: string
 }
 
 export async function registrarMovimiento(input: MovimientoInput): Promise<MovimientoCaja> {
-  await wait()
-  const db = getCajaDB()
-  const sesion = db.sesiones.find((s) => s.id === input.sesionId && s.estado === 'abierta')
-  if (!sesion) throw new Error('El turno ya no está abierto.')
-  if (!(input.monto > 0)) throw new Error('El monto tiene que ser mayor a cero.')
-  if (input.tipo === 'retiro' && !db.config.retirosHabilitados) {
-    throw new Error('Los retiros a bóveda están deshabilitados en la configuración.')
-  }
-  // Un egreso/retiro no puede sacar más efectivo del que hay en el cajón.
-  if (input.tipo === 'egreso' || input.tipo === 'retiro') {
-    const movs = db.movimientos.filter((m) => m.sesionId === sesion.id)
-    const disponible = calcularResumenSesion(sesion, movs).esperadoPorMedio.efectivo
-    if (input.monto > disponible) {
-      throw new Error('No hay suficiente efectivo en caja para ese monto.')
-    }
-  }
-  const movimiento: MovimientoCaja = {
-    id: uid('mov'),
-    cajaId: sesion.cajaId,
-    sesionId: sesion.id,
-    tipo: input.tipo,
-    medio: input.tipo === 'venta' ? input.medio : 'efectivo',
-    monto: input.monto,
-    motivo: input.motivo.trim(),
-    detalle: input.detalle?.trim() || undefined,
-    usuario: input.usuario,
-    fecha: new Date().toISOString(),
-  }
-  db.movimientos.push(movimiento)
-  persistCaja()
-  return { ...movimiento }
+  const dto = await api.post<MovimientoDTO>(
+    '/caja/movimientos/',
+    {
+      sesion: Number(input.sesionId),
+      tipo: input.tipo,
+      medio: input.medio,
+      monto: input.monto,
+      motivo: input.motivo,
+      detalle: input.detalle ?? '',
+    },
+    token(),
+  )
+  return mapMovimiento(dto)
 }
 
 export async function eliminarMovimiento(id: string): Promise<void> {
-  await wait()
-  const db = getCajaDB()
-  const mov = db.movimientos.find((m) => m.id === id)
-  if (!mov) throw new Error('El movimiento no existe.')
-  const sesion = db.sesiones.find((s) => s.id === mov.sesionId)
-  if (!sesion || sesion.estado !== 'abierta') {
-    throw new Error('Los movimientos de un turno cerrado son inmutables.')
-  }
-  db.movimientos = db.movimientos.filter((m) => m.id !== id)
-  persistCaja()
+  await api.del<void>(`/caja/movimientos/${id}/`, token())
 }
 
 // ===== Resumen (esperado por medio) ==========================================
@@ -219,7 +328,7 @@ export interface ResumenSesion {
   esperadoPorMedio: Record<MedioPagoCaja, number>
 }
 
-/** Cálculo puro y sincrónico: lo usan la página, el asistente de cierre y el servicio. */
+/** Cálculo puro y sincrónico (mismo criterio que el backend al cerrar). */
 export function calcularResumenSesion(sesion: SesionCaja, movimientos: MovimientoCaja[]): ResumenSesion {
   const ventasPorMedio = mediosEnCero()
   const operacionesPorMedio = mediosEnCero()
@@ -268,82 +377,34 @@ export interface CerrarCajaInput {
   fondoSiguiente: number
   motivoDiferencia?: string
   notaDiferencia?: string
+  /** Lo determina el backend; queda por compatibilidad de firma. */
   usuario: string
 }
 
 export async function cerrarCaja(input: CerrarCajaInput): Promise<CierreCaja> {
-  await wait()
-  const db = getCajaDB()
-  const sesion = db.sesiones.find((s) => s.id === input.sesionId && s.estado === 'abierta')
-  if (!sesion) throw new Error('El turno ya no está abierto.')
-  if (input.fondoSiguiente < 0) throw new Error('El fondo siguiente no puede ser negativo.')
-
-  const caja = db.cajas.find((c) => c.id === sesion.cajaId)
-  const movimientos = db.movimientos
-    .filter((m) => m.sesionId === sesion.id)
-    .sort((a, b) => a.fecha.localeCompare(b.fecha))
-  const resumen = calcularResumenSesion(sesion, movimientos)
-
-  const diferenciaPorMedio = mediosEnCero()
-  let diferenciaTotal = 0
-  for (const medio of Object.keys(diferenciaPorMedio) as MedioPagoCaja[]) {
-    const d = (input.contadoPorMedio[medio] ?? 0) - resumen.esperadoPorMedio[medio]
-    diferenciaPorMedio[medio] = d
-    diferenciaTotal += d
-  }
-
-  const contadoEfectivo = input.contadoPorMedio.efectivo ?? 0
-  const cierre: CierreCaja = {
-    id: uid('cie'),
-    numero: db.proximoZ++,
-    cajaId: sesion.cajaId,
-    cajaNombre: caja?.nombre ?? 'Caja',
-    sesionId: sesion.id,
-    sesionNumero: sesion.numero,
-    abiertaEn: sesion.abiertaEn,
-    cerradaEn: new Date().toISOString(),
-    abiertaPor: sesion.abiertaPor,
-    cerradoPor: input.usuario,
-    fondoInicial: sesion.fondoInicial,
-    ventasPorMedio: resumen.ventasPorMedio,
-    operacionesPorMedio: resumen.operacionesPorMedio,
-    ingresos: resumen.ingresos,
-    egresos: resumen.egresos,
-    retiros: resumen.retiros,
-    esperadoPorMedio: resumen.esperadoPorMedio,
-    contadoPorMedio: { ...input.contadoPorMedio },
-    conteoCierre: input.conteoCierre,
-    diferenciaPorMedio,
-    diferenciaTotal,
-    motivoDiferencia: input.motivoDiferencia?.trim() || undefined,
-    notaDiferencia: input.notaDiferencia?.trim() || undefined,
-    cierreCiego: db.config.cierreCiego,
-    fondoSiguiente: input.fondoSiguiente,
-    retiroFinal: Math.max(0, contadoEfectivo - input.fondoSiguiente),
-    movimientos: movimientos.map((m) => ({ ...m })),
-  }
-
-  // El turno queda cerrado y sus movimientos viven solo dentro del Z.
-  sesion.estado = 'cerrada'
-  db.movimientos = db.movimientos.filter((m) => m.sesionId !== sesion.id)
-  db.cierres.unshift(cierre)
-  persistCaja()
-  return { ...cierre }
+  const dto = await api.post<CierreDTO>(
+    '/caja/cerrar/',
+    {
+      sesion: Number(input.sesionId),
+      contado_por_medio: input.contadoPorMedio,
+      conteo_cierre: input.conteoCierre ?? null,
+      fondo_siguiente: input.fondoSiguiente,
+      motivo_diferencia: input.motivoDiferencia ?? '',
+      nota_diferencia: input.notaDiferencia ?? '',
+    },
+    token(),
+  )
+  return mapCierre(dto)
 }
 
 /** Historial de comprobantes Z (más recientes primero). */
 export async function listarCierres(): Promise<CierreCaja[]> {
-  await wait()
-  return getCajaDB()
-    .cierres.slice()
-    .sort((a, b) => b.cerradaEn.localeCompare(a.cerradaEn))
-    .map((c) => ({ ...c }))
+  const cierres = await api.get<CierreDTO[]>('/caja/cierres/?limite=200', token())
+  return cierres.map(mapCierre)
 }
 
 /** Último cierre de una caja (para sugerir el fondo al reabrir). */
 export async function ultimoCierreDeCaja(cajaId: string): Promise<CierreCaja | null> {
-  await wait(60)
-  const cierres = getCajaDB().cierres.filter((c) => c.cajaId === cajaId)
-  if (cierres.length === 0) return null
-  return { ...cierres.slice().sort((a, b) => b.cerradaEn.localeCompare(a.cerradaEn))[0] }
+  const cierres = await api.get<CierreDTO[]>(`/caja/cierres/?caja=${cajaId}&limite=1`, token())
+  return cierres.length > 0 ? mapCierre(cierres[0]) : null
 }

@@ -120,6 +120,10 @@ export interface Venta {
   usuario: string | null
   items: ItemVenta[]
   creado: string // ISO
+  /** Id del movimiento de caja generado (null si no había turno abierto). */
+  movimiento_caja?: number | null
+  /** Aviso del backend cuando la venta no entró en ningún arqueo. */
+  aviso_caja?: string | null
 }
 
 export interface VentaInput {
@@ -127,6 +131,8 @@ export interface VentaInput {
   forma_pago: FormaPago
   nota?: string
   items: Array<{ producto: number; cantidad: number; precio_unitario: number }>
+  /** Caja donde anotar la venta en el arqueo (opcional). */
+  caja?: number
 }
 
 export function registrarVenta(input: VentaInput): Promise<Venta> {

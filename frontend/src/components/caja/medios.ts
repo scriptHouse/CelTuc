@@ -3,9 +3,9 @@ import {
   ArrowRightLeft,
   ArrowUpFromLine,
   Banknote,
+  CircleDollarSign,
   CreditCard,
   Landmark,
-  QrCode,
   Receipt,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -15,10 +15,9 @@ import { MEDIOS_PAGO_CAJA } from '@/types'
 /** Ícono de cada medio de pago (una sola fuente para página, cierre y ticket). */
 export const MEDIO_ICONO: Record<MedioPagoCaja, LucideIcon> = {
   efectivo: Banknote,
-  debito: CreditCard,
-  credito: CreditCard,
   transferencia: ArrowRightLeft,
-  mercadopago: QrCode,
+  tarjeta: CreditCard,
+  otro: CircleDollarSign,
 }
 
 /** Nombre visible de cada medio. */

@@ -120,6 +120,7 @@ INSTALLED_APPS = [
     'precios_service',
     'productos',
     'inventario',
+    'caja',
     'facturacion',
 ]
 

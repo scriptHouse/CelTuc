@@ -30,7 +30,7 @@ const router = createBrowserRouter([
       { path: '/dolar', element: <RequirePermiso permiso="ver_dolar"><DolarPage /></RequirePermiso> },
       { path: '/inventario', element: <RequirePermiso permiso="ver_inventario"><InventarioPage /></RequirePermiso> },
       { path: '/facturacion', element: <RequirePermiso permiso="ver_facturacion"><FacturacionPage /></RequirePermiso> },
-      { path: '/caja', element: <RequirePermiso><CajaPage /></RequirePermiso> },
+      { path: '/caja', element: <RequirePermiso permiso="ver_caja"><CajaPage /></RequirePermiso> },
       { path: '/empleados', element: <RequirePermiso permiso="ver_empleados"><EmpleadosPage /></RequirePermiso> },
       { path: '/simulador', element: <RequirePermiso permiso="ver_simulador"><SimuladorPage /></RequirePermiso> },
       { path: '/cotizaciones', element: <RequirePermiso permiso="ver_cotizaciones"><CotizacionesPage /></RequirePermiso> },

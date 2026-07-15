@@ -130,6 +130,9 @@ class CrearVentaSerializer(serializers.Serializer):
     )
     nota = serializers.CharField(required=False, allow_blank=True, max_length=200)
     items = ItemVentaInputSerializer(many=True)
+    # Caja donde anotar la venta en el arqueo (id; opcional). Se valida en la
+    # vista con import tardio para no acoplar inventario a la app caja.
+    caja = serializers.IntegerField(required=False, allow_null=True)
 
     def validate_items(self, value):
         if not value:

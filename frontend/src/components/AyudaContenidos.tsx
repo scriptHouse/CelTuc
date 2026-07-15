@@ -497,16 +497,17 @@ export function AyudaCaja() {
           los POS profesionales (Square, Shopify, Odoo, Fudo): se <b>abre un turno</b> declarando el
           fondo, se registran los <b>movimientos</b> (ventas, ingresos, egresos, retiros) y al final
           se hace el <b>arqueo</b>: contás lo que hay, el sistema lo compara con lo que debería
-          haber y emite un <b>comprobante Z</b> inmutable.
+          haber y emite un <b>comprobante Z</b> inmutable. Todo queda guardado de verdad en el
+          servidor, igual que el stock.
         </p>
       </AyudaSeccion>
 
       <AyudaSeccion titulo="La venta de mostrador (el botón VERDE)">
         <p>
-          El bloque <b>«Venta de mostrador»</b> es la parte de Caja que ya está conectada al
-          sistema de verdad — por eso su botón es <b>verde</b>. Registrar una venta ahí
-          <b> descuenta el stock del Inventario al instante</b> y queda en el historial con tu
-          usuario ("Venta #N").
+          El botón <b>verde</b> «Registrar venta» es la puerta de entrada de la plata: una venta
+          ahí <b>descuenta el stock del Inventario al instante</b> Y <b>entra sola al arqueo</b> del
+          turno abierto, con su medio de pago. Una sola carga para las dos cosas. Si no hay caja
+          abierta, la venta vale igual (el stock baja) pero te avisa que no entró en ningún arqueo.
         </p>
         <AyudaPasos
           pasos={[
@@ -527,9 +528,9 @@ export function AyudaCaja() {
       <AyudaSeccion titulo="Abrir el turno">
         <AyudaPasos
           pasos={[
-            <>Tocá <b>«Abrir caja»</b> y declará el <b>fondo inicial</b> (el efectivo que queda en el cajón para dar vuelto). Se sugiere el fondo que dejó el último cierre.</>,
+            <>Tocá <b>«Abrir caja»</b> y declará el <b>fondo inicial</b>. Se sugiere solo el fondo que dejó el último cierre: si ayer dejaste <span className="tnum">$ 10.000</span>, hoy arrancás con <span className="tnum">$ 10.000</span>.</>,
             <>Si querés precisión total, usá <b>«Contar el fondo por billetes»</b>: la grilla arma el monto sola.</>,
-            <>Durante el día, cargá cada movimiento con <b>«Nuevo»</b>: ventas con su medio de pago, egresos con motivo, y <b>retiros a bóveda</b> para no acumular efectivo (la mejor práctica antirrobo).</>,
+            <>Con <b>«Nuevo»</b> cargás los movimientos manuales de efectivo: ingresos, egresos con motivo y <b>retiros a bóveda</b> para no acumular plata en el cajón (la mejor práctica antirrobo). Las ventas NO van por acá: van por el botón verde.</>,
           ]}
         />
       </AyudaSeccion>

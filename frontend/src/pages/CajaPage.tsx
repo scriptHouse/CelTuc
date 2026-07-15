@@ -283,9 +283,9 @@ export function CajaPage() {
         }
       />
 
-      {/* Venta de mostrador (backend REAL: descuenta stock). El resto de la
-          página sigue siendo front-only hasta que Caja tenga su backend. */}
-      <VentaRapida />
+      {/* Venta de mostrador: descuenta stock Y entra sola al arqueo del turno
+          abierto de la caja seleccionada (una sola carga). */}
+      <VentaRapida cajaId={cajaId || undefined} />
 
       {/* Selector multi-caja */}
       {config?.multiCaja && cajasVisibles.length > 1 && (
@@ -447,14 +447,16 @@ export function CajaPage() {
                           {negativo ? '− ' : ''}
                           {money(m.monto)}
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => handleEliminarMovimiento(m)}
-                          aria-label={`Eliminar movimiento ${m.motivo}`}
-                          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-ink-300 opacity-0 transition-all hover:bg-ink-100 hover:text-ink-900 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 group-hover:opacity-100"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        {m.tipo !== 'venta' && (
+                          <button
+                            type="button"
+                            onClick={() => handleEliminarMovimiento(m)}
+                            aria-label={`Eliminar movimiento ${m.motivo}`}
+                            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-ink-300 opacity-0 transition-all hover:bg-ink-100 hover:text-ink-900 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 group-hover:opacity-100"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                       </div>
                     )
                   })}

@@ -159,7 +159,26 @@ class VentasView(_BaseInventario, APIView):
             )
         except ValidationError as e:
             return Response({'detail': ' '.join(e.messages)}, status=400)
-        return Response(VentaSerializer(venta).data, status=201)
+
+        # La venta tambien entra al arqueo: se anota como movimiento en el turno
+        # abierto de la caja indicada (o de la unica abierta). Si no hay turno,
+        # la venta vale igual y se devuelve el aviso para que el front lo muestre.
+        movimiento_caja = None
+        aviso_caja = None
+        try:
+            from caja.models import Caja, registrar_venta_en_caja
+
+            caja_obj = Caja.objects.filter(pk=datos['caja']).first() if datos.get('caja') else None
+            movimiento_caja = registrar_venta_en_caja(venta, caja=caja_obj, usuario=request.user)
+        except ValidationError as e:
+            aviso_caja = ' '.join(e.messages)
+        if movimiento_caja is None and aviso_caja is None:
+            aviso_caja = 'No hay un turno de caja abierto: la venta no entro en ningun arqueo.'
+
+        data = VentaSerializer(venta).data
+        data['movimiento_caja'] = movimiento_caja.pk if movimiento_caja else None
+        data['aviso_caja'] = aviso_caja
+        return Response(data, status=201)
 
 
 class MovimientoListView(_BaseInventario, generics.ListAPIView):

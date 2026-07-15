@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowDownToLine, ArrowUpFromLine, Landmark, Receipt } from 'lucide-react'
+import { ArrowDownToLine, ArrowUpFromLine, Landmark } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { MedioPagoCaja, TipoMovimientoCaja } from '@/types'
-import { MEDIOS_PAGO_CAJA, MOTIVOS_MOVIMIENTO_CAJA } from '@/types'
+import { MOTIVOS_MOVIMIENTO_CAJA } from '@/types'
 import { money } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { Modal } from '@/components/ui/Modal'
@@ -11,9 +11,10 @@ import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 
 /**
- * Alta de movimiento del turno. Las ventas llevan medio de pago y concepto;
- * ingresos/egresos/retiros son de efectivo y exigen motivo (patrón Toast/Odoo:
- * nunca entra ni sale plata sin explicación).
+ * Alta de movimiento MANUAL del turno: ingresos, egresos y retiros a bóveda,
+ * siempre en efectivo y con motivo obligatorio (patrón Toast/Odoo). Las VENTAS
+ * no se cargan acá: entran solas al arqueo desde «Registrar venta» (que además
+ * descuenta el stock).
  */
 
 export interface MovimientoValues {
@@ -24,8 +25,9 @@ export interface MovimientoValues {
   detalle?: string
 }
 
-const TIPOS: { value: TipoMovimientoCaja; label: string; icon: LucideIcon; hint: string }[] = [
-  { value: 'venta', label: 'Venta', icon: Receipt, hint: 'Entra plata por una venta' },
+type TipoManual = 'ingreso' | 'egreso' | 'retiro'
+
+const TIPOS: { value: TipoManual; label: string; icon: LucideIcon; hint: string }[] = [
   { value: 'ingreso', label: 'Ingreso', icon: ArrowDownToLine, hint: 'Entra efectivo al cajón' },
   { value: 'egreso', label: 'Egreso', icon: ArrowUpFromLine, hint: 'Sale efectivo (gasto, pago)' },
   { value: 'retiro', label: 'Retiro', icon: Landmark, hint: 'Efectivo a bóveda / banco' },
@@ -51,27 +53,25 @@ export function MovimientoModal({
     [retirosHabilitados],
   )
 
-  const [tipo, setTipo] = useState<TipoMovimientoCaja>('venta')
-  const [medio, setMedio] = useState<MedioPagoCaja>('efectivo')
+  const [tipo, setTipo] = useState<TipoManual>('ingreso')
   const [monto, setMonto] = useState('')
-  const [motivo, setMotivo] = useState('')
+  const [motivo, setMotivo] = useState(MOTIVOS_MOVIMIENTO_CAJA.ingreso[0])
   const [detalle, setDetalle] = useState('')
-  const [errores, setErrores] = useState<{ monto?: string; motivo?: string }>({})
+  const [errores, setErrores] = useState<{ monto?: string }>({})
 
   useEffect(() => {
     if (!open) return
-    setTipo('venta')
-    setMedio('efectivo')
+    setTipo('ingreso')
     setMonto('')
-    setMotivo('')
+    setMotivo(MOTIVOS_MOVIMIENTO_CAJA.ingreso[0])
     setDetalle('')
     setErrores({})
   }, [open])
 
-  function cambiarTipo(t: TipoMovimientoCaja) {
+  function cambiarTipo(t: TipoManual) {
     setTipo(t)
     setErrores({})
-    setMotivo(t === 'venta' ? '' : MOTIVOS_MOVIMIENTO_CAJA[t][0])
+    setMotivo(MOTIVOS_MOVIMIENTO_CAJA[t][0])
   }
 
   const saleEfectivo = tipo === 'egreso' || tipo === 'retiro'
@@ -83,12 +83,11 @@ export function MovimientoModal({
     else if (saleEfectivo && montoNum > efectivoDisponible) {
       errs.monto = `No hay tanto efectivo en caja (hay ${money(efectivoDisponible)}).`
     }
-    if (!motivo.trim()) errs.motivo = tipo === 'venta' ? 'Contá qué se vendió.' : 'Elegí un motivo.'
     setErrores(errs)
     if (Object.keys(errs).length > 0) return
     await onSubmit({
       tipo,
-      medio: tipo === 'venta' ? medio : 'efectivo',
+      medio: 'efectivo',
       monto: montoNum,
       motivo: motivo.trim(),
       detalle: detalle.trim() || undefined,
@@ -101,14 +100,16 @@ export function MovimientoModal({
     <Modal open={open} onClose={onClose} size="lg">
       <div className="border-b border-line px-5 py-4">
         <h2 className="text-lg font-semibold text-ink-950">Nuevo movimiento</h2>
-        <p className="mt-0.5 text-xs text-ink-400">{tipoActivo?.hint}</p>
+        <p className="mt-0.5 text-xs text-ink-400">
+          {tipoActivo?.hint} · Las ventas entran solas desde «Registrar venta».
+        </p>
       </div>
 
       <div className="space-y-4 overflow-y-auto px-5 py-5">
         {/* Tipo (segmentado) */}
         <div>
           <label className="mb-1.5 block text-xs font-medium text-ink-500">Tipo</label>
-          <div className="grid grid-cols-2 gap-1.5 rounded-2xl border border-line bg-canvas/60 p-1.5 sm:grid-cols-4">
+          <div className="grid grid-cols-3 gap-1.5 rounded-2xl border border-line bg-canvas/60 p-1.5">
             {tipos.map((t) => {
               const activo = tipo === t.value
               const Icon = t.icon
@@ -135,18 +136,16 @@ export function MovimientoModal({
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          {tipo === 'venta' && (
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-ink-500">Medio de pago</label>
-              <Select
-                options={MEDIOS_PAGO_CAJA.map((m) => ({ value: m.value, label: m.label }))}
-                value={medio}
-                onChange={(v) => setMedio(v as MedioPagoCaja)}
-              />
-            </div>
-          )}
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-ink-500">Motivo</label>
+            <Select
+              options={MOTIVOS_MOVIMIENTO_CAJA[tipo].map((m) => ({ value: m, label: m }))}
+              value={motivo}
+              onChange={setMotivo}
+            />
+          </div>
 
-          <div className={cn(tipo !== 'venta' && 'sm:order-2')}>
+          <div>
             <label className="mb-1.5 block text-xs font-medium text-ink-500">Monto (ARS)</label>
             <Input
               type="number"
@@ -167,32 +166,12 @@ export function MovimientoModal({
             {errores.monto && <p className="mt-1 text-xs text-ink-700">{errores.monto}</p>}
           </div>
 
-          <div className={cn(tipo !== 'venta' && 'sm:order-1')}>
-            <label className="mb-1.5 block text-xs font-medium text-ink-500">
-              {tipo === 'venta' ? 'Concepto' : 'Motivo'}
-            </label>
-            {tipo === 'venta' ? (
-              <Input
-                value={motivo}
-                onChange={(e) => setMotivo(e.target.value)}
-                placeholder="Ej: Funda + templado iPhone 13"
-              />
-            ) : (
-              <Select
-                options={MOTIVOS_MOVIMIENTO_CAJA[tipo].map((m) => ({ value: m, label: m }))}
-                value={motivo}
-                onChange={setMotivo}
-              />
-            )}
-            {errores.motivo && <p className="mt-1 text-xs text-ink-700">{errores.motivo}</p>}
-          </div>
-
-          <div className={cn(tipo !== 'venta' && 'sm:order-3 sm:col-span-2')}>
+          <div className="sm:col-span-2">
             <label className="mb-1.5 block text-xs font-medium text-ink-500">Detalle (opcional)</label>
             <Input
               value={detalle}
               onChange={(e) => setDetalle(e.target.value)}
-              placeholder={tipo === 'venta' ? 'Cliente, garantía…' : 'Ej: proveedor, autorizó…'}
+              placeholder="Ej: proveedor, quién autorizó…"
             />
           </div>
         </div>

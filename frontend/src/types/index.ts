@@ -481,20 +481,21 @@ export interface SeccionPreciosService {
 // Odoo, Fudo): la SESIÓN de caja es la entidad central; el cierre es su último
 // evento y queda inmutable como comprobante Z numerado.
 
-/** Medio de pago con el que entra plata a la caja. */
-export type MedioPagoCaja = 'efectivo' | 'debito' | 'credito' | 'transferencia' | 'mercadopago'
+/** Medio de pago con el que entra plata a la caja.
+ *  Es EL MISMO vocabulario que la venta de mostrador (`FormaPago` de
+ *  inventario): así una venta cae en el arqueo sin mapeos. */
+export type MedioPagoCaja = 'efectivo' | 'transferencia' | 'tarjeta' | 'otro'
 
 /** Catálogo de medios para selectores y desgloses (orden de la UI). */
 export const MEDIOS_PAGO_CAJA: { value: MedioPagoCaja; label: string }[] = [
   { value: 'efectivo', label: 'Efectivo' },
-  { value: 'debito', label: 'Tarjeta débito' },
-  { value: 'credito', label: 'Tarjeta crédito' },
   { value: 'transferencia', label: 'Transferencia' },
-  { value: 'mercadopago', label: 'Mercado Pago QR' },
+  { value: 'tarjeta', label: 'Tarjeta' },
+  { value: 'otro', label: 'Otro' },
 ]
 
 /** Los medios que se concilian contra el cierre de lote de la terminal. */
-export const MEDIOS_CON_LOTE: MedioPagoCaja[] = ['debito', 'credito']
+export const MEDIOS_CON_LOTE: MedioPagoCaja[] = ['tarjeta']
 
 export type TipoMovimientoCaja = 'venta' | 'ingreso' | 'egreso' | 'retiro'
 
