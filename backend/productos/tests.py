@@ -79,11 +79,14 @@ class DerivacionProductosTests(TestCase):
 
 class SeedAccesoriosTests(TestCase):
     def test_categorias_y_productos_sembrados(self):
-        self.assertEqual(CategoriaProducto.objects.filter(padre__isnull=True).count(), 15)
+        # 15 de la hoja Accesorios + 11 de las secciones de service de las
+        # planillas de stock (Baterías, Módulos, ... — seed 0007 de inventario).
+        self.assertEqual(CategoriaProducto.objects.filter(padre__isnull=True).count(), 26)
         # 403 de la hoja Accesorios + 12 que aparecieron en las planillas de
         # stock de las sucursales (seed de inventario, jul 2026) + 19 de las
-        # filas sin cantidad informada (seed "(no informado)", jul 2026).
-        self.assertEqual(Producto.objects.count(), 434)
+        # filas sin cantidad informada (seed "(no informado)", jul 2026) + 253
+        # repuestos de service (filas con precio de BATERIAS/MODULOS/etc.).
+        self.assertEqual(Producto.objects.count(), 687)
 
     def test_jerarquia_de_cables(self):
         cables = CategoriaProducto.objects.get(nombre='Cables', padre__isnull=True)
