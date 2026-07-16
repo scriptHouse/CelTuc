@@ -1,8 +1,8 @@
-import { Image, StyleSheet, Text, View } from '@react-pdf/renderer'
+import { Document, Image, Page, StyleSheet, Text, View } from '@react-pdf/renderer'
 import type { ReactNode } from 'react'
 import { LOGO_CELTUC, ICON_FACEBOOK, ICON_INSTAGRAM } from './assets'
 import { EMPRESA } from './content'
-import { BOX, FRAME, INK, pt, type Run } from './kit'
+import { BOX, FRAME, INK, STD_CONTENT_W, STD_PAD, STD_W, pt, type Run } from './kit'
 
 /* ============================================================================
  * Kit de primitivas para el PDF (vectorial, @react-pdf). Espeja `kit.tsx`.
@@ -43,66 +43,131 @@ export function PdfGap({ h }: { h: number }) {
   return <View style={{ height: h }} />
 }
 
+const HDR_LEFT_W = 399
+const HDR_LABEL_W = 85
+const HDR_BOX_W = 270
+
+/** Encabezado CelTuc del formato nuevo (filas 2-4). Espeja `CtHeader` del kit HTML. */
 export function PdfCtHeader({
   cupon,
   dia,
   mes,
   anio,
-  contentW,
   socials = 'redes',
-  height = 79.8,
 }: {
   cupon: string
   dia: string
   mes: string
   anio: string
-  contentW: number
   socials?: 'redes' | 'simple'
-  height?: number
 }) {
-  const clusterW = 190
-  const labelW = 86
   return (
-    <View style={{ height, flexDirection: 'row', alignItems: 'center' }}>
-      <View style={{ width: contentW - clusterW, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <Image src={LOGO_CELTUC} style={{ width: 64, height: 64 }} />
+    <View style={{ height: 60, flexDirection: 'row' }}>
+      <View style={{ width: HDR_LEFT_W, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <Image src={LOGO_CELTUC} style={{ width: 56, height: 56 }} />
         <View>
           <Text style={{ fontSize: pt(16), fontFamily: BOLD, letterSpacing: 0.8 }}>{EMPRESA.nombre}</Text>
-          <Text style={{ fontSize: pt(8), marginTop: 3 }}>{EMPRESA.direccion}</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
-            <Image src={ICON_INSTAGRAM} style={{ width: 14, height: 14 }} />
+          <Text style={{ fontSize: pt(8), marginTop: 2 }}>{EMPRESA.direccion}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+            <Image src={ICON_INSTAGRAM} style={{ width: 13, height: 13 }} />
             <Text style={{ fontSize: pt(9) }}>{socials === 'simple' ? 'CelTuc' : EMPRESA.instagram}</Text>
-            <Image src={ICON_FACEBOOK} style={{ width: 14, height: 14, marginLeft: 4 }} />
+            <Image src={ICON_FACEBOOK} style={{ width: 13, height: 13, marginLeft: 4 }} />
             <Text style={{ fontSize: pt(9) }}>{socials === 'simple' ? 'CelTuc' : EMPRESA.facebook}</Text>
           </View>
         </View>
       </View>
 
-      <View style={{ width: clusterW, justifyContent: 'center', gap: 10 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <Text style={{ width: labelW, fontSize: pt(11) }}>CUPON N°</Text>
-          <View style={{ flex: 1, height: 20, borderWidth: BOX, borderColor: INK, justifyContent: 'center' }}>
+      <View style={{ width: STD_CONTENT_W - HDR_LEFT_W }}>
+        <View style={{ height: 20, flexDirection: 'row', alignItems: 'center' }}>
+          <Text style={{ width: HDR_LABEL_W, fontSize: pt(11), textAlign: 'center' }}>CUPON N°</Text>
+          <View style={{ width: HDR_BOX_W, height: 20, borderWidth: BOX, borderColor: INK, justifyContent: 'center' }}>
             <Text style={{ fontSize: pt(11), textAlign: 'center' }}>{cupon}</Text>
           </View>
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <Text style={{ width: labelW, fontSize: pt(11) }}>FECHA</Text>
-          <View style={{ flexDirection: 'row', height: 20, borderWidth: BOX, borderColor: INK }}>
-            <PdfDateCell width={30} value={dia} />
-            <PdfDateCell width={34} value={mes} divider />
-            <PdfDateCell width={34} value={anio} divider />
+        <View style={{ height: 20, flexDirection: 'row', alignItems: 'center' }}>
+          <Text style={{ width: HDR_LABEL_W, fontSize: pt(11), textAlign: 'center' }}>FECHA</Text>
+          <View style={{ width: HDR_BOX_W, flexDirection: 'row', height: 20, borderWidth: BOX, borderColor: INK }}>
+            <PdfDateCell flex={96} value={dia} />
+            <PdfDateCell flex={96} value={mes} divider />
+            <PdfDateCell flex={78} value={anio} divider />
           </View>
         </View>
+        <View style={{ height: 20 }} />
       </View>
     </View>
   )
 }
 
-function PdfDateCell({ width, value, divider }: { width: number; value: string; divider?: boolean }) {
+function PdfDateCell({ flex, value, divider }: { flex: number; value: string; divider?: boolean }) {
   return (
-    <View style={{ width, justifyContent: 'center', borderLeftWidth: divider ? BOX : 0, borderColor: INK }}>
+    <View style={{ flex, justifyContent: 'center', borderLeftWidth: divider ? BOX : 0, borderColor: INK }}>
       <Text style={{ fontSize: pt(11), textAlign: 'center' }}>{value}</Text>
     </View>
+  )
+}
+
+/** Bloque de firmas al pie: dos columnas (línea + leyenda). */
+export function PdfFirmaBlock({ izq = 'FIRMA', der = 'ACLARACION' }: { izq?: string; der?: string }) {
+  const linea = '_____________________________________________'
+  return (
+    <View style={{ flexDirection: 'row', paddingBottom: 2 }}>
+      <View style={{ width: 298 }}>
+        <Text style={{ fontSize: pt(8), textAlign: 'center' }}>{linea}</Text>
+        <Text style={{ fontSize: pt(7), textAlign: 'center', marginTop: 1 }}>{izq}</Text>
+      </View>
+      <View style={{ width: 101 }} />
+      <View style={{ width: 277 }}>
+        <Text style={{ fontSize: pt(8), textAlign: 'center' }}>{linea}</Text>
+        <Text style={{ fontSize: pt(7), textAlign: 'center', marginTop: 1 }}>{der}</Text>
+      </View>
+    </View>
+  )
+}
+
+/** Esqueleto PDF de los documentos estándar. Espeja `DocShell` del kit HTML. */
+export function PdfDocShell({
+  titulo,
+  height,
+  cupon,
+  dia,
+  mes,
+  anio,
+  garantia,
+  firmaIzq,
+  firmaDer,
+  children,
+}: {
+  titulo: string
+  height: number
+  cupon: string
+  dia: string
+  mes: string
+  anio: string
+  garantia: Run[]
+  firmaIzq?: string
+  firmaDer?: string
+  children: ReactNode
+}) {
+  const M = 28
+  return (
+    <Document title={`${titulo} — CelTuc`} author="CelTuc">
+      <Page size={[STD_W + M * 2, height + M * 2]} style={{ backgroundColor: '#fff', padding: M }}>
+        <PdfPaper width={STD_W} height={height}>
+          <PdfTitle height={20} fontSize={pt(10)}>
+            {titulo}
+          </PdfTitle>
+          <PdfBody padL={STD_PAD} padR={STD_PAD}>
+            <PdfCtHeader cupon={cupon} dia={dia} mes={mes} anio={anio} />
+            <PdfGap h={7} />
+            {children}
+            <PdfGap h={10} />
+            <PdfGarantia runs={garantia} fontSize={pt(7)} />
+            <PdfGap h={8} />
+            <PdfFirmaBlock izq={firmaIzq} der={firmaDer} />
+          </PdfBody>
+        </PdfPaper>
+      </Page>
+    </Document>
   )
 }
 

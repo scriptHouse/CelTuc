@@ -41,6 +41,8 @@ export const SENA = {
   valorTotal: 'VALOR TOTAL:',
   total: 'TOTAL',
   firma: 'FIRMA',
+  /** Línea de firma del formato nuevo (guiones bajos, ya no puntos). */
+  lineaFirma: '__________________',
   disclaimer:
     'El cliente entiende y acepta que una seña menor al 50% no congela no asegura el precio del equipo, solo asegura el stock del mismo',
 } as const

@@ -1,74 +1,56 @@
-import { ALIGN, Bordes, blobDe, cajaCompletaEn, calibri, ctHeaderXlsx, MEDIUM, nuevaHoja, put, richGarantia, setCols, setRows } from './kitXlsx'
-import { COMPRA_GARANTIA, COMPRA_TITULO, type CompraData } from './compraContent'
-
-const LINEAS = {
-  recibiDe: 'RECIBI DE ___________________________________________________________________________',
-  dni: 'DNI ________________________________N° TEL________________________________________________',
-  laSuma: 'LA SUMA DE _________________________________________________________________________________',
-  concepto: 'EN CONCEPTO DE LA COMPRA DE EQUIPO/S____________________________________________________',
-  c1: '___________________________________________________________________________________________',
-  c2: '____________________________________________________________________________________',
-}
+import { ALIGN, Bordes, blobDe, cajaCompletaEn, calibri, ctHeaderXlsx, firmasXlsx, nuevaHoja, put, richGarantia, setCols, setRows, STD_COLS } from './kitXlsx'
+import { COMPRA_GARANTIA, COMPRA_LABELS, COMPRA_LINEAS, COMPRA_TITULO, type CompraData } from './compraContent'
 
 export async function construirCompraXlsx(d: CompraData): Promise<Blob> {
-  const { wb, ws } = nuevaHoja('Compra')
-  setCols(ws, [0.86, 10.71, 7.71, 13, 4.71, 10.71, 3.71, 13, 13, 0.86])
+  const { wb, ws } = nuevaHoja('COMPRA')
+  setCols(ws, STD_COLS)
   setRows(ws, [
-    20.1, 9.9, 15, 9.9, 15, 9.9,
-    13.5, 13.5, 13.5, 13.5, 13.5, 13.5, 13.5, 13.5, 13.5, 13.5, 13.5, 13.5, 13.5, 13.5, 13.5,
-    15, 15, 15, 15, 15, 15, 15, 15, 13.2, 15, 9, 7.2,
+    15, 15, 15, 15, 5.1, // 1-5
+    15, 15, 22.5, 15, 15.8, // 6-10
+    15, 15, 15, 15.8, 15.8, // 11-15
+    ...Array(29).fill(15), // 16-44
+    15.8, 15, 25.5, 20.2, // 45-48
   ])
-  ;['A1:J1', 'B7:I7', 'B8:I8', 'B9:I9', 'B10:I10', 'B11:I11', 'B12:I12', 'E15:F15', 'E16:F16', 'E17:F17', 'B22:I32'].forEach((m) =>
-    ws.mergeCells(m),
-  )
+  ;['A1:J1', 'B6:I6', 'B7:I7', 'B8:I8', 'B9:I9', 'F11:I11', 'F12:I14', 'B16:I45'].forEach((m) => ws.mergeCells(m))
 
   const b = new Bordes()
-  // Marco
-  b.h(1, 10, 33, 'bottom')
-  b.v(1, 2, 33, 'left')
-  b.v(10, 2, 33, 'right')
-  // Encabezado (cupón/fecha) + textos + imágenes
+  b.h(1, 10, 48, 'bottom')
+  b.v(1, 2, 48, 'left')
+  b.v(10, 2, 48, 'right')
   ctHeaderXlsx(wb, ws, b, { cupon: d.cupon, dia: d.fechaDia, mes: d.fechaMes, anio: d.fechaAnio })
-  // Caja izquierda (CONDICION/IMEI/GARANTIA/FORMA)
-  b.caja(2, 14, 4, 17, [14, 15, 16])
-  // Firma (E15:F17): borde izquierdo + cierre inferior
-  b.add(5, 15, { left: MEDIUM })
-  b.add(5, 16, { left: MEDIUM })
-  b.add(5, 17, { left: MEDIUM, right: MEDIUM })
-  b.add(6, 17, { right: MEDIUM })
-  // Caja TOTAL (G15:I17)
-  b.caja(7, 15, 9, 17)
-  // Caja OBS (B19:I20)
-  b.caja(2, 19, 9, 20, [19])
+  b.caja(2, 11, 4, 14, [11, 12, 13]) // CEL / MAIL / CONDICION / IMEI
   b.apply(ws)
   cajaCompletaEn(ws, 'A1')
-  cajaCompletaEn(ws, 'B22')
+  cajaCompletaEn(ws, 'F11') // etiqueta TOTAL (combinada)
+  cajaCompletaEn(ws, 'F12') // importe TOTAL (combinada F12:I14)
+  cajaCompletaEn(ws, 'B16') // garantía (combinada)
 
-  const bold = (_s?: string) => calibri(11, true)
+  const bold10 = calibri(10, true)
   const con = (label: string, v: string, blanco: string) => (v.trim() ? `${label} ${v}` : blanco)
 
-  put(ws, 'A1', COMPRA_TITULO, calibri(14, true), ALIGN.center)
-  put(ws, 'B7', con('RECIBI DE', d.recibiDe, LINEAS.recibiDe), bold('B7'), ALIGN.left)
-  put(ws, 'B8', d.dni.trim() || d.tel.trim() ? `DNI ${d.dni}          N° TEL ${d.tel}` : LINEAS.dni, bold('B8'), ALIGN.left)
-  put(ws, 'B9', con('LA SUMA DE', d.laSuma, LINEAS.laSuma), bold('B9'), ALIGN.left)
-  put(ws, 'B10', con('EN CONCEPTO DE LA COMPRA DE EQUIPO/S', d.concepto, LINEAS.concepto), bold('B10'), ALIGN.left)
-  put(ws, 'B11', d.conceptoExtra.trim() || LINEAS.c1, bold('B11'), ALIGN.left)
-  put(ws, 'B12', d.conceptoExtra2.trim() || LINEAS.c2, bold('B12'), ALIGN.left)
+  put(ws, 'A1', COMPRA_TITULO, calibri(10, true), ALIGN.center)
+  put(
+    ws,
+    'B6',
+    d.recibiDe.trim() || d.dni.trim() ? `RECIBI DE ${d.recibiDe}          DNI ${d.dni}` : COMPRA_LINEAS.recibiDe,
+    bold10,
+    ALIGN.left,
+  )
+  put(ws, 'B7', con('LA SUMA DE ', d.laSuma, COMPRA_LINEAS.laSuma), bold10, ALIGN.left)
+  put(ws, 'B8', con(COMPRA_LABELS.concepto, d.concepto, COMPRA_LINEAS.concepto), bold10, ALIGN.left)
+  put(ws, 'B9', d.conceptoExtra.trim() || COMPRA_LINEAS.cont, bold10, ALIGN.left)
 
-  put(ws, 'B14', con('CONDICION:', d.condicion, 'CONDICION:'), bold('B14'), ALIGN.left)
-  put(ws, 'B15', con('IMEI:', d.imei, 'IMEI:'), bold('B15'), ALIGN.left)
-  put(ws, 'B16', con('GARANTIA:', d.garantia, 'GARANTIA:'), bold('B16'), ALIGN.left)
-  put(ws, 'B17', con('FORMA DE PAGO', d.formaPago, 'FORMA DE PAGO'), bold('B17'), ALIGN.left)
-  put(ws, 'H14', 'TOTAL $', calibri(11, true), ALIGN.center)
-  put(ws, 'H16', d.total, calibri(14, true), ALIGN.center)
-  put(ws, 'E16', '…………………………….', calibri(9), ALIGN.center)
-  put(ws, 'E17', 'Firma', calibri(11, true), ALIGN.center)
+  put(ws, 'B11', con(COMPRA_LABELS.cel, d.cel, COMPRA_LABELS.cel), bold10, ALIGN.left)
+  put(ws, 'B12', con(COMPRA_LABELS.mail, d.mail, COMPRA_LABELS.mail), bold10, ALIGN.left)
+  put(ws, 'B13', con(COMPRA_LABELS.condicion, d.condicion, COMPRA_LABELS.condicion), bold10, ALIGN.left)
+  put(ws, 'B14', con(COMPRA_LABELS.imei, d.imei, COMPRA_LABELS.imei), bold10, ALIGN.left)
+  put(ws, 'F11', COMPRA_LABELS.total, calibri(11, true), ALIGN.center)
+  put(ws, 'F12', d.total, calibri(16, true), ALIGN.center)
 
-  put(ws, 'B19', 'OBS:', calibri(11, true), ALIGN.left)
-  put(ws, 'B20', d.obs, calibri(11), ALIGN.leftTop)
+  ws.getCell('B16').value = richGarantia(COMPRA_GARANTIA, 7)
+  ws.getCell('B16').alignment = { horizontal: 'left', vertical: 'top', wrapText: true }
 
-  ws.getCell('B22').value = richGarantia(COMPRA_GARANTIA, 6)
-  ws.getCell('B22').alignment = ALIGN.justify
+  firmasXlsx(ws, 47)
 
   return blobDe(wb)
 }

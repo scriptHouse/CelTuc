@@ -97,8 +97,11 @@ export const ALIGN = {
   justify: { horizontal: 'justify' as const, vertical: 'top' as const, wrapText: true },
 }
 
-/** Encabezado CelTuc estándar: nombre, dirección, redes, CUPON/FECHA + logo e íconos.
- *  Agrega los bordes de las cajas de cupón/fecha al acumulador `b`. */
+/** Anchos de columna del formato estándar (Excel nuevo). */
+export const STD_COLS = [0.86, 11.43, 13, 16, 13.71, 11.43, 13, 13, 10.43, 0.86]
+
+/** Encabezado CelTuc del formato nuevo (filas 2-4): identidad + CUPON (fila 2) y
+ *  FECHA en tres cajas (fila 3), con logo e íconos. Agrega bordes al acumulador `b`. */
 export function ctHeaderXlsx(
   wb: ExcelJS.Workbook,
   ws: ExcelJS.Worksheet,
@@ -107,29 +110,43 @@ export function ctHeaderXlsx(
 ) {
   const ig = opts.socials === 'simple' ? 'CelTuc' : EMPRESA.instagram
   const fb = opts.socials === 'simple' ? 'CelTuc' : EMPRESA.facebook
-  put(ws, 'C3', '   ' + EMPRESA.nombre, calibri(16, true), ALIGN.left)
-  put(ws, 'C4', EMPRESA.direccion, calibri(8), ALIGN.left)
-  put(ws, 'C5', `   ${ig}      ${fb}`, calibri(9), ALIGN.left)
-  put(ws, 'F3', 'CUPON N°', calibri(11), ALIGN.center)
-  put(ws, 'F5', 'FECHA', calibri(11), ALIGN.center)
-  put(ws, 'G3', opts.cupon, calibri(11), ALIGN.center)
-  put(ws, 'G5', opts.dia, calibri(11), ALIGN.center)
-  put(ws, 'H5', opts.mes, calibri(11), ALIGN.center)
-  put(ws, 'I5', opts.anio, calibri(11), ALIGN.center)
-  // Cajas: cupón G3:I3 (sin divisiones) y fecha G5:I5 (3 compartimentos).
+  put(ws, 'C2', '   ' + EMPRESA.nombre, calibri(16, true), ALIGN.left)
+  put(ws, 'C3', EMPRESA.direccion, calibri(8), ALIGN.left)
+  put(ws, 'C4', `   ${ig}      ${fb}`, calibri(9), ALIGN.left)
+  put(ws, 'F2', 'CUPON N°', calibri(11), ALIGN.center)
+  put(ws, 'F3', 'FECHA', calibri(11), ALIGN.center)
+  put(ws, 'G2', opts.cupon, calibri(11), ALIGN.center)
+  put(ws, 'G3', opts.dia, calibri(11), ALIGN.center)
+  put(ws, 'H3', opts.mes, calibri(11), ALIGN.center)
+  put(ws, 'I3', opts.anio, calibri(11), ALIGN.center)
+  // Caja de cupón G2:I2 (sin divisiones internas).
+  b.h(7, 9, 2, 'top')
+  b.h(7, 9, 2, 'bottom')
+  b.add(7, 2, { left: MEDIUM })
+  b.add(9, 2, { right: MEDIUM })
+  // Fecha G3/H3/I3: cada celda es su propia caja.
   b.h(7, 9, 3, 'top')
   b.h(7, 9, 3, 'bottom')
-  b.add(7, 3, { left: MEDIUM })
-  b.add(9, 3, { right: MEDIUM })
-  b.h(7, 9, 5, 'top')
-  b.h(7, 9, 5, 'bottom')
-  ;[7, 8, 9].forEach((c) => b.add(c, 5, { left: MEDIUM }))
-  b.add(9, 5, { right: MEDIUM })
+  ;[7, 8, 9].forEach((c) => b.add(c, 3, { left: MEDIUM, right: MEDIUM }))
   // Imágenes
   const add = (uri: string, ext: 'jpeg' | 'png') => wb.addImage({ base64: uri.split(',')[1], extension: ext })
-  ws.addImage(add(LOGO_CELTUC, 'jpeg'), { tl: { col: 1.03, row: 1.35 }, ext: { width: 66, height: 66 }, editAs: 'oneCell' })
-  ws.addImage(add(ICON_INSTAGRAM, 'jpeg'), { tl: { col: 1.92, row: 4.35 }, ext: { width: 13, height: 13 }, editAs: 'oneCell' })
-  ws.addImage(add(ICON_FACEBOOK, 'jpeg'), { tl: { col: 3.0, row: 4.35 }, ext: { width: 13, height: 13 }, editAs: 'oneCell' })
+  ws.addImage(add(LOGO_CELTUC, 'jpeg'), { tl: { col: 1.05, row: 1.1 }, ext: { width: 56, height: 56 }, editAs: 'oneCell' })
+  ws.addImage(add(ICON_INSTAGRAM, 'jpeg'), { tl: { col: 2.03, row: 3.28 }, ext: { width: 12, height: 12 }, editAs: 'oneCell' })
+  ws.addImage(add(ICON_FACEBOOK, 'jpeg'), { tl: { col: 2.62, row: 3.28 }, ext: { width: 12, height: 12 }, editAs: 'oneCell' })
+}
+
+/** Bloque de firmas: fila con las líneas y fila con las leyendas (B:D y F:H). */
+export function firmasXlsx(ws: ExcelJS.Worksheet, filaLinea: number, izq = 'FIRMA', der = 'ACLARACION') {
+  const linea = '_____________________________________________'
+  const filaLabel = filaLinea + 1
+  ws.mergeCells(`B${filaLinea}:D${filaLinea}`)
+  ws.mergeCells(`F${filaLinea}:H${filaLinea}`)
+  ws.mergeCells(`B${filaLabel}:D${filaLabel}`)
+  ws.mergeCells(`F${filaLabel}:H${filaLabel}`)
+  put(ws, `B${filaLinea}`, linea, calibri(8), { horizontal: 'center', wrapText: true })
+  put(ws, `F${filaLinea}`, linea, calibri(8), { horizontal: 'center', wrapText: true })
+  put(ws, `B${filaLabel}`, izq, calibri(7), { horizontal: 'center', vertical: 'top', wrapText: true })
+  put(ws, `F${filaLabel}`, der, calibri(7), { horizontal: 'center', vertical: 'top', wrapText: true })
 }
 
 /** Texto enriquecido para una celda de garantía (tamaño chico, con negritas). */

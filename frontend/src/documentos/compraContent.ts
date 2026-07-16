@@ -1,5 +1,5 @@
-import { partirGarantia } from './content'
 import { hoyDMY } from './types'
+import { L_COMPRA_CONCEPTO, L_COMPRA_CONT, L_COMPRA_RECIBI, L_COMPRA_SUMA, RUNS_COMPRA } from './textosLegales'
 
 /** Datos del documento "Recibo de compra de equipo/s". */
 export interface CompraData {
@@ -9,17 +9,14 @@ export interface CompraData {
   fechaAnio: string
   recibiDe: string
   dni: string
-  tel: string
   laSuma: string
   concepto: string
   conceptoExtra: string
-  conceptoExtra2: string
+  cel: string
+  mail: string
   condicion: string
   imei: string
-  garantia: string
-  formaPago: string
   total: string
-  obs: string
 }
 
 export function compraVacia(): CompraData {
@@ -31,47 +28,42 @@ export function compraVacia(): CompraData {
     fechaAnio: anio,
     recibiDe: '',
     dni: '',
-    tel: '',
     laSuma: '',
     concepto: '',
     conceptoExtra: '',
-    conceptoExtra2: '',
+    cel: '',
+    mail: '',
     condicion: '',
     imei: '',
-    garantia: '',
-    formaPago: '',
     total: '',
-    obs: '',
   }
 }
 
-/** Dimensiones naturales del papel (px), basadas en la grilla del Excel. */
-export const COMPRA_W = 598
-export const COMPRA_H = 596
+/** Dimensiones naturales del papel (px), según la grilla del Excel nuevo. */
+export const COMPRA_W = 776
+export const COMPRA_H = 982
 
 export const COMPRA_TITULO = 'RECIBO DE COMPRA DE EQUIPO/S'
 
 export const COMPRA_LABELS = {
   recibiDe: 'RECIBI DE',
   dni: 'DNI',
-  tel: 'N° TEL',
   laSuma: 'LA SUMA DE',
   concepto: 'EN CONCEPTO DE LA COMPRA DE EQUIPO/S',
+  cel: 'CEL:',
+  mail: 'MAIL:',
   condicion: 'CONDICION:',
   imei: 'IMEI:',
-  garantia: 'GARANTIA:',
-  formaPago: 'FORMA DE PAGO',
-  total: 'TOTAL $',
-  firma: 'Firma',
-  obs: 'OBS:',
+  total: 'TOTAL',
 } as const
 
-const COMPRA_GARANTIA_TEXTO =
-  'La garantía sólo podrá ser reclamada por la persona que aparece en la orden, presentando una identificación oficial. \n' +
-  'Los equipos nuevos cuentan con un (1) año de garantía internacional de Apple, el plazo de la misma comienza a contar desde el día que se hace entrega del equipo. Si la garantía aplica CelTuc se encargara de la logística del equipo, siendo de Apple la decisión si el equipo se repara o se sustituye.\n' +
-  'Los equipos usados cuentan con tres (3) meses de garantía, el plazo de la misma comienza a contar desde el día que se hace entrega del equipo. El tiempo para validar si procede o no con la garantía es de hasta tres (3) días. Si la garantía aplica, la reparación de ésta puede demorar hasta 10 días hábiles dependiendo de la disponibilidad de equipos.\n' +
-  'Esta garantía NO cubre:\n' +
-  'Reembolsos/devoluciones; si el equipo supera el plazo de garantía; daños, roturas, golpes, irregularidades y/o vicios aparentes de fácil e inmediata observación que no fueron verificados dentro del plazo de satisfacción de compra; productos con la faja de seguridad dañada, sin número de serial, serial adulterado o ilegible; daños por fluidos; si fue utilizado con algún accesorio que no pertenece al celular, por ejemplo un cargador de otra marca; si se utilizó algún software no autorizado por el fabricante; defectos o daños ocasionados por testeos, instalaciones, alteraciones y/o modificación de cualquier tipo realizado por otro servicio técnico; robo o hurto del equipo.\n'
+/** Renglones en blanco tal cual el Excel (para el XLSX sin completar). */
+export const COMPRA_LINEAS = {
+  recibiDe: L_COMPRA_RECIBI,
+  laSuma: L_COMPRA_SUMA,
+  concepto: L_COMPRA_CONCEPTO,
+  cont: L_COMPRA_CONT,
+}
 
-export const COMPRA_GARANTIA = partirGarantia(COMPRA_GARANTIA_TEXTO)
-export const COMPRA_GARANTIA_TEXTO_PLANO = COMPRA_GARANTIA_TEXTO
+/** Texto de garantía con su formato original (títulos en negrita). */
+export const COMPRA_GARANTIA = RUNS_COMPRA

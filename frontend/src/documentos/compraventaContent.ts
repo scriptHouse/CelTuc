@@ -1,6 +1,21 @@
 import { hoyDMY } from './types'
+import {
+  CV_CUARTA as T_CUARTA,
+  CV_INTRO as T_INTRO,
+  CV_PRIMERA as T_PRIMERA,
+  CV_QUINTA as T_QUINTA,
+  CV_SEGUNDA as T_SEGUNDA,
+  CV_SEXTA as T_SEXTA,
+  CV_TERCERA as T_TERCERA,
+  L_CV_COLOR,
+  L_CV_IMEI1,
+  L_CV_IMEI2,
+  L_CV_MARCA,
+  L_CV_MODELO,
+  L_CV_OBS,
+} from './textosLegales'
 
-/** Datos del contrato de compraventa (usados). */
+/** Datos del contrato de compraventa (usados). El comprador es fijo (CelTuc). */
 export interface CompraventaData {
   cupon: string
   fechaDia: string
@@ -14,9 +29,8 @@ export interface CompraventaData {
   imei1: string
   imei2: string
   obs: string
-  nombreComprador: string
-  dniComprador: string
-  precio: string
+  precioNum: string
+  precioLetras: string
 }
 
 export function compraventaVacia(): CompraventaData {
@@ -34,14 +48,13 @@ export function compraventaVacia(): CompraventaData {
     imei1: '',
     imei2: '',
     obs: '',
-    nombreComprador: '',
-    dniComprador: '',
-    precio: '',
+    precioNum: '',
+    precioLetras: '',
   }
 }
 
-export const CV_W = 740
-export const CV_H = 786
+export const CV_W = 776
+export const CV_H = 995
 
 export const CV_TITULO = 'CONTRATO DE COMPRA VENTA DE EQUIPO/S (USADOS)'
 
@@ -49,75 +62,68 @@ export const CV_TITULO = 'CONTRATO DE COMPRA VENTA DE EQUIPO/S (USADOS)'
 export type Seg = { t: string } | { f: keyof CompraventaData; w: number; aria: string }
 
 export interface Clausula {
-  prefix?: string
+  /** Encabezado en negrita (p. ej. "PRIMERA – Identificación del equipo"). */
+  prefix: string
   segs: Seg[]
 }
 
-export const CV_INTRO =
-  'Por el presente documento, celebramos entre los suscriptos un contrato de Compraventa de un teléfono celular, en base a los siguientes términos:'
-
-export const CV_PRIMERA: Clausula = {
-  prefix: 'PRIMERA:',
-  segs: [
-    { t: ' El señor/a ' },
-    { f: 'nombreVendedor', w: 220, aria: 'Nombre del vendedor' },
-    { t: ' mayor de edad, identificado con el DNI ' },
-    { f: 'dniVendedor', w: 110, aria: 'DNI del vendedor' },
-    { t: ' es propietario de un teléfono celular, con las siguientes: características:' },
-  ],
+/**
+ * Arma una cláusula a partir del texto literal del Excel: separa el encabezado
+ * en negrita y reemplaza cada serie de guiones bajos por un campo rellenable.
+ */
+function clausula(texto: string, prefix: string, campos: Seg[] = []): Clausula {
+  const cuerpo = texto.slice(prefix.length)
+  const partes = cuerpo.split(/_{3,}/)
+  const segs: Seg[] = []
+  partes.forEach((p, i) => {
+    segs.push({ t: p })
+    if (i < campos.length) segs.push(campos[i])
+  })
+  return { prefix, segs }
 }
 
-export const CV_SEGUNDA: Clausula = {
-  prefix: 'SEGUNDA:',
-  segs: [
-    { t: ' Ya realizada la descripción del equipo, el vendedor le vende al comprador ' },
-    { f: 'nombreComprador', w: 220, aria: 'Nombre del comprador' },
-    { t: ' identificado con el DNI ' },
-    { f: 'dniComprador', w: 110, aria: 'DNI del comprador' },
-    { t: ' , el teléfono celular que se ha descrito anteriormente.' },
-  ],
-}
+export const CV_INTRO = T_INTRO
 
-export const CV_TERCERA: Clausula = {
-  prefix: 'TERCERA:',
-  segs: [
-    { t: ' El precio de venta pactado por ambas partes es por la cantidad de $' },
-    { f: 'precio', w: 120, aria: 'Precio' },
-    { t: ' pagados en forma de efectivo, entregándole el derecho de dominio del teléfono celular descripto anteriormente, respetando los términos de este contrato.' },
-  ],
-}
+export const CV_PRIMERA = clausula(T_PRIMERA, 'PRIMERA – Identificación del equipo', [
+  { f: 'nombreVendedor', w: 260, aria: 'Nombre del vendedor' },
+  { f: 'dniVendedor', w: 130, aria: 'DNI del vendedor' },
+])
+export const CV_SEGUNDA = clausula(T_SEGUNDA, 'SEGUNDA – Objeto')
+export const CV_TERCERA = clausula(T_TERCERA, 'TERCERA – Precio', [
+  { f: 'precioNum', w: 150, aria: 'Precio (números)' },
+  { f: 'precioLetras', w: 250, aria: 'Precio (en letras)' },
+])
+export const CV_CUARTA = clausula(T_CUARTA, 'CUARTA – Estado del equipo')
+export const CV_QUINTA = clausula(T_QUINTA, 'QUINTA – Responsabilidad por bloqueo')
+export const CV_SEXTA = clausula(T_SEXTA, 'SEXTA – Declaraciones del vendedor')
 
-export const CV_CUARTA: Clausula = {
-  prefix: 'CUARTA:',
-  segs: [
-    {
-      t: ' El vendedor, declara que el teléfono celular, no tiene problemas de ninguna naturaleza, ni ningún inconveniente para su posterior uso. Dejando en claro que el equipo telefónico no fue utilizado para ningún tipo de delito, eximiendo al comprador de cualquier costo adicional (aduana - impuestos). El comprador, declara saber el estado en el que se encuentra el equipo que adquiere, por lo que una vez finalizada la venta, este no podrá reclamar por su mal funcionamiento.',
-    },
-  ],
-}
+export const CV_CLAUSULAS_FIJAS = [CV_SEGUNDA, CV_CUARTA, CV_QUINTA, CV_SEXTA]
 
-export const CV_QUINTA: Clausula = {
-  prefix: 'QUINTA: ',
-  segs: [
-    {
-      t: 'El vendedor, asume responsabilidad ante cualquier bloqueo del equipo por parte de ENACOM, asumiendo el compromiso del mismo. Ya que dicho bloqueo, estaría asociado a la línea que anteriormente operaba en el equipo.',
-    },
-  ],
+/** Etiqueta de cada característica (lo que va antes de los guiones del Excel). */
+function etiqueta(linea: string): string {
+  return linea.split(/_{3,}/)[0]
 }
 
 export const CV_CARACTERISTICAS = [
-  { label: 'MARCA:', f: 'marca' as const },
-  { label: 'MODELO:', f: 'modelo' as const },
-  { label: 'COLOR:', f: 'color' as const },
-  { label: 'IMEI 1:', f: 'imei1' as const },
-  { label: 'IMEI 2:', f: 'imei2' as const },
-  { label: 'OBS:', f: 'obs' as const },
+  { label: etiqueta(L_CV_MARCA), f: 'marca' as const },
+  { label: etiqueta(L_CV_MODELO), f: 'modelo' as const },
+  { label: etiqueta(L_CV_COLOR), f: 'color' as const },
+  { label: etiqueta(L_CV_IMEI1), f: 'imei1' as const },
+  { label: etiqueta(L_CV_IMEI2), f: 'imei2' as const },
+  { label: etiqueta(L_CV_OBS), f: 'obs' as const },
 ]
+
+/** Pie de firmas tal cual el Excel nuevo. */
+export const CV_FIRMAS = {
+  firmaIzq: 'FIRMA COMPRADOR',
+  firmaDer: 'FIRMA VENDEDOR',
+  aclaracionIzq: 'ACLARACION COMPRADOR',
+  aclaracionDer: 'ACLARACION VENDEDOR',
+  /** Aclaración preimpresa en el Excel nuevo. */
+  aclaracionDerValor: 'ESTEBAN NICOLAS PADROS',
+} as const
 
 /** Texto plano de una cláusula con los valores incrustados (para PDF/XLSX). */
 export function clausulaPlana(c: Clausula, d: CompraventaData): string {
-  const cuerpo = c.segs
-    .map((s) => ('t' in s ? s.t : (d[s.f] || '______')))
-    .join('')
-  return (c.prefix ?? '') + cuerpo
+  return c.prefix + c.segs.map((s) => ('t' in s ? s.t : d[s.f] || '______')).join('')
 }

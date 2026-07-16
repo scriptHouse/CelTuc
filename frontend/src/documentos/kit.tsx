@@ -185,6 +185,18 @@ export function Spacer({ h }: { h: number }) {
 
 /* ------------------------ Encabezado CelTuc ------------------------------- */
 
+/* ===== Geometría del formato estándar (Excel nuevo): 776 px de ancho ===== */
+export const STD_W = 776
+export const STD_PAD = 11
+export const STD_CONTENT_W = STD_W - STD_PAD * 2 // 754 (columnas B…I)
+const HDR_LEFT_W = 399 // columnas B…E
+const HDR_LABEL_W = 85 // columna F
+const HDR_BOX_W = 270 // columnas G…I
+
+/**
+ * Encabezado CelTuc del formato nuevo: logo + identidad (filas 2-4) y, a la
+ * derecha, CUPON N° (fila 2) y FECHA en tres cajas (fila 3).
+ */
 export function CtHeader({
   cupon,
   onCupon,
@@ -195,9 +207,7 @@ export function CtHeader({
   onMes,
   onAnio,
   readOnly,
-  contentW,
   socials = 'redes',
-  height = 79.8,
 }: {
   cupon: string
   onCupon: Setter
@@ -208,52 +218,132 @@ export function CtHeader({
   onMes: Setter
   onAnio: Setter
   readOnly?: boolean
-  contentW: number
-  /** 'redes' = @CelTuc /CelTuc ; 'simple' = CelTuc CelTuc (Compraventa). */
+  /** 'redes' = @CelTuc /CelTuc ; 'simple' = CelTuc CelTuc. */
   socials?: 'redes' | 'simple'
-  height?: number
 }) {
-  const clusterW = 190
-  const labelW = 86
   return (
-    <div style={{ height, display: 'flex', alignItems: 'center' }}>
-      <div style={{ width: contentW - clusterW, display: 'flex', alignItems: 'center', gap: 8 }}>
-        <img src={LOGO_CELTUC} alt="CelTuc" width={64} height={64} style={{ display: 'block', flexShrink: 0 }} />
+    <div style={{ height: 60, display: 'flex' }}>
+      <div style={{ width: HDR_LEFT_W, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <img src={LOGO_CELTUC} alt="CelTuc" width={56} height={56} style={{ display: 'block', flexShrink: 0 }} />
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: pt(16), fontWeight: 800, letterSpacing: '0.04em', lineHeight: 1 }}>{EMPRESA.nombre}</div>
-          <div style={{ fontSize: pt(8), marginTop: 3 }}>{EMPRESA.direccion}</div>
-          <div style={{ fontSize: pt(9), marginTop: 3, display: 'flex', alignItems: 'center', gap: 4 }}>
-            <img src={ICON_INSTAGRAM} alt="" width={14} height={14} style={{ display: 'block' }} />
+          <div style={{ fontSize: pt(8), marginTop: 2 }}>{EMPRESA.direccion}</div>
+          <div style={{ fontSize: pt(9), marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <img src={ICON_INSTAGRAM} alt="" width={13} height={13} style={{ display: 'block' }} />
             <span>{socials === 'simple' ? 'CelTuc' : EMPRESA.instagram}</span>
-            <img src={ICON_FACEBOOK} alt="" width={14} height={14} style={{ display: 'block', marginLeft: 4 }} />
+            <img src={ICON_FACEBOOK} alt="" width={13} height={13} style={{ display: 'block', marginLeft: 4 }} />
             <span>{socials === 'simple' ? 'CelTuc' : EMPRESA.facebook}</span>
           </div>
         </div>
       </div>
 
-      <div style={{ width: clusterW, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <span style={{ width: labelW, fontSize: pt(11), fontWeight: 600 }}>CUPON N°</span>
-          <div style={{ flex: 1, height: 20, border: `${BOX}px solid ${INK}` }}>
+      <div style={{ width: STD_CONTENT_W - HDR_LEFT_W }}>
+        <div style={{ height: 20, display: 'flex', alignItems: 'center' }}>
+          <span style={{ width: HDR_LABEL_W, fontSize: pt(11), textAlign: 'center' }}>CUPON N°</span>
+          <div style={{ width: HDR_BOX_W, height: 20, border: `${BOX}px solid ${INK}`, boxSizing: 'border-box' }}>
             <Field value={cupon} onChange={onCupon} readOnly={readOnly} align="center" ariaLabel="Número de cupón" />
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <span style={{ width: labelW, fontSize: pt(11), fontWeight: 600 }}>FECHA</span>
-          <div style={{ display: 'flex', height: 20, border: `${BOX}px solid ${INK}` }}>
-            <div style={{ width: 30 }}>
+        <div style={{ height: 20, display: 'flex', alignItems: 'center' }}>
+          <span style={{ width: HDR_LABEL_W, fontSize: pt(11), textAlign: 'center' }}>FECHA</span>
+          <div style={{ width: HDR_BOX_W, display: 'flex', height: 20, border: `${BOX}px solid ${INK}`, boxSizing: 'border-box' }}>
+            <div style={{ flex: 96 }}>
               <Field value={dia} onChange={onDia} readOnly={readOnly} align="center" ariaLabel="Día" maxLength={2} />
             </div>
-            <div style={{ width: 34, borderLeft: `${BOX}px solid ${INK}` }}>
+            <div style={{ flex: 96, borderLeft: `${BOX}px solid ${INK}` }}>
               <Field value={mes} onChange={onMes} readOnly={readOnly} align="center" ariaLabel="Mes" maxLength={2} />
             </div>
-            <div style={{ width: 34, borderLeft: `${BOX}px solid ${INK}` }}>
+            <div style={{ flex: 78, borderLeft: `${BOX}px solid ${INK}` }}>
               <Field value={anio} onChange={onAnio} readOnly={readOnly} align="center" ariaLabel="Año" maxLength={4} />
             </div>
           </div>
         </div>
+        <div style={{ height: 20 }} />
       </div>
     </div>
+  )
+}
+
+/** Bloque de firmas al pie: dos columnas (línea + leyenda). */
+export function FirmaBlock({ izq = 'FIRMA', der = 'ACLARACION' }: { izq?: string; der?: string }) {
+  const linea = '_____________________________________________'
+  return (
+    <div style={{ display: 'flex', paddingBottom: 2 }}>
+      <div style={{ width: 298, textAlign: 'center' }}>
+        <div style={{ fontSize: pt(8) }}>{linea}</div>
+        <div style={{ fontSize: pt(7), marginTop: 1 }}>{izq}</div>
+      </div>
+      <div style={{ width: 101 }} />
+      <div style={{ width: 277, textAlign: 'center' }}>
+        <div style={{ fontSize: pt(8) }}>{linea}</div>
+        <div style={{ fontSize: pt(7), marginTop: 1 }}>{der}</div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Esqueleto de los documentos estándar (Compra, Reparación, Extensión,
+ * Compra mayorista): marco + título + encabezado + [contenido] + garantía + firmas.
+ */
+export function DocShell({
+  titulo,
+  height,
+  cupon,
+  onCupon,
+  dia,
+  mes,
+  anio,
+  onDia,
+  onMes,
+  onAnio,
+  readOnly,
+  garantia,
+  firmaIzq,
+  firmaDer,
+  children,
+}: {
+  titulo: string
+  height: number
+  cupon: string
+  onCupon: Setter
+  dia: string
+  mes: string
+  anio: string
+  onDia: Setter
+  onMes: Setter
+  onAnio: Setter
+  readOnly?: boolean
+  garantia: Run[]
+  firmaIzq?: string
+  firmaDer?: string
+  children: ReactNode
+}) {
+  return (
+    <Paper width={STD_W} height={height}>
+      <TitleBar height={20} fontSize={pt(10)}>
+        {titulo}
+      </TitleBar>
+      <Body padL={STD_PAD} padR={STD_PAD}>
+        <CtHeader
+          cupon={cupon}
+          onCupon={onCupon}
+          dia={dia}
+          mes={mes}
+          anio={anio}
+          onDia={onDia}
+          onMes={onMes}
+          onAnio={onAnio}
+          readOnly={readOnly}
+        />
+        <Spacer h={7} />
+        {children}
+        <Spacer h={10} />
+        <GarantiaBox runs={garantia} fontSize={pt(7)} />
+        <Spacer h={8} />
+        <FirmaBlock izq={firmaIzq} der={firmaDer} />
+      </Body>
+    </Paper>
   )
 }
 

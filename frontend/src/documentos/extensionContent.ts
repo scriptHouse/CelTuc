@@ -1,21 +1,22 @@
-import { partirGarantia } from './content'
 import { hoyDMY } from './types'
+import { L_EXT_CONCEPTO, L_EXT_RECIBI, L_EXT_SUMA, RUNS_EXTENSION } from './textosLegales'
 
-/** Datos del documento "Extensión de garantía". */
+/** Datos del documento "Extensión de garantía" (formato nuevo). */
 export interface ExtensionData {
   cupon: string
   fechaDia: string
   fechaMes: string
   fechaAnio: string
-  nombre: string
+  recibiDe: string
   dni: string
-  tel: string
-  dias: string
+  laSuma: string
   concepto: string
   conceptoExtra: string
+  meses: string
+  cel: string
+  mail: string
+  condicion: string
   imei: string
-  vendedor: string
-  formaPago: string
   total: string
 }
 
@@ -26,42 +27,44 @@ export function extensionVacia(): ExtensionData {
     fechaDia: dia,
     fechaMes: mes,
     fechaAnio: anio,
-    nombre: '',
+    recibiDe: '',
     dni: '',
-    tel: '',
-    dias: '',
+    laSuma: '',
     concepto: '',
     conceptoExtra: '',
+    meses: '',
+    cel: '',
+    mail: '',
+    condicion: '',
     imei: '',
-    vendedor: '',
-    formaPago: '',
     total: '',
   }
 }
 
-export const EXT_W = 598
-export const EXT_H = 596
+export const EXT_W = 776
+export const EXT_H = 921
 
-export const EXT_TITULO = 'EXTENCION GARANTIA'
+export const EXT_TITULO = 'EXTENCION DE GARANTIA'
 
 export const EXT_LABELS = {
-  nombre: 'NOMBRE',
+  recibiDe: 'RECIBI DE',
   dni: 'DNI',
-  tel: 'N° TEL',
-  extiende1: 'SE EXTIENDE LA GARANTIA POR UN PLAZO DE',
-  extiende2: 'DIAS EN',
-  concepto: 'COCEPTO DE COMPRA DEL EQUIPO',
+  laSuma: 'LA SUMA DE',
+  concepto: 'EN CONCEPTO DE EXTENCION DE GARANTIA DEL EQUIPO',
+  porN: 'POR Nº',
+  meses: 'MESES A PARTIR DE LA FECHA QUE SE MUESTA EN ESTE RECIBO.',
+  cel: 'CEL:',
+  mail: 'MAIL:',
+  condicion: 'CONDICION:',
   imei: 'IMEI:',
-  vendedor: 'VENDEDOR:',
-  formaPago: 'FORMA DE PAGO',
-  total: 'TOTAL $',
-  firma: 'Firma',
+  total: 'TOTAL',
 } as const
 
-const EXT_GARANTIA_TEXTO =
-  'Documento valido como extensión de garantía. La misma empieza a correr el día que culmina la garantía de compra (3 meses), extendiéndose por 45 o 90 días según lo indica este documento. ' +
-  'Esta garantía sólo podrá ser reclamada por la persona que aparece en la orden, presentando una identificación oficial. El tiempo para validar si procede o no con la garantía es de hasta tres (3) días. Si la garantía aplica, la reparación de ésta puede demorar hasta 10 días hábiles dependiendo de la disponibilidad de equipos.\n' +
-  'Esta garantía NO cubre:\n' +
-  'Reembolsos/devoluciones; si el equipo supera el plazo de garantía; daños, roturas, golpes, irregularidades y/o vicios aparentes de fácil e inmediata observación que no fueron verificados dentro del plazo de satisfacción de compra; productos con la faja de seguridad dañada, sin número de serial, serial adulterado o ilegible; daños por fluidos; si fue utilizado con algún accesorio que no pertenece al celular, por ejemplo un cargador de otra marca; si se utilizó algún software no autorizado por el fabricante; defectos o daños ocasionados por testeos, instalaciones, alteraciones y/o modificación de cualquier tipo realizado por otro servicio técnico; robo o hurto del equipo. Cabe destacar que si se pierde la garantía de compra (3 meses) por alguna de las circunstancias mencionadas anteriormente, la extensión de garantía también queda anulada.\n'
+export const EXT_LINEAS = {
+  recibiDe: L_EXT_RECIBI,
+  laSuma: L_EXT_SUMA,
+  concepto: L_EXT_CONCEPTO,
+}
 
-export const EXT_GARANTIA = partirGarantia(EXT_GARANTIA_TEXTO)
+/** Texto de la extensión con su formato original (título en negrita). */
+export const EXT_GARANTIA = RUNS_EXTENSION

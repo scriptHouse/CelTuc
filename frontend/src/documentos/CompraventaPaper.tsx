@@ -1,31 +1,31 @@
 import type { CSSProperties } from 'react'
-import { Body, CtHeader, INK, Inline, Paper, TitleBar, UnderlineLine, pt } from './kit'
+import { Body, CtHeader, Inline, Paper, STD_PAD, STD_W, TitleBar, UnderlineLine, pt } from './kit'
 import {
   CV_CARACTERISTICAS,
   CV_CUARTA,
+  CV_FIRMAS,
   CV_H,
   CV_INTRO,
   CV_PRIMERA,
   CV_QUINTA,
   CV_SEGUNDA,
+  CV_SEXTA,
   CV_TERCERA,
   CV_TITULO,
-  CV_W,
   type Clausula,
   type CompraventaData,
 } from './compraventaContent'
 import type { PaperProps } from './types'
 
-const PAD = 24
-const CONTENT_W = CV_W - PAD * 2
-
 export function CompraventaPaper({ datos, onChange, readOnly }: PaperProps<CompraventaData>) {
   const set = (k: keyof CompraventaData) => (v: string) => onChange({ [k]: v })
 
   return (
-    <Paper width={CV_W} height={CV_H}>
-      <TitleBar>{CV_TITULO}</TitleBar>
-      <Body padL={PAD} padR={PAD}>
+    <Paper width={STD_W} height={CV_H}>
+      <TitleBar height={20} fontSize={pt(10)}>
+        {CV_TITULO}
+      </TitleBar>
+      <Body padL={STD_PAD} padR={STD_PAD}>
         <CtHeader
           cupon={datos.cupon}
           onCupon={set('cupon')}
@@ -36,14 +36,12 @@ export function CompraventaPaper({ datos, onChange, readOnly }: PaperProps<Compr
           onMes={set('fechaMes')}
           onAnio={set('fechaAnio')}
           readOnly={readOnly}
-          contentW={CONTENT_W}
-          socials="simple"
         />
 
         <p style={parr}>{CV_INTRO}</p>
         <ClausulaView c={CV_PRIMERA} datos={datos} set={set} readOnly={readOnly} />
 
-        <div style={{ marginTop: 4, marginBottom: 4 }}>
+        <div style={{ marginTop: 2 }}>
           {CV_CARACTERISTICAS.map((c) => (
             <UnderlineLine
               key={c.f}
@@ -52,6 +50,7 @@ export function CompraventaPaper({ datos, onChange, readOnly }: PaperProps<Compr
               onChange={set(c.f)}
               readOnly={readOnly}
               height={20}
+              fontSize={pt(10)}
             />
           ))}
         </div>
@@ -60,22 +59,23 @@ export function CompraventaPaper({ datos, onChange, readOnly }: PaperProps<Compr
         <ClausulaView c={CV_TERCERA} datos={datos} set={set} readOnly={readOnly} />
         <ClausulaView c={CV_CUARTA} datos={datos} set={set} readOnly={readOnly} />
         <ClausulaView c={CV_QUINTA} datos={datos} set={set} readOnly={readOnly} />
+        <ClausulaView c={CV_SEXTA} datos={datos} set={set} readOnly={readOnly} />
 
-        {/* Firmas (empujadas al pie) */}
+        {/* Firmas al pie */}
         <div style={{ flex: 1 }} />
-        <div style={{ display: 'flex', justifyContent: 'space-around', paddingBottom: 10 }}>
-          <Firma caption="VENDEDOR" />
-          <Firma caption="COMPRADOR" />
-        </div>
+        <FirmaFila izq={CV_FIRMAS.firmaIzq} der={CV_FIRMAS.firmaDer} />
+        <div style={{ height: 6 }} />
+        <FirmaFila izq={CV_FIRMAS.aclaracionIzq} der={CV_FIRMAS.aclaracionDer} valorDer={CV_FIRMAS.aclaracionDerValor} />
+        <div style={{ height: 6 }} />
       </Body>
     </Paper>
   )
 }
 
 const parr: CSSProperties = {
-  margin: '6px 0 0',
-  fontSize: pt(11),
-  lineHeight: 1.25,
+  margin: '5px 0 0',
+  fontSize: pt(10),
+  lineHeight: 1.22,
   textAlign: 'justify',
 }
 
@@ -92,30 +92,32 @@ function ClausulaView({
 }) {
   return (
     <p style={parr}>
-      {c.prefix && <span style={{ fontWeight: 700 }}>{c.prefix}</span>}
+      <span style={{ fontWeight: 700 }}>{c.prefix}</span>
       {c.segs.map((s, i) =>
         't' in s ? (
           <span key={i}>{s.t}</span>
         ) : (
-          <Inline
-            key={i}
-            value={datos[s.f]}
-            onChange={set(s.f)}
-            readOnly={readOnly}
-            ariaLabel={s.aria}
-            width={s.w}
-          />
+          <Inline key={i} value={datos[s.f]} onChange={set(s.f)} readOnly={readOnly} ariaLabel={s.aria} width={s.w} />
         ),
       )}
     </p>
   )
 }
 
-function Firma({ caption }: { caption: string }) {
+/** Fila de firmas: dos columnas con línea y leyenda (la derecha puede venir preimpresa). */
+function FirmaFila({ izq, der, valorDer }: { izq: string; der: string; valorDer?: string }) {
+  const linea = '_____________________________________________'
   return (
-    <div style={{ width: 220, textAlign: 'center', fontSize: pt(11) }}>
-      <div style={{ borderTop: `1px solid ${INK}`, marginBottom: 3 }} />
-      <span style={{ fontWeight: 700 }}>{caption}</span>
+    <div style={{ display: 'flex', fontSize: pt(10) }}>
+      <div style={{ width: 298, textAlign: 'center' }}>
+        <div>{linea}</div>
+        <div style={{ fontWeight: 700, marginTop: 1 }}>{izq}</div>
+      </div>
+      <div style={{ width: 101 }} />
+      <div style={{ width: 277, textAlign: 'center' }}>
+        <div style={{ fontWeight: valorDer ? 700 : 400 }}>{valorDer ?? linea}</div>
+        <div style={{ fontWeight: 700, marginTop: 1 }}>{der}</div>
+      </div>
     </div>
   )
 }

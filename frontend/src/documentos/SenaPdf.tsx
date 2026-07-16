@@ -19,11 +19,16 @@ export function SenaPdf({ datos }: { datos: SenaData }) {
                 <Image src={LOGO_CELTUC} style={{ width: 54, height: 54 }} />
                 <Text style={{ fontSize: pt(8), marginTop: 3 }}>{SENA.direccion}</Text>
               </View>
-              <View style={{ width: 226, gap: 4 }}>
-                <PdfLine label={SENA.numeroRecibo} value={datos.numeroRecibo} />
-                <PdfStackBox label={SENA.fecha} width={120}>
-                  <Text style={{ fontSize: pt(10), textAlign: 'center' }}>{datos.fecha}</Text>
-                </PdfStackBox>
+              <View style={{ width: 226, gap: 5 }}>
+                {/* N° RECIBO y FECHA: dos cajas lado a lado (formato nuevo) */}
+                <View style={{ flexDirection: 'row', gap: 5 }}>
+                  <PdfStackBox label={SENA.numeroRecibo} width={118}>
+                    <Text style={{ fontSize: pt(10), textAlign: 'center' }}>{datos.numeroRecibo}</Text>
+                  </PdfStackBox>
+                  <PdfStackBox label={SENA.fecha} width={103}>
+                    <Text style={{ fontSize: pt(10), textAlign: 'center' }}>{datos.fecha}</Text>
+                  </PdfStackBox>
+                </View>
                 <Text style={{ fontSize: pt(8), textAlign: 'center' }}>{SENA.noFactura}</Text>
               </View>
             </View>
@@ -46,7 +51,7 @@ export function SenaPdf({ datos }: { datos: SenaData }) {
                   <Text style={{ fontSize: pt(12), fontFamily: BOLD, textAlign: 'center' }}>{datos.total}</Text>
                 </PdfStackBox>
                 <View style={{ marginTop: 12, alignItems: 'center' }}>
-                  <Text style={{ fontSize: pt(10), letterSpacing: 1 }}>…...........................</Text>
+                  <Text style={{ fontSize: pt(10) }}>{SENA.lineaFirma}</Text>
                   <Text style={{ fontSize: pt(8), fontFamily: BOLD }}>{SENA.firma}</Text>
                 </View>
               </View>

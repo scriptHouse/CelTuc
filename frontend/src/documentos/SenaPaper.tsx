@@ -16,17 +16,17 @@ export function SenaPaper({ datos, onChange, readOnly }: PaperProps<SenaData>) {
             <img src={LOGO_CELTUC} alt="CelTuc" width={54} height={54} style={{ display: 'block' }} />
             <div style={{ fontSize: pt(8), marginTop: 3 }}>{SENA.direccion}</div>
           </div>
-          <div style={{ width: 226, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4 }}>
-              <span style={{ fontWeight: 700, whiteSpace: 'nowrap', paddingBottom: 2 }}>{SENA.numeroRecibo}</span>
-              <div style={{ flex: 1, borderBottom: `1px solid ${INK}` }}>
+          <div style={{ width: 226, display: 'flex', flexDirection: 'column', gap: 5 }}>
+            {/* N° RECIBO y FECHA: dos cajas lado a lado (formato nuevo) */}
+            <div style={{ display: 'flex', gap: 5 }}>
+              <StackBox label={SENA.numeroRecibo} width={118}>
                 <Field value={datos.numeroRecibo} onChange={set('numeroRecibo')} readOnly={readOnly} align="center" ariaLabel="N° de recibo" />
-              </div>
+              </StackBox>
+              <StackBox label={SENA.fecha} width={103}>
+                <Field value={datos.fecha} onChange={set('fecha')} readOnly={readOnly} align="center" ariaLabel="Fecha" />
+              </StackBox>
             </div>
-            <StackBox label={SENA.fecha} width={120}>
-              <Field value={datos.fecha} onChange={set('fecha')} readOnly={readOnly} align="center" ariaLabel="Fecha" />
-            </StackBox>
-            <div style={{ fontSize: pt(8), textAlign: 'center', marginTop: 1 }}>{SENA.noFactura}</div>
+            <div style={{ fontSize: pt(8), textAlign: 'center' }}>{SENA.noFactura}</div>
           </div>
         </div>
 
@@ -57,7 +57,7 @@ export function SenaPaper({ datos, onChange, readOnly }: PaperProps<SenaData>) {
               <Field value={datos.total} onChange={set('total')} readOnly={readOnly} align="center" ariaLabel="Total" style={{ fontWeight: 700, fontSize: pt(12) }} />
             </StackBox>
             <div style={{ marginTop: 12, textAlign: 'center', width: '100%' }}>
-              <div style={{ fontSize: pt(10), letterSpacing: 1 }}>…...........................</div>
+              <div style={{ fontSize: pt(10) }}>{SENA.lineaFirma}</div>
               <div style={{ fontSize: pt(8), fontWeight: 700 }}>{SENA.firma}</div>
             </div>
           </div>
