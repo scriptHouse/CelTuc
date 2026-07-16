@@ -385,7 +385,7 @@ export function AyudaInventario() {
         <AyudaCampos
           campos={[
             [<>Pestañas de sucursal</>, <>Elegís qué local estás mirando (Solar, Centro…). <b>Todas</b> muestra las dos columnas juntas con el total.</>],
-            [<>Vistas</>, <>«Con stock» es el día a día; «Todo el catálogo» muestra también lo que está en 0; «Bajo mínimo» es la lista de reposición.</>],
+            [<>Vistas</>, <>«Con stock» es el día a día; «Todo el catálogo» muestra también lo que está en 0; «Bajo mínimo» es la lista de reposición; «No informado» junta los productos cuya cantidad nunca se cargó.</>],
             [<>Botones − / +</>, <>Restan o suman de a una unidad (vendí una / encontré una). Quedan registrados con tu usuario.</>],
             [<>El lápiz ✎</>, <>Abre el detalle: cantidad exacta, stock mínimo, transferencia a otra sucursal y los últimos movimientos.</>],
           ]}
@@ -423,6 +423,16 @@ export function AyudaInventario() {
           Si a un producto le ponés un mínimo (ej: <b>2</b>), cuando la cantidad llega a ese
           número la fila se marca y el producto aparece en la vista «Bajo mínimo» y en el bloque
           «Reposición» del Panel. Sin mínimo cargado, no hay alerta.
+        </p>
+      </AyudaSeccion>
+
+      <AyudaSeccion titulo="Qué significa «(no informado)»">
+        <p>
+          Son los productos que en las planillas originales tenían la <b>celda de stock vacía</b>:
+          nadie los contó, así que ese 0 <b>no es un conteo real</b>. Se muestran con un guion (—)
+          y la etiqueta <b>(no informado)</b> para distinguirlos de un 0 de verdad. En cuanto
+          alguien carga la cantidad real (con + / − o el ✎, aunque sea 0), la marca desaparece
+          sola. La vista «No informado» los junta a todos para ir bajándolos con el conteo.
         </p>
       </AyudaSeccion>
 

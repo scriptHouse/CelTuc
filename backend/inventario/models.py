@@ -62,6 +62,12 @@ class StockProducto(ModeloBase):
         blank=True,
         help_text='Vacio = sin alerta. Con valor, la fila avisa cuando cantidad <= minimo.',
     )
+    sin_dato = models.BooleanField(
+        'sin dato (no informado)',
+        default=False,
+        help_text='La planilla de origen no informaba cantidad: el 0 no es un conteo. '
+                  'Se limpia solo al cargar una cantidad real.',
+    )
 
     class Meta:
         db_table = 'inventario_stock'
@@ -205,7 +211,8 @@ def aplicar_ajuste(producto, sucursal, *, delta=None, cantidad=None, tipo='',
         fila, _ = StockProducto.objects.select_for_update().get_or_create(
             producto=producto, sucursal=sucursal,
         )
-        if cantidad is not None:
+        informa_cantidad = cantidad is not None
+        if informa_cantidad:
             delta = int(cantidad) - fila.cantidad
         delta = int(delta or 0)
         nueva = fila.cantidad + delta
@@ -222,9 +229,12 @@ def aplicar_ajuste(producto, sucursal, *, delta=None, cantidad=None, tipo='',
             else:
                 tipo = MovimientoStock.Tipo.AJUSTE
         fila.cantidad = nueva
+        if fila.sin_dato and (delta != 0 or informa_cantidad):
+            # Alguien conto de verdad (aunque haya contado 0): ya esta informado.
+            fila.sin_dato = False
         if usuario is not None:
             fila.actualizado_por = usuario
-        fila.save(update_fields=['cantidad', 'actualizado_por'])
+        fila.save(update_fields=['cantidad', 'sin_dato', 'actualizado_por'])
         movimiento = None
         if delta != 0:
             movimiento = MovimientoStock.objects.create(

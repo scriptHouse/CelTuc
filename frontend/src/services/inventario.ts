@@ -25,6 +25,9 @@ export interface StockRow {
   cantidad: number
   /** null = sin alerta configurada. */
   stock_minimo: number | null
+  /** La planilla de origen no informaba cantidad: el 0 no es un conteo.
+   *  Se muestra como "(no informado)" y se limpia al cargar una cantidad real. */
+  sin_dato: boolean
   actualizado: string // ISO
 }
 

@@ -58,12 +58,13 @@ import { useConfirm } from '@/components/ConfirmProvider'
  */
 
 type SeleccionSucursal = number | 'todas'
-type Vista = 'con-stock' | 'todos' | 'bajo'
+type Vista = 'con-stock' | 'todos' | 'bajo' | 'no-informado'
 
 const VISTAS: Array<{ id: Vista; label: string }> = [
   { id: 'con-stock', label: 'Con stock' },
   { id: 'todos', label: 'Todo el catálogo' },
   { id: 'bajo', label: 'Bajo mínimo' },
+  { id: 'no-informado', label: 'No informado' },
 ]
 
 export function InventarioPage() {
@@ -147,6 +148,13 @@ export function InventarioPage() {
     const rows = donde === 'todas' ? [...porSucursal.values()] : [porSucursal.get(donde)]
     return rows.some((r) => r && r.stock_minimo !== null && r.cantidad <= r.stock_minimo)
   }
+  // "(no informado)": la planilla de origen no traía cantidad para esa sucursal.
+  const noInformado = (productoId: number, donde: SeleccionSucursal) => {
+    const porSucursal = filas.get(productoId)
+    if (!porSucursal) return false
+    const rows = donde === 'todas' ? [...porSucursal.values()] : [porSucursal.get(donde)]
+    return rows.some((r) => r && r.sin_dato && r.cantidad === 0)
+  }
 
   // ---- Filtrado ----
   const visibles = useMemo(() => {
@@ -164,6 +172,7 @@ export function InventarioPage() {
       if (termino) return true
       if (vista === 'con-stock') return cantidadDe(p.id, sel) > 0
       if (vista === 'bajo') return bajoMinimo(p.id, sel)
+      if (vista === 'no-informado') return noInformado(p.id, sel)
       return true
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -347,13 +356,23 @@ export function InventarioPage() {
       ) : visibles.length === 0 ? (
         <EmptyState
           icon={PackageSearch}
-          title={buscando ? 'Sin resultados' : vista === 'bajo' ? 'Nada bajo mínimo' : 'Sin stock cargado'}
+          title={
+            buscando
+              ? 'Sin resultados'
+              : vista === 'bajo'
+                ? 'Nada bajo mínimo'
+                : vista === 'no-informado'
+                  ? 'Todo informado'
+                  : 'Sin stock cargado'
+          }
           description={
             buscando
               ? 'Probá con otra búsqueda o cambiá la categoría.'
               : vista === 'bajo'
                 ? 'Ningún producto está en o por debajo de su mínimo en esta vista.'
-                : 'Buscá un producto del catálogo y cargale unidades con el botón +.'
+                : vista === 'no-informado'
+                  ? 'No queda ningún producto "(no informado)" acá: todas las cantidades fueron cargadas.'
+                  : 'Buscá un producto del catálogo y cargale unidades con el botón +.'
           }
         />
       ) : (
@@ -460,6 +479,10 @@ function FilaProducto({
 
   if (sel === 'todas') {
     const total = activas.reduce((acc, s) => acc + (filaDe(producto.id, s.id)?.cantidad ?? 0), 0)
+    const algunaSinDato = activas.some((s) => {
+      const fila = filaDe(producto.id, s.id)
+      return fila?.sin_dato && fila.cantidad === 0
+    })
     return (
       <li className="ct-stagger-fade flex items-center gap-3 px-4 py-3 sm:px-5" style={estilo}>
         <div className="min-w-0 flex-1">
@@ -477,20 +500,30 @@ function FilaProducto({
           {activas.map((s) => {
             const fila = filaDe(producto.id, s.id)
             const bajo = fila && fila.stock_minimo !== null && fila.cantidad <= fila.stock_minimo
+            const sinDato = fila?.sin_dato && fila.cantidad === 0
             return (
               <span
                 key={s.id}
                 className={cn(
                   'tnum rounded-lg px-2 py-1 text-xs font-medium',
                   bajo ? 'bg-ink-950 text-on-ink' : 'bg-ink-50 text-ink-600',
+                  sinDato && 'text-ink-400',
                 )}
-                title={`${s.nombre}: ${fila?.cantidad ?? 0}`}
+                title={sinDato ? `${s.nombre}: (no informado)` : `${s.nombre}: ${fila?.cantidad ?? 0}`}
               >
-                {s.nombre.slice(0, 3)} {num(fila?.cantidad ?? 0)}
+                {s.nombre.slice(0, 3)} {sinDato ? '—' : num(fila?.cantidad ?? 0)}
               </span>
             )
           })}
-          <span className="tnum w-10 text-right text-sm font-bold text-ink-950">{num(total)}</span>
+          <span
+            className={cn(
+              'tnum w-10 text-right text-sm font-bold',
+              total === 0 && algunaSinDato ? 'text-ink-400' : 'text-ink-950',
+            )}
+            title={total === 0 && algunaSinDato ? '(no informado)' : undefined}
+          >
+            {total === 0 && algunaSinDato ? '—' : num(total)}
+          </span>
         </div>
       </li>
     )
@@ -502,6 +535,7 @@ function FilaProducto({
   const cantidad = fila?.cantidad ?? 0
   const minimo = fila?.stock_minimo ?? null
   const bajo = minimo !== null && cantidad <= minimo
+  const sinDato = (fila?.sin_dato ?? false) && cantidad === 0
   const claveOcupado = `${producto.id}-${sucursal.id}`
   const trabajando = ocupado === claveOcupado
 
@@ -523,7 +557,12 @@ function FilaProducto({
       </div>
 
       <div className="flex shrink-0 items-center gap-1.5">
-        {bajo && (
+        {sinDato && (
+          <Badge tone="outline" title="La planilla no traía cantidad: cargala para informarla">
+            (no informado)
+          </Badge>
+        )}
+        {bajo && !sinDato && (
           <Badge tone={cantidad === 0 ? 'solid' : 'outline'} className="hidden sm:inline-flex">
             {cantidad === 0 ? 'sin stock' : `mín. ${num(minimo!)}`}
           </Badge>
@@ -538,8 +577,14 @@ function FilaProducto({
           >
             <Minus className="h-3.5 w-3.5" />
           </button>
-          <span className={cn('tnum w-10 text-center text-sm font-semibold', bajo ? 'text-ink-950' : 'text-ink-900')}>
-            {trabajando ? <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" /> : num(cantidad)}
+          <span
+            className={cn(
+              'tnum w-10 text-center text-sm font-semibold',
+              sinDato ? 'text-ink-400' : bajo ? 'text-ink-950' : 'text-ink-900',
+            )}
+            title={sinDato ? '(no informado)' : undefined}
+          >
+            {trabajando ? <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" /> : sinDato ? '—' : num(cantidad)}
           </span>
           <button
             type="button"
@@ -701,6 +746,12 @@ function DetalleStockModal({
       </div>
 
       <div className="max-h-[70vh] space-y-5 overflow-y-auto px-5 py-5">
+        {fila?.sin_dato && fila.cantidad === 0 && (
+          <p className="rounded-xl border border-line bg-ink-50 px-3 py-2.5 text-xs text-ink-600">
+            <b>(no informado)</b> — la planilla de esta sucursal no traía cantidad para este
+            producto. Guardá la cantidad real (aunque sea 0) y deja de figurar así.
+          </p>
+        )}
         <div className="grid gap-4 sm:grid-cols-2">
           <CampoLocal label="Cantidad exacta">
             <Input

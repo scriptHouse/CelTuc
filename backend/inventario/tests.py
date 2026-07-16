@@ -67,6 +67,18 @@ class OperacionesStockTests(TestCase):
         self.assertEqual(movs.count(), 2)
         self.assertEqual(sorted(m.delta for m in movs), [-4, 4])
 
+    def test_ajuste_limpia_sin_dato(self):
+        # Una fila "(no informado)" deja de estarlo en cuanto alguien carga
+        # una cantidad real — incluso si lo que carga es 0 (conto y habia 0).
+        StockProducto.objects.create(producto=self.producto, sucursal=self.solar, sin_dato=True)
+        fila, mov = aplicar_ajuste(self.producto, self.solar, cantidad=0)
+        self.assertFalse(fila.sin_dato)
+        self.assertIsNone(mov)  # el 0 explicito no genera movimiento
+        StockProducto.objects.create(producto=self.producto, sucursal=self.centro, sin_dato=True)
+        fila, mov = aplicar_ajuste(self.producto, self.centro, delta=3)
+        self.assertFalse(fila.sin_dato)
+        self.assertEqual(mov.tipo, MovimientoStock.Tipo.INGRESO)
+
     def test_transferencia_sin_stock_falla_atomica(self):
         aplicar_ajuste(self.producto, self.solar, delta=2)
         from django.core.exceptions import ValidationError
@@ -196,6 +208,7 @@ class ApiInventarioTests(TestCase):
         }, format='json')
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.data['stock']['cantidad'], 3)
+        self.assertIs(r.data['stock']['sin_dato'], False)
         self.assertEqual(r.data['movimiento']['tipo'], 'ingreso')
         self.assertEqual(r.data['movimiento']['usuario'], 'empleado.inv')
 
@@ -318,6 +331,23 @@ class SeedInventarioTests(TestCase):
             MovimientoStock.objects.filter(nota__icontains='planilla').count(),
             StockProducto.objects.filter(cantidad__gt=0).count(),
         )
+
+    def test_seed_no_informado(self):
+        # Las filas cuya celda de stock estaba vacia en las planillas quedan
+        # como "(no informado)": cantidad 0 + sin_dato, sin movimiento.
+        marcadas = StockProducto.objects.filter(sin_dato=True)
+        self.assertEqual(marcadas.count(), 378)  # Solar 175 + Centro 203
+        self.assertFalse(marcadas.exclude(cantidad=0).exists())
+        # Producto que solo estaba en las planillas sin cantidad: se creo aca.
+        haylou = Producto.objects.get(nombre='Haylou X1 Neo')
+        self.assertEqual(haylou.stocks.filter(sin_dato=True).count(), 2)
+        # "Fuente 5W - CO" estaba vacia en las dos hojas (en Centro ademas de
+        # Solar): las dos sucursales quedan "(no informado)".
+        fuente5 = StockProducto.objects.filter(
+            producto__nombre='Fuente 5W', producto__calidad='Calidad original',
+        )
+        self.assertEqual(fuente5.count(), 2)
+        self.assertTrue(all(f.sin_dato and f.cantidad == 0 for f in fuente5))
 
     def test_casos_conocidos_de_la_hoja(self):
         solar = Sucursal.objects.get(nombre='Solar')

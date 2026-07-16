@@ -81,8 +81,9 @@ class SeedAccesoriosTests(TestCase):
     def test_categorias_y_productos_sembrados(self):
         self.assertEqual(CategoriaProducto.objects.filter(padre__isnull=True).count(), 15)
         # 403 de la hoja Accesorios + 12 que aparecieron en las planillas de
-        # stock de las sucursales (seed de inventario, jul 2026).
-        self.assertEqual(Producto.objects.count(), 415)
+        # stock de las sucursales (seed de inventario, jul 2026) + 19 de las
+        # filas sin cantidad informada (seed "(no informado)", jul 2026).
+        self.assertEqual(Producto.objects.count(), 434)
 
     def test_jerarquia_de_cables(self):
         cables = CategoriaProducto.objects.get(nombre='Cables', padre__isnull=True)

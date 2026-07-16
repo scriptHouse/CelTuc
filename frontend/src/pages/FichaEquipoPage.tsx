@@ -96,13 +96,14 @@ export function FichaEquipoPage() {
     retry: false,
   })
   const stockDe = useMemo(() => {
-    const porProducto = new Map<number, Array<{ sucursal: string; cantidad: number }>>()
+    const porProducto = new Map<number, Array<{ sucursal: string; cantidad: number; sinDato?: boolean }>>()
     if (!puedeInventario) return porProducto
     const nombreSucursal = new Map(sucursales.map((s) => [s.id, s.nombre]))
     for (const fila of stock) {
-      if (fila.cantidad <= 0) continue
+      const sinDato = fila.sin_dato && fila.cantidad === 0
+      if (fila.cantidad <= 0 && !sinDato) continue
       const lista = porProducto.get(fila.producto) ?? []
-      lista.push({ sucursal: nombreSucursal.get(fila.sucursal) ?? '', cantidad: fila.cantidad })
+      lista.push({ sucursal: nombreSucursal.get(fila.sucursal) ?? '', cantidad: fila.cantidad, sinDato })
       porProducto.set(fila.producto, lista)
     }
     return porProducto
@@ -406,16 +407,25 @@ export function FichaEquipoPage() {
   )
 }
 
-/** Stock por sucursal, del Inventario: "Solar 3 · Centro 1" (o "sin stock"). */
-function StockChips({ filas }: { filas?: Array<{ sucursal: string; cantidad: number }> }) {
-  if (!filas || filas.length === 0) {
-    return <Badge tone="outline">sin stock</Badge>
+/** Stock por sucursal, del Inventario: "Solar 3 · Centro 1", "sin stock" o
+ *  "(no informado)" si la planilla nunca trajo cantidad. */
+function StockChips({ filas }: { filas?: Array<{ sucursal: string; cantidad: number; sinDato?: boolean }> }) {
+  const conStock = (filas ?? []).filter((f) => !f.sinDato)
+  if (conStock.length > 0) {
+    return (
+      <Badge tone="soft" className="tnum">
+        {conStock.map((f) => `${f.sucursal} ${num(f.cantidad)}`).join(' · ')}
+      </Badge>
+    )
   }
-  return (
-    <Badge tone="soft" className="tnum">
-      {filas.map((f) => `${f.sucursal} ${num(f.cantidad)}`).join(' · ')}
-    </Badge>
-  )
+  if (filas && filas.length > 0) {
+    return (
+      <Badge tone="outline" title="La planilla no traía cantidad para este producto">
+        (no informado)
+      </Badge>
+    )
+  }
+  return <Badge tone="outline">sin stock</Badge>
 }
 
 function BloqueFicha({
