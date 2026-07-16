@@ -336,9 +336,10 @@ class SeedInventarioTests(TestCase):
         # Las filas cuya celda de stock estaba vacia en las planillas quedan
         # como "(no informado)": cantidad 0 + sin_dato, sin movimiento.
         # 378 del seed 0006 (Solar 175 + Centro 203) + 506 repuestos de
-        # service del seed 0007 (253 productos x 2 sucursales).
+        # service del seed 0007 (253 productos x 2 sucursales) + 86 iPhones
+        # del seed 0008 (43 modelos x 2 sucursales).
         marcadas = StockProducto.objects.filter(sin_dato=True)
-        self.assertEqual(marcadas.count(), 884)
+        self.assertEqual(marcadas.count(), 970)
         self.assertFalse(marcadas.exclude(cantidad=0).exists())
         # Producto que solo estaba en las planillas sin cantidad: se creo aca.
         haylou = Producto.objects.get(nombre='Haylou X1 Neo')
@@ -359,6 +360,16 @@ class SeedInventarioTests(TestCase):
         self.assertFalse(Producto.objects.filter(
             categoria__nombre='Baterías', nombre__startswith='17',
         ).exists())
+        # Los equipos iPhone (seed 0008): 43 modelos sin precio, vinculados a
+        # su Dispositivo (para la Ficha) y "(no informado)" en ambas sucursales.
+        iphones = Producto.objects.filter(categoria__nombre='iPhones')
+        self.assertEqual(iphones.count(), 43)
+        quince_pro = iphones.get(nombre='iPhone 15 Pro')
+        self.assertIsNone(quince_pro.precio_lista_usd)
+        self.assertEqual(quince_pro.stocks.filter(sin_dato=True, cantidad=0).count(), 2)
+        self.assertEqual(
+            [d.nombre for d in quince_pro.dispositivos.all()], ['iPhone 15 Pro'],
+        )
 
     def test_casos_conocidos_de_la_hoja(self):
         solar = Sucursal.objects.get(nombre='Solar')

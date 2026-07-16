@@ -85,8 +85,9 @@ class SeedAccesoriosTests(TestCase):
         # 403 de la hoja Accesorios + 12 que aparecieron en las planillas de
         # stock de las sucursales (seed de inventario, jul 2026) + 19 de las
         # filas sin cantidad informada (seed "(no informado)", jul 2026) + 253
-        # repuestos de service (filas con precio de BATERIAS/MODULOS/etc.).
-        self.assertEqual(Producto.objects.count(), 687)
+        # repuestos de service (filas con precio de BATERIAS/MODULOS/etc.)
+        # + 43 iPhones del catalogo de equipos (seed 0008 de inventario).
+        self.assertEqual(Producto.objects.count(), 730)
 
     def test_jerarquia_de_cables(self):
         cables = CategoriaProducto.objects.get(nombre='Cables', padre__isnull=True)
@@ -128,11 +129,15 @@ class SeedAccesoriosTests(TestCase):
         )
         self.assertTrue(ipad.categoria.es_equipo)
 
-    def test_iphones_vacia_lista_para_cargar(self):
+    def test_iphones_cargados_sin_precio(self):
+        # La categoria arranco vacia; el seed 0008 de inventario la lleno con
+        # los 43 modelos del catalogo de equipos, todos sin precio (se cotizan
+        # a mano) y "(no informado)" en stock.
         iphones = CategoriaProducto.objects.get(nombre='iPhones')
         self.assertTrue(iphones.es_equipo)
         self.assertEqual(iphones.tarifa_cuotas, 'equipos')
-        self.assertEqual(iphones.productos.count(), 0)
+        self.assertEqual(iphones.productos.count(), 43)
+        self.assertFalse(iphones.productos.filter(precio_lista_usd__isnull=False).exists())
 
 
 class CategoriaSerializerTests(TestCase):
