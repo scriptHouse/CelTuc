@@ -65,7 +65,7 @@ export function GuiaPractica({
       {
         id: 'venta',
         titulo: 'Registrá una venta',
-        descripcion: 'Elegí el medio de pago y mirá cómo sube el «efectivo esperado» si es en efectivo.',
+        descripcion: 'Elegí productos del catálogo y el medio de pago; mirá cómo sube el «efectivo esperado».',
         icono: Receipt,
         hecho: hizo(['venta'], movimientos, cierres),
         accion: 'Venta de práctica',
