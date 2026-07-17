@@ -108,20 +108,26 @@ function PdfDateCell({ flex, value, divider }: { flex: number; value: string; di
   )
 }
 
-/** Bloque de firmas al pie: dos columnas (línea + leyenda). */
+const SIGN_COL = 326
+const SIGN_GAP = STD_CONTENT_W - SIGN_COL * 2
+const SIGN_LINE = '________________________________________________'
+
+/** Bloque de firmas al pie: dos columnas balanceadas (línea + leyenda). */
 export function PdfFirmaBlock({ izq = 'FIRMA', der = 'ACLARACION' }: { izq?: string; der?: string }) {
-  const linea = '_____________________________________________'
   return (
     <View style={{ flexDirection: 'row', paddingBottom: 2 }}>
-      <View style={{ width: 298 }}>
-        <Text style={{ fontSize: pt(8), textAlign: 'center' }}>{linea}</Text>
-        <Text style={{ fontSize: pt(7), textAlign: 'center', marginTop: 1 }}>{izq}</Text>
-      </View>
-      <View style={{ width: 101 }} />
-      <View style={{ width: 277 }}>
-        <Text style={{ fontSize: pt(8), textAlign: 'center' }}>{linea}</Text>
-        <Text style={{ fontSize: pt(7), textAlign: 'center', marginTop: 1 }}>{der}</Text>
-      </View>
+      <PdfFirmaCol caption={izq} />
+      <View style={{ width: SIGN_GAP }} />
+      <PdfFirmaCol caption={der} />
+    </View>
+  )
+}
+
+function PdfFirmaCol({ caption }: { caption: string }) {
+  return (
+    <View style={{ width: SIGN_COL }}>
+      <Text style={{ fontSize: pt(8), textAlign: 'center' }}>{SIGN_LINE}</Text>
+      <Text style={{ fontSize: pt(8), fontFamily: BOLD, textAlign: 'center', marginTop: 2, letterSpacing: 0.2 }}>{caption}</Text>
     </View>
   )
 }
@@ -213,11 +219,11 @@ export function PdfGarantia({ runs, height, fontSize = pt(7) }: { runs: Run[]; h
         borderColor: INK,
         minHeight: height,
         flexGrow: height === undefined ? 1 : undefined,
-        paddingVertical: 3,
-        paddingHorizontal: 4,
+        paddingVertical: 5,
+        paddingHorizontal: 7,
       }}
     >
-      <Text style={{ fontSize, textAlign: 'justify', lineHeight: 1.12 }}>
+      <Text style={{ fontSize, textAlign: 'justify', lineHeight: 1.28 }}>
         {runs.map((run, i) => (
           <Text key={i} style={{ fontFamily: run.bold ? BOLD : REG }}>
             {run.t}

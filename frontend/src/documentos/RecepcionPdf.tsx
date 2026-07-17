@@ -111,8 +111,8 @@ export function RecepcionPdf({
             <View style={{ height: H.gSpacer }} />
 
             {/* Garantía */}
-            <View style={{ borderWidth: BOX, borderColor: INK, height: H.garantiaRow * 9 + H.garantiaLast, paddingVertical: 3, paddingHorizontal: 4 }}>
-              <Text style={{ fontSize: FONT.warranty, textAlign: 'justify', lineHeight: 1.12 }}>
+            <View style={{ borderWidth: BOX, borderColor: INK, height: H.garantiaRow * 9 + H.garantiaLast, paddingVertical: 4, paddingHorizontal: 5 }}>
+              <Text style={{ fontSize: FONT.warranty, textAlign: 'justify', lineHeight: 1.25 }}>
                 {GARANTIA_RUNS.map((run, i) => (
                   <Text key={i} style={{ fontFamily: run.bold ? BOLD : REG }}>
                     {run.t}

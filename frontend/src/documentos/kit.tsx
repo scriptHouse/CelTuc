@@ -267,20 +267,27 @@ export function CtHeader({
   )
 }
 
-/** Bloque de firmas al pie: dos columnas (línea + leyenda). */
+/** Ancho de las columnas de firma: llenan el ancho útil, balanceadas. */
+const SIGN_COL = 326
+const SIGN_GAP = STD_CONTENT_W - SIGN_COL * 2 // 102
+const SIGN_LINE = '________________________________________________'
+
+/** Bloque de firmas al pie: dos columnas balanceadas (línea + leyenda). */
 export function FirmaBlock({ izq = 'FIRMA', der = 'ACLARACION' }: { izq?: string; der?: string }) {
-  const linea = '_____________________________________________'
   return (
     <div style={{ display: 'flex', paddingBottom: 2 }}>
-      <div style={{ width: 298, textAlign: 'center' }}>
-        <div style={{ fontSize: pt(8) }}>{linea}</div>
-        <div style={{ fontSize: pt(7), marginTop: 1 }}>{izq}</div>
-      </div>
-      <div style={{ width: 101 }} />
-      <div style={{ width: 277, textAlign: 'center' }}>
-        <div style={{ fontSize: pt(8) }}>{linea}</div>
-        <div style={{ fontSize: pt(7), marginTop: 1 }}>{der}</div>
-      </div>
+      <FirmaCol caption={izq} />
+      <div style={{ width: SIGN_GAP }} />
+      <FirmaCol caption={der} />
+    </div>
+  )
+}
+
+function FirmaCol({ caption }: { caption: string }) {
+  return (
+    <div style={{ width: SIGN_COL, textAlign: 'center' }}>
+      <div style={{ fontSize: pt(8) }}>{SIGN_LINE}</div>
+      <div style={{ fontSize: pt(8), fontWeight: 700, marginTop: 2, letterSpacing: '0.02em' }}>{caption}</div>
     </div>
   )
 }
@@ -442,9 +449,9 @@ export function GarantiaBox({
         height,
         flex: height === undefined ? 1 : undefined,
         minHeight: 0,
-        padding: '3px 4px',
+        padding: '5px 7px',
         fontSize,
-        lineHeight: 1.12,
+        lineHeight: 1.28,
         textAlign: 'justify',
         overflow: 'hidden',
       }}

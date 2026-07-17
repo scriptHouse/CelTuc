@@ -8,7 +8,7 @@ export function gAccVacia(): GAccData {
 }
 
 export const GACC_W = 470
-export const GACC_H = 248
+export const GACC_H = 318
 
 /** Título tal cual el Excel nuevo (con su doble espacio). */
 export const GACC_TITULO = 'DOCUMENTO  VALIDO COMO GARANTIA'

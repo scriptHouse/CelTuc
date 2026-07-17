@@ -44,7 +44,7 @@ export function SenaPdf({ datos, direccion = SENA.direccion }: { datos: SenaData
             <View style={{ flexDirection: 'row', gap: 12, marginTop: 8, flex: 1 }}>
               <View style={{ flex: 1 }}>
                 <PdfLine label={SENA.valorTotal} value={datos.valorTotal} />
-                <Text style={{ fontSize: pt(8), fontFamily: BOLD, marginTop: 5, lineHeight: 1.15 }}>{SENA.disclaimer}</Text>
+                <Text style={{ fontSize: pt(8), fontFamily: BOLD, marginTop: 5, lineHeight: 1.28 }}>{SENA.disclaimer}</Text>
               </View>
               <View style={{ width: 150, alignItems: 'center' }}>
                 <PdfStackBox label={SENA.total} width="100%" valueHeight={24}>

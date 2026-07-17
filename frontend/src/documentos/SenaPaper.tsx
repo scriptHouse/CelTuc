@@ -50,7 +50,7 @@ export function SenaPaper({ datos, onChange, readOnly, direccion = SENA.direccio
         <div style={{ display: 'flex', gap: 12, marginTop: 8, flex: 1 }}>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
             <SenaLine label={SENA.valorTotal} value={datos.valorTotal} onChange={set('valorTotal')} readOnly={readOnly} />
-            <div style={{ fontSize: pt(8), fontWeight: 700, marginTop: 5, lineHeight: 1.15 }}>{SENA.disclaimer}</div>
+            <div style={{ fontSize: pt(8), fontWeight: 700, marginTop: 5, lineHeight: 1.28 }}>{SENA.disclaimer}</div>
           </div>
           <div style={{ width: 150, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             <StackBox label={SENA.total} width="100%" valueHeight={24}>

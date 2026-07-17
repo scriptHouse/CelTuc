@@ -294,9 +294,9 @@ function Garantia() {
       style={{
         border: `${BOX}px solid ${INK}`,
         height: H.garantiaRow * 9 + H.garantiaLast,
-        padding: '3px 4px',
+        padding: '4px 5px',
         fontSize: FONT.warranty,
-        lineHeight: 1.12,
+        lineHeight: 1.25,
         textAlign: 'justify',
         overflow: 'hidden',
       }}
