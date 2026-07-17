@@ -54,7 +54,7 @@ export function compraventaVacia(): CompraventaData {
 }
 
 export const CV_W = 776
-export const CV_H = 995
+export const CV_H = 1052
 
 export const CV_TITULO = 'CONTRATO DE COMPRA VENTA DE EQUIPO/S (USADOS)'
 
