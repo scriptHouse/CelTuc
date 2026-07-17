@@ -17,7 +17,7 @@ import {
 } from './compraventaContent'
 import type { PaperProps } from './types'
 
-export function CompraventaPaper({ datos, onChange, readOnly }: PaperProps<CompraventaData>) {
+export function CompraventaPaper({ datos, onChange, readOnly, direccion }: PaperProps<CompraventaData>) {
   const set = (k: keyof CompraventaData) => (v: string) => onChange({ [k]: v })
 
   return (
@@ -36,6 +36,7 @@ export function CompraventaPaper({ datos, onChange, readOnly }: PaperProps<Compr
           onMes={set('fechaMes')}
           onAnio={set('fechaAnio')}
           readOnly={readOnly}
+          direccion={direccion}
         />
 
         <p style={parr}>{CV_INTRO}</p>

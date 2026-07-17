@@ -1,7 +1,7 @@
 import { ALIGN, Bordes, blobDe, cajaCompletaEn, calibri, ctHeaderXlsx, firmasXlsx, nuevaHoja, put, richGarantia, setCols, setRows, STD_COLS } from './kitXlsx'
 import { MAY_GARANTIA, MAY_LABELS, MAY_LINEAS, MAY_TITULO, type MayoristaData } from './mayoristaContent'
 
-export async function construirMayoristaXlsx(d: MayoristaData): Promise<Blob> {
+export async function construirMayoristaXlsx(d: MayoristaData, direccion?: string): Promise<Blob> {
   const { wb, ws } = nuevaHoja('COMPRA MAYORISTA')
   setCols(ws, STD_COLS)
   setRows(ws, [
@@ -17,7 +17,7 @@ export async function construirMayoristaXlsx(d: MayoristaData): Promise<Blob> {
   b.h(1, 10, 48, 'bottom')
   b.v(1, 2, 48, 'left')
   b.v(10, 2, 48, 'right')
-  ctHeaderXlsx(wb, ws, b, { cupon: d.cupon, dia: d.fechaDia, mes: d.fechaMes, anio: d.fechaAnio })
+  ctHeaderXlsx(wb, ws, b, { cupon: d.cupon, dia: d.fechaDia, mes: d.fechaMes, anio: d.fechaAnio, direccion })
   b.caja(2, 9, 4, 14, [9, 10, 11, 12, 13]) // 6 IMEI a la izquierda
   b.caja(6, 9, 9, 12, [9, 10, 11]) // 4 IMEI a la derecha
   b.apply(ws)

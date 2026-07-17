@@ -1,7 +1,7 @@
 import { ALIGN, Bordes, blobDe, cajaCompletaEn, calibri, ctHeaderXlsx, firmasXlsx, nuevaHoja, put, richGarantia, setCols, setRows, STD_COLS } from './kitXlsx'
 import { COMPRA_GARANTIA, COMPRA_LABELS, COMPRA_LINEAS, COMPRA_TITULO, type CompraData } from './compraContent'
 
-export async function construirCompraXlsx(d: CompraData): Promise<Blob> {
+export async function construirCompraXlsx(d: CompraData, direccion?: string): Promise<Blob> {
   const { wb, ws } = nuevaHoja('COMPRA')
   setCols(ws, STD_COLS)
   setRows(ws, [
@@ -17,7 +17,7 @@ export async function construirCompraXlsx(d: CompraData): Promise<Blob> {
   b.h(1, 10, 48, 'bottom')
   b.v(1, 2, 48, 'left')
   b.v(10, 2, 48, 'right')
-  ctHeaderXlsx(wb, ws, b, { cupon: d.cupon, dia: d.fechaDia, mes: d.fechaMes, anio: d.fechaAnio })
+  ctHeaderXlsx(wb, ws, b, { cupon: d.cupon, dia: d.fechaDia, mes: d.fechaMes, anio: d.fechaAnio, direccion })
   b.caja(2, 11, 4, 14, [11, 12, 13]) // CEL / MAIL / CONDICION / IMEI
   b.apply(ws)
   cajaCompletaEn(ws, 'A1')

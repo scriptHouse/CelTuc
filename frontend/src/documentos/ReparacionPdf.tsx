@@ -7,7 +7,7 @@ const LEFT_W = 298
 const GAP_W = 101
 const RIGHT_W = STD_CONTENT_W - LEFT_W - GAP_W
 
-export function ReparacionPdf({ datos }: { datos: ReparacionData }) {
+export function ReparacionPdf({ datos, direccion }: { datos: ReparacionData; direccion?: string }) {
   return (
     <PdfDocShell
       titulo={REP_TITULO}
@@ -16,6 +16,7 @@ export function ReparacionPdf({ datos }: { datos: ReparacionData }) {
       dia={datos.fechaDia}
       mes={datos.fechaMes}
       anio={datos.fechaAnio}
+      direccion={direccion}
       garantia={REP_GARANTIA}
     >
       <PdfLine label={REP_LABELS.recibiDe} value={datos.recibiDe} height={20} fontSize={pt(10)} />

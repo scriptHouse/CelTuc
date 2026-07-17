@@ -6,7 +6,7 @@ const LEFT_W = 298 // columnas B–D
 const GAP_W = 101 // columna E
 const RIGHT_W = STD_CONTENT_W - LEFT_W - GAP_W // columnas F–I
 
-export function ReparacionPaper({ datos, onChange, readOnly }: PaperProps<ReparacionData>) {
+export function ReparacionPaper({ datos, onChange, readOnly, direccion }: PaperProps<ReparacionData>) {
   const set = (k: keyof ReparacionData) => (v: string) => onChange({ [k]: v })
 
   return (
@@ -22,6 +22,7 @@ export function ReparacionPaper({ datos, onChange, readOnly }: PaperProps<Repara
       onMes={set('fechaMes')}
       onAnio={set('fechaAnio')}
       readOnly={readOnly}
+      direccion={direccion}
       garantia={REP_GARANTIA}
     >
       <UnderlineLine label={REP_LABELS.recibiDe} value={datos.recibiDe} onChange={set('recibiDe')} readOnly={readOnly} height={20} fontSize={pt(10)} />

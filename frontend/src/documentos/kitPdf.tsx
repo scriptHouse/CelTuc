@@ -54,12 +54,14 @@ export function PdfCtHeader({
   mes,
   anio,
   socials = 'redes',
+  direccion = EMPRESA.direccion,
 }: {
   cupon: string
   dia: string
   mes: string
   anio: string
   socials?: 'redes' | 'simple'
+  direccion?: string
 }) {
   return (
     <View style={{ height: 60, flexDirection: 'row' }}>
@@ -67,7 +69,7 @@ export function PdfCtHeader({
         <Image src={LOGO_CELTUC} style={{ width: 56, height: 56 }} />
         <View>
           <Text style={{ fontSize: pt(16), fontFamily: BOLD, letterSpacing: 0.8 }}>{EMPRESA.nombre}</Text>
-          <Text style={{ fontSize: pt(8), marginTop: 2 }}>{EMPRESA.direccion}</Text>
+          <Text style={{ fontSize: pt(8), marginTop: 2 }}>{direccion}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
             <Image src={ICON_INSTAGRAM} style={{ width: 13, height: 13 }} />
             <Text style={{ fontSize: pt(9) }}>{socials === 'simple' ? 'CelTuc' : EMPRESA.instagram}</Text>
@@ -135,6 +137,7 @@ export function PdfDocShell({
   garantia,
   firmaIzq,
   firmaDer,
+  direccion,
   children,
 }: {
   titulo: string
@@ -146,6 +149,7 @@ export function PdfDocShell({
   garantia: Run[]
   firmaIzq?: string
   firmaDer?: string
+  direccion?: string
   children: ReactNode
 }) {
   const M = 28
@@ -157,7 +161,7 @@ export function PdfDocShell({
             {titulo}
           </PdfTitle>
           <PdfBody padL={STD_PAD} padR={STD_PAD}>
-            <PdfCtHeader cupon={cupon} dia={dia} mes={mes} anio={anio} />
+            <PdfCtHeader cupon={cupon} dia={dia} mes={mes} anio={anio} direccion={direccion} />
             <PdfGap h={7} />
             {children}
             <PdfGap h={10} />

@@ -26,7 +26,7 @@ function clausulaRich(c: Clausula, d: CompraventaData): ExcelJS.CellValue {
   }
 }
 
-export async function construirCompraventaXlsx(d: CompraventaData): Promise<Blob> {
+export async function construirCompraventaXlsx(d: CompraventaData, direccion?: string): Promise<Blob> {
   const { wb, ws } = nuevaHoja('COMPRA VENTA')
   setCols(ws, STD_COLS)
   setRows(ws, [
@@ -65,7 +65,7 @@ export async function construirCompraventaXlsx(d: CompraventaData): Promise<Blob
   b.h(1, 10, 50, 'bottom')
   b.v(1, 2, 50, 'left')
   b.v(10, 2, 50, 'right')
-  ctHeaderXlsx(wb, ws, b, { cupon: d.cupon, dia: d.fechaDia, mes: d.fechaMes, anio: d.fechaAnio })
+  ctHeaderXlsx(wb, ws, b, { cupon: d.cupon, dia: d.fechaDia, mes: d.fechaMes, anio: d.fechaAnio, direccion })
   b.apply(ws)
   cajaCompletaEn(ws, 'A1')
 

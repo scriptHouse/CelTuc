@@ -1,7 +1,7 @@
 import { ALIGN, Bordes, blobDe, cajaCompletaEn, calibri, ctHeaderXlsx, firmasXlsx, nuevaHoja, put, richGarantia, setCols, setRows, STD_COLS } from './kitXlsx'
 import { EXT_GARANTIA, EXT_LABELS, EXT_LINEAS, EXT_TITULO, type ExtensionData } from './extensionContent'
 
-export async function construirExtensionXlsx(d: ExtensionData): Promise<Blob> {
+export async function construirExtensionXlsx(d: ExtensionData, direccion?: string): Promise<Blob> {
   const { wb, ws } = nuevaHoja('EXTENCION GARANTIA')
   setCols(ws, STD_COLS)
   setRows(ws, [
@@ -18,7 +18,7 @@ export async function construirExtensionXlsx(d: ExtensionData): Promise<Blob> {
   b.h(1, 10, 46, 'bottom')
   b.v(1, 2, 46, 'left')
   b.v(10, 2, 46, 'right')
-  ctHeaderXlsx(wb, ws, b, { cupon: d.cupon, dia: d.fechaDia, mes: d.fechaMes, anio: d.fechaAnio })
+  ctHeaderXlsx(wb, ws, b, { cupon: d.cupon, dia: d.fechaDia, mes: d.fechaMes, anio: d.fechaAnio, direccion })
   b.caja(2, 11, 4, 14, [11, 12, 13])
   b.apply(ws)
   cajaCompletaEn(ws, 'A1')

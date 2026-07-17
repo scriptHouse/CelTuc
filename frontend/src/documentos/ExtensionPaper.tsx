@@ -6,7 +6,7 @@ const LEFT_W = 298
 const GAP_W = 101
 const RIGHT_W = STD_CONTENT_W - LEFT_W - GAP_W
 
-export function ExtensionPaper({ datos, onChange, readOnly }: PaperProps<ExtensionData>) {
+export function ExtensionPaper({ datos, onChange, readOnly, direccion }: PaperProps<ExtensionData>) {
   const set = (k: keyof ExtensionData) => (v: string) => onChange({ [k]: v })
 
   return (
@@ -22,6 +22,7 @@ export function ExtensionPaper({ datos, onChange, readOnly }: PaperProps<Extensi
       onMes={set('fechaMes')}
       onAnio={set('fechaAnio')}
       readOnly={readOnly}
+      direccion={direccion}
       garantia={EXT_GARANTIA}
     >
       {/* RECIBI DE + DNI */}

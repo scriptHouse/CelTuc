@@ -10,7 +10,7 @@ const LINEAS = {
   valorTotal: 'VALOR TOTAL:______________________',
 }
 
-export async function construirSenaXlsx(d: SenaData): Promise<Blob> {
+export async function construirSenaXlsx(d: SenaData, direccion: string = SENA.direccion): Promise<Blob> {
   const { wb, ws } = nuevaHoja('Seña')
   setCols(ws, [2.29, 11.57, 13, 9.86, 16.29, 14.43, 1.57])
   setRows(ws, [13.5, 15, 13.5, 14.4, 15, 15, 15, 9, 15, 21.6, 15, 10.9])
@@ -35,7 +35,7 @@ export async function construirSenaXlsx(d: SenaData): Promise<Blob> {
   put(ws, 'E2', d.numeroRecibo, s10, ALIGN.center)
   put(ws, 'F1', SENA.fecha, calibri(10, true), ALIGN.center)
   put(ws, 'F2', d.fecha, s10, ALIGN.center)
-  put(ws, 'C3', SENA.direccion, calibri(8), ALIGN.left)
+  put(ws, 'C3', direccion, calibri(8), ALIGN.left)
   put(ws, 'E4', SENA.noFactura, calibri(8), ALIGN.center)
 
   put(ws, 'B5', d.recibiDe.trim() || d.tel.trim() ? `RECIBI DE:${d.recibiDe}          TEL:${d.tel}` : LINEAS.recibiDe, s10, ALIGN.left)

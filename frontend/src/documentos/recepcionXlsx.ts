@@ -23,6 +23,7 @@ const LINEAS = {
 
 export async function construirRecepcionXlsx(
   datos: RecepcionData,
+  direccion: string = EMPRESA.direccion,
   titulo = 'RECEPCION DE EQUIPO/S',
   hoja = 'Recepcion',
 ): Promise<Blob> {
@@ -152,7 +153,7 @@ export async function construirRecepcionXlsx(
 
   // ----- Encabezado (textos; el logo va como imagen) -----
   put('C3', '   ' + EMPRESA.nombre, calibri(16, true), { horizontal: 'left', vertical: 'middle' })
-  put('C4', EMPRESA.direccion, calibri(8), { horizontal: 'left', vertical: 'middle' })
+  put('C4', direccion, calibri(8), { horizontal: 'left', vertical: 'middle' })
   put('C5', `   ${EMPRESA.instagram}      ${EMPRESA.facebook}`, calibri(9), { horizontal: 'left', vertical: 'middle' })
   put('F3', LABELS.cupon, calibri(11), { horizontal: 'center', vertical: 'middle' })
   put('F5', LABELS.fecha, calibri(11), { horizontal: 'center', vertical: 'middle' })

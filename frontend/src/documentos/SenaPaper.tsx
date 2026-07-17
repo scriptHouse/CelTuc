@@ -4,7 +4,7 @@ import { LOGO_CELTUC } from './assets'
 import { SENA, SENA_H, SENA_W, type SenaData } from './senaContent'
 import type { PaperProps } from './types'
 
-export function SenaPaper({ datos, onChange, readOnly }: PaperProps<SenaData>) {
+export function SenaPaper({ datos, onChange, readOnly, direccion = SENA.direccion }: PaperProps<SenaData>) {
   const set = (k: keyof SenaData) => (v: string) => onChange({ [k]: v })
 
   return (
@@ -14,7 +14,7 @@ export function SenaPaper({ datos, onChange, readOnly }: PaperProps<SenaData>) {
         <div style={{ display: 'flex', gap: 10 }}>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
             <img src={LOGO_CELTUC} alt="CelTuc" width={54} height={54} style={{ display: 'block' }} />
-            <div style={{ fontSize: pt(8), marginTop: 3 }}>{SENA.direccion}</div>
+            <div style={{ fontSize: pt(8), marginTop: 3 }}>{direccion}</div>
           </div>
           <div style={{ width: 226, display: 'flex', flexDirection: 'column', gap: 5 }}>
             {/* N° RECIBO y FECHA: dos cajas lado a lado (formato nuevo) */}

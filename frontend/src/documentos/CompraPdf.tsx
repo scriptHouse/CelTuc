@@ -7,7 +7,7 @@ const LEFT_W = 298
 const GAP_W = 101
 const RIGHT_W = STD_CONTENT_W - LEFT_W - GAP_W
 
-export function CompraPdf({ datos }: { datos: CompraData }) {
+export function CompraPdf({ datos, direccion }: { datos: CompraData; direccion?: string }) {
   return (
     <PdfDocShell
       titulo={COMPRA_TITULO}
@@ -16,6 +16,7 @@ export function CompraPdf({ datos }: { datos: CompraData }) {
       dia={datos.fechaDia}
       mes={datos.fechaMes}
       anio={datos.fechaAnio}
+      direccion={direccion}
       garantia={COMPRA_GARANTIA}
     >
       <PdfLine label={COMPRA_LABELS.recibiDe} value={`${datos.recibiDe}          ${COMPRA_LABELS.dni}  ${datos.dni}`} height={20} fontSize={pt(10)} />

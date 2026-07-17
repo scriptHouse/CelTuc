@@ -6,7 +6,7 @@ const LEFT_W = 298 // columnas B–D
 const GAP_W = 101 // columna E
 const RIGHT_W = STD_CONTENT_W - LEFT_W - GAP_W // columnas F–I (355)
 
-export function CompraPaper({ datos, onChange, readOnly }: PaperProps<CompraData>) {
+export function CompraPaper({ datos, onChange, readOnly, direccion }: PaperProps<CompraData>) {
   const set = (k: keyof CompraData) => (v: string) => onChange({ [k]: v })
 
   return (
@@ -22,6 +22,7 @@ export function CompraPaper({ datos, onChange, readOnly }: PaperProps<CompraData
       onMes={set('fechaMes')}
       onAnio={set('fechaAnio')}
       readOnly={readOnly}
+      direccion={direccion}
       garantia={COMPRA_GARANTIA}
     >
       {/* Renglones */}

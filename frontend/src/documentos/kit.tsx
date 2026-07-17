@@ -208,6 +208,7 @@ export function CtHeader({
   onAnio,
   readOnly,
   socials = 'redes',
+  direccion = EMPRESA.direccion,
 }: {
   cupon: string
   onCupon: Setter
@@ -220,6 +221,8 @@ export function CtHeader({
   readOnly?: boolean
   /** 'redes' = @CelTuc /CelTuc ; 'simple' = CelTuc CelTuc. */
   socials?: 'redes' | 'simple'
+  /** Dirección configurable del encabezado. */
+  direccion?: string
 }) {
   return (
     <div style={{ height: 60, display: 'flex' }}>
@@ -227,7 +230,7 @@ export function CtHeader({
         <img src={LOGO_CELTUC} alt="CelTuc" width={56} height={56} style={{ display: 'block', flexShrink: 0 }} />
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: pt(16), fontWeight: 800, letterSpacing: '0.04em', lineHeight: 1 }}>{EMPRESA.nombre}</div>
-          <div style={{ fontSize: pt(8), marginTop: 2 }}>{EMPRESA.direccion}</div>
+          <div style={{ fontSize: pt(8), marginTop: 2 }}>{direccion}</div>
           <div style={{ fontSize: pt(9), marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
             <img src={ICON_INSTAGRAM} alt="" width={13} height={13} style={{ display: 'block' }} />
             <span>{socials === 'simple' ? 'CelTuc' : EMPRESA.instagram}</span>
@@ -301,6 +304,7 @@ export function DocShell({
   garantia,
   firmaIzq,
   firmaDer,
+  direccion,
   children,
 }: {
   titulo: string
@@ -317,6 +321,7 @@ export function DocShell({
   garantia: Run[]
   firmaIzq?: string
   firmaDer?: string
+  direccion?: string
   children: ReactNode
 }) {
   return (
@@ -335,6 +340,7 @@ export function DocShell({
           onMes={onMes}
           onAnio={onAnio}
           readOnly={readOnly}
+          direccion={direccion}
         />
         <Spacer h={7} />
         {children}

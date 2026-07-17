@@ -1,7 +1,7 @@
 import { ALIGN, Bordes, blobDe, cajaCompletaEn, calibri, ctHeaderXlsx, firmasXlsx, nuevaHoja, put, richGarantia, setCols, setRows, STD_COLS } from './kitXlsx'
 import { REP_GARANTIA, REP_LABELS, REP_LINEAS, REP_TITULO, type ReparacionData } from './reparacionContent'
 
-export async function construirReparacionXlsx(d: ReparacionData): Promise<Blob> {
+export async function construirReparacionXlsx(d: ReparacionData, direccion?: string): Promise<Blob> {
   const { wb, ws } = nuevaHoja('REPARACION')
   setCols(ws, STD_COLS)
   setRows(ws, [
@@ -18,7 +18,7 @@ export async function construirReparacionXlsx(d: ReparacionData): Promise<Blob> 
   b.h(1, 10, 49, 'bottom')
   b.v(1, 2, 49, 'left')
   b.v(10, 2, 49, 'right')
-  ctHeaderXlsx(wb, ws, b, { cupon: d.cupon, dia: d.fechaDia, mes: d.fechaMes, anio: d.fechaAnio })
+  ctHeaderXlsx(wb, ws, b, { cupon: d.cupon, dia: d.fechaDia, mes: d.fechaMes, anio: d.fechaAnio, direccion })
   b.caja(2, 11, 4, 13, [11, 12]) // CEL / MAIL / IMEI
   b.caja(6, 11, 9, 13, [11, 12]) // PRESUPUESTO / SEÑA / PENDIENTE
   b.apply(ws)

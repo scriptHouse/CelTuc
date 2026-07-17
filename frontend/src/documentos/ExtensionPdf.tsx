@@ -7,7 +7,7 @@ const LEFT_W = 298
 const GAP_W = 101
 const RIGHT_W = STD_CONTENT_W - LEFT_W - GAP_W
 
-export function ExtensionPdf({ datos }: { datos: ExtensionData }) {
+export function ExtensionPdf({ datos, direccion }: { datos: ExtensionData; direccion?: string }) {
   return (
     <PdfDocShell
       titulo={EXT_TITULO}
@@ -16,6 +16,7 @@ export function ExtensionPdf({ datos }: { datos: ExtensionData }) {
       dia={datos.fechaDia}
       mes={datos.fechaMes}
       anio={datos.fechaAnio}
+      direccion={direccion}
       garantia={EXT_GARANTIA}
     >
       <PdfLine label={EXT_LABELS.recibiDe} value={`${datos.recibiDe}          ${EXT_LABELS.dni}  ${datos.dni}`} height={20} fontSize={pt(10)} />

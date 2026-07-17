@@ -8,7 +8,7 @@ const RIGHT_W = STD_CONTENT_W - LEFT_W - GAP_W
 /** Alto de cada renglón de IMEI (filas 9-14 del Excel). */
 const IMEI_H = [21, 21, 20, 20, 20, 21]
 
-export function MayoristaPaper({ datos, onChange, readOnly }: PaperProps<MayoristaData>) {
+export function MayoristaPaper({ datos, onChange, readOnly, direccion }: PaperProps<MayoristaData>) {
   const set = (k: keyof MayoristaData) => (v: string) => onChange({ [k]: v })
   const setImei = (i: number) => (v: string) => {
     const imeis = [...datos.imeis]
@@ -29,6 +29,7 @@ export function MayoristaPaper({ datos, onChange, readOnly }: PaperProps<Mayoris
       onMes={set('fechaMes')}
       onAnio={set('fechaAnio')}
       readOnly={readOnly}
+      direccion={direccion}
       garantia={MAY_GARANTIA}
     >
       {/* RECIBI DE + DNI */}

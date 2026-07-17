@@ -7,7 +7,7 @@ import { GACC_H, GACC_RUNS, GACC_TITULO, GACC_W, type GAccData } from './garanti
 
 const M = 28
 
-export function GarantiaAccPdf(_props: { datos: GAccData }) {
+export function GarantiaAccPdf({ direccion = EMPRESA.direccion }: { datos: GAccData; direccion?: string }) {
   return (
     <Document title={`${GACC_TITULO} — CelTuc`} author="CelTuc">
       <Page size={[GACC_W + M * 2, GACC_H + M * 2]} style={{ backgroundColor: '#fff', padding: M }}>
@@ -18,7 +18,7 @@ export function GarantiaAccPdf(_props: { datos: GAccData }) {
               <Image src={LOGO_CELTUC} style={{ width: 58, height: 58 }} />
               <View>
                 <Text style={{ fontSize: pt(16), fontFamily: BOLD, letterSpacing: 0.8 }}>{EMPRESA.nombre}</Text>
-                <Text style={{ fontSize: pt(8), marginTop: 3 }}>{EMPRESA.direccion}</Text>
+                <Text style={{ fontSize: pt(8), marginTop: 3 }}>{direccion}</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
                   <Image src={ICON_INSTAGRAM} style={{ width: 14, height: 14 }} />
                   <Text style={{ fontSize: pt(9) }}>{EMPRESA.instagram}</Text>

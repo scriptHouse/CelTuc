@@ -1,13 +1,29 @@
 import { useMemo, useState } from 'react'
-import { Clock, Eraser, FileSpreadsheet, FileText, Loader2 } from 'lucide-react'
+import { Clock, Eraser, FileSpreadsheet, FileText, Loader2, MapPin } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
+import { Select } from '@/components/ui/Select'
 import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
 import { cn, ctStagger } from '@/lib/utils'
 import { PaperScaler } from '@/documentos/PaperScaler'
+import { DIRECCION_POR_DEFECTO, DIRECCIONES } from '@/documentos/content'
 import { DOC_MODULES, PROXIMOS_DOCS } from '@/documentos/registry'
+
+/** Dirección elegida para el encabezado de todos los documentos (se recuerda). */
+const DIR_KEY = 'celtuc:doc:direccion'
+const DIR_OPTIONS = DIRECCIONES.map((d) => ({ value: d, label: d }))
+
+function leerDireccion(): string {
+  try {
+    const g = localStorage.getItem(DIR_KEY)
+    if (g && (DIRECCIONES as readonly string[]).includes(g)) return g
+  } catch {
+    /* localStorage no disponible */
+  }
+  return DIRECCION_POR_DEFECTO
+}
 
 function descargar(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob)
@@ -30,18 +46,28 @@ export function DocumentosPage() {
     Object.fromEntries(DOC_MODULES.map((m) => [m.id, m.crearVacio()])),
   )
   const [busy, setBusy] = useState<'pdf' | 'xlsx' | null>(null)
+  const [direccion, setDireccion] = useState<string>(leerDireccion)
 
   const active = useMemo(() => DOC_MODULES.find((m) => m.id === activeId) ?? DOC_MODULES[0], [activeId])
   const datos = estados[active.id]
   const patch = (p: Record<string, unknown>) =>
     setEstados((s) => ({ ...s, [active.id]: { ...(s[active.id] as object), ...p } }))
 
+  function cambiarDireccion(v: string) {
+    setDireccion(v)
+    try {
+      localStorage.setItem(DIR_KEY, v)
+    } catch {
+      /* localStorage no disponible */
+    }
+  }
+
   async function exportarPdf() {
     if (busy) return
     setBusy('pdf')
     try {
       const [{ pdf }, Pdf] = await Promise.all([import('@react-pdf/renderer'), active.loadPdf()])
-      const blob = await pdf(<Pdf datos={datos} />).toBlob()
+      const blob = await pdf(<Pdf datos={datos} direccion={direccion} />).toBlob()
       descargar(blob, `${active.nombreArchivo(datos)}.pdf`)
       toast.success('PDF generado', `Se descargó: ${active.nombre}.`)
     } catch (e) {
@@ -57,7 +83,7 @@ export function DocumentosPage() {
     setBusy('xlsx')
     try {
       const construir = await active.loadXlsx()
-      const blob = await construir(datos)
+      const blob = await construir(datos, direccion)
       descargar(blob, `${active.nombreArchivo(datos)}.xlsx`)
       toast.success('Excel generado', 'Se descargó la planilla editable.')
     } catch (e) {
@@ -118,6 +144,16 @@ export function DocumentosPage() {
             <p className="text-xs text-ink-400">Tocá cualquier campo para completarlo.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1.5" title="Dirección del encabezado (se aplica a todos los documentos)">
+              <MapPin className="h-4 w-4 shrink-0 text-ink-400" />
+              <Select
+                options={DIR_OPTIONS}
+                value={direccion}
+                onChange={cambiarDireccion}
+                className="w-52"
+                triggerClassName="h-9 text-xs"
+              />
+            </div>
             <Button variant="ghost" size="sm" onClick={limpiar} disabled={!!busy}>
               <Eraser className="h-4 w-4" /> Limpiar
             </Button>
@@ -137,7 +173,7 @@ export function DocumentosPage() {
           <div className="mx-auto" style={{ maxWidth: Math.min(active.naturalW * 1.55, 820) }}>
             <div className="overflow-hidden rounded-[5px] bg-white shadow-[0_12px_44px_rgba(10,10,11,0.18)] ring-1 ring-black/5">
               <PaperScaler naturalW={active.naturalW} naturalH={active.naturalH}>
-                <Paper datos={datos} onChange={patch} />
+                <Paper datos={datos} onChange={patch} direccion={direccion} />
               </PaperScaler>
             </div>
           </div>

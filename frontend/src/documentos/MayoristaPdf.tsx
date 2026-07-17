@@ -8,7 +8,7 @@ const GAP_W = 101
 const RIGHT_W = STD_CONTENT_W - LEFT_W - GAP_W
 const IMEI_H = [21, 21, 20, 20, 20, 21]
 
-export function MayoristaPdf({ datos }: { datos: MayoristaData }) {
+export function MayoristaPdf({ datos, direccion }: { datos: MayoristaData; direccion?: string }) {
   return (
     <PdfDocShell
       titulo={MAY_TITULO}
@@ -17,6 +17,7 @@ export function MayoristaPdf({ datos }: { datos: MayoristaData }) {
       dia={datos.fechaDia}
       mes={datos.fechaMes}
       anio={datos.fechaAnio}
+      direccion={direccion}
       garantia={MAY_GARANTIA}
     >
       <PdfLine label={MAY_LABELS.recibiDe} value={`${datos.recibiDe}          ${MAY_LABELS.dni}  ${datos.dni}`} height={20} fontSize={pt(10)} />

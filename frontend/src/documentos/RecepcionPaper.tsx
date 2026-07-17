@@ -40,9 +40,11 @@ interface PaperProps {
   readOnly?: boolean
   /** Título del documento (Recepción y Reparación comparten este formulario). */
   titulo?: string
+  /** Dirección configurable del encabezado. */
+  direccion?: string
 }
 
-export function RecepcionPaper({ datos, onChange, readOnly = false, titulo = RECEPCION_TITULO }: PaperProps) {
+export function RecepcionPaper({ datos, onChange, readOnly = false, titulo = RECEPCION_TITULO, direccion = EMPRESA.direccion }: PaperProps) {
   const set = (k: keyof RecepcionData) => (v: string) => onChange({ [k]: v } as Patch)
 
   return (
@@ -76,7 +78,7 @@ export function RecepcionPaper({ datos, onChange, readOnly = false, titulo = REC
 
       {/* ===== Cuerpo (con márgenes internos = columnas A y J) ===== */}
       <div style={{ paddingLeft: PAD_L, paddingRight: PAD_R }}>
-        <Header datos={datos} set={set} readOnly={readOnly} />
+        <Header datos={datos} set={set} readOnly={readOnly} direccion={direccion} />
 
         {/* Renglones rellenables */}
         <Line label={LABELS.recibiDe} value={datos.recibiDe} onChange={set('recibiDe')} readOnly={readOnly} />
@@ -144,10 +146,12 @@ function Header({
   datos,
   set,
   readOnly,
+  direccion,
 }: {
   datos: RecepcionData
   set: (k: keyof RecepcionData) => (v: string) => void
   readOnly: boolean
+  direccion: string
 }) {
   return (
     <div style={{ height: H.header, display: 'flex', alignItems: 'center' }}>
@@ -158,7 +162,7 @@ function Header({
           <div style={{ fontSize: FONT.celtuc, fontWeight: 800, letterSpacing: '0.04em', lineHeight: 1 }}>
             {EMPRESA.nombre}
           </div>
-          <div style={{ fontSize: FONT.address, marginTop: 3 }}>{EMPRESA.direccion}</div>
+          <div style={{ fontSize: FONT.address, marginTop: 3 }}>{direccion}</div>
           <div style={{ fontSize: FONT.social, marginTop: 3, display: 'flex', alignItems: 'center', gap: 4 }}>
             <img src={ICON_INSTAGRAM} alt="" width={SOCIAL_ICON} height={SOCIAL_ICON} style={{ display: 'block' }} />
             <span>{EMPRESA.instagram}</span>

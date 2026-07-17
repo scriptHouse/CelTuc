@@ -19,7 +19,7 @@ import {
 
 const M = 28
 
-export function CompraventaPdf({ datos }: { datos: CompraventaData }) {
+export function CompraventaPdf({ datos, direccion }: { datos: CompraventaData; direccion?: string }) {
   return (
     <Document title={`${CV_TITULO} — CelTuc`} author="CelTuc">
       <Page size={[STD_W + M * 2, CV_H + M * 2]} style={{ backgroundColor: '#fff', padding: M }}>
@@ -28,7 +28,7 @@ export function CompraventaPdf({ datos }: { datos: CompraventaData }) {
             {CV_TITULO}
           </PdfTitle>
           <PdfBody padL={STD_PAD} padR={STD_PAD}>
-            <PdfCtHeader cupon={datos.cupon} dia={datos.fechaDia} mes={datos.fechaMes} anio={datos.fechaAnio} />
+            <PdfCtHeader cupon={datos.cupon} dia={datos.fechaDia} mes={datos.fechaMes} anio={datos.fechaAnio} direccion={direccion} />
 
             <Text style={parr}>{CV_INTRO}</Text>
             <ClausulaPdf c={CV_PRIMERA} datos={datos} />

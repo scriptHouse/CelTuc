@@ -3,7 +3,7 @@ import { LOGO_CELTUC, ICON_FACEBOOK, ICON_INSTAGRAM } from './assets'
 import { EMPRESA } from './content'
 import { GACC_RUNS, GACC_TITULO, type GAccData } from './garantiaAccContent'
 
-export async function construirGarantiaAccXlsx(_d: GAccData): Promise<Blob> {
+export async function construirGarantiaAccXlsx(_d: GAccData, direccion: string = EMPRESA.direccion): Promise<Blob> {
   const { wb, ws } = nuevaHoja('Garantia Accesorios')
   setCols(ws, [2.5, 11, 9, 11, 11, 11, 2.5])
   setRows(ws, [20.1, 9.9, 15, 15, 9.9, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 9])
@@ -21,7 +21,7 @@ export async function construirGarantiaAccXlsx(_d: GAccData): Promise<Blob> {
 
   put(ws, 'A1', GACC_TITULO, calibri(14, true), ALIGN.center)
   put(ws, 'C3', '   ' + EMPRESA.nombre, calibri(16, true), ALIGN.left)
-  put(ws, 'C4', EMPRESA.direccion, calibri(8), ALIGN.left)
+  put(ws, 'C4', direccion, calibri(8), ALIGN.left)
   put(ws, 'C5', `   ${EMPRESA.instagram}      ${EMPRESA.facebook}`, calibri(9), ALIGN.left)
   ws.getCell('B6').value = richGarantia(GACC_RUNS, 8)
   ws.getCell('B6').alignment = ALIGN.justify

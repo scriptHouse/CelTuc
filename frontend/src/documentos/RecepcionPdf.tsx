@@ -47,7 +47,15 @@ const s = StyleSheet.create({
   row: { flexDirection: 'row' },
 })
 
-export function RecepcionPdf({ datos, titulo = RECEPCION_TITULO }: { datos: RecepcionData; titulo?: string }) {
+export function RecepcionPdf({
+  datos,
+  titulo = RECEPCION_TITULO,
+  direccion = EMPRESA.direccion,
+}: {
+  datos: RecepcionData
+  titulo?: string
+  direccion?: string
+}) {
   return (
     <Document title={`${titulo} — CelTuc`} author="CelTuc">
       <Page size="A4" style={s.page}>
@@ -58,7 +66,7 @@ export function RecepcionPdf({ datos, titulo = RECEPCION_TITULO }: { datos: Rece
           </View>
 
           <View style={s.body}>
-            <Header datos={datos} />
+            <Header datos={datos} direccion={direccion} />
 
             {/* Renglones */}
             <Line label={LABELS.recibiDe} value={datos.recibiDe} />
@@ -121,7 +129,7 @@ export function RecepcionPdf({ datos, titulo = RECEPCION_TITULO }: { datos: Rece
   )
 }
 
-function Header({ datos }: { datos: RecepcionData }) {
+function Header({ datos, direccion }: { datos: RecepcionData; direccion: string }) {
   return (
     <View style={{ height: H.header, flexDirection: 'row', alignItems: 'center' }}>
       {/* Identidad */}
@@ -129,7 +137,7 @@ function Header({ datos }: { datos: RecepcionData }) {
         <Image src={LOGO_CELTUC} style={{ width: LOGO, height: LOGO }} />
         <View>
           <Text style={{ fontSize: FONT.celtuc, fontFamily: BOLD, letterSpacing: 0.8 }}>{EMPRESA.nombre}</Text>
-          <Text style={{ fontSize: FONT.address, marginTop: 3 }}>{EMPRESA.direccion}</Text>
+          <Text style={{ fontSize: FONT.address, marginTop: 3 }}>{direccion}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
             <Image src={ICON_INSTAGRAM} style={{ width: SOCIAL_ICON, height: SOCIAL_ICON }} />
             <Text style={{ fontSize: FONT.social }}>{EMPRESA.instagram}</Text>

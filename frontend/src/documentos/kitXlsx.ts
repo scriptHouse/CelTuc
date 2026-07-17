@@ -106,12 +106,12 @@ export function ctHeaderXlsx(
   wb: ExcelJS.Workbook,
   ws: ExcelJS.Worksheet,
   b: Bordes,
-  opts: { socials?: 'redes' | 'simple'; cupon: string; dia: string; mes: string; anio: string },
+  opts: { socials?: 'redes' | 'simple'; cupon: string; dia: string; mes: string; anio: string; direccion?: string },
 ) {
   const ig = opts.socials === 'simple' ? 'CelTuc' : EMPRESA.instagram
   const fb = opts.socials === 'simple' ? 'CelTuc' : EMPRESA.facebook
   put(ws, 'C2', '   ' + EMPRESA.nombre, calibri(16, true), ALIGN.left)
-  put(ws, 'C3', EMPRESA.direccion, calibri(8), ALIGN.left)
+  put(ws, 'C3', opts.direccion ?? EMPRESA.direccion, calibri(8), ALIGN.left)
   put(ws, 'C4', `   ${ig}      ${fb}`, calibri(9), ALIGN.left)
   put(ws, 'F2', 'CUPON N°', calibri(11), ALIGN.center)
   put(ws, 'F3', 'FECHA', calibri(11), ALIGN.center)

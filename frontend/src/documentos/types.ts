@@ -52,6 +52,8 @@ export interface PaperProps<T> {
   datos: T
   onChange: (patch: Partial<T>) => void
   readOnly?: boolean
+  /** Dirección del encabezado (configurable desde la página). */
+  direccion?: string
 }
 
 /**
@@ -74,8 +76,8 @@ export interface DocModule<T = unknown> {
   /** Nombre de archivo base para las exportaciones (sin extensión). */
   nombreArchivo: (datos: T) => string
   Paper: ComponentType<PaperProps<T>>
-  loadPdf: () => Promise<ComponentType<{ datos: T }>>
-  loadXlsx: () => Promise<(datos: T) => Promise<Blob>>
+  loadPdf: () => Promise<ComponentType<{ datos: T; direccion?: string }>>
+  loadXlsx: () => Promise<(datos: T, direccion?: string) => Promise<Blob>>
 }
 
 /** Fecha de hoy en partes (para prefijar el campo FECHA de los formularios). */

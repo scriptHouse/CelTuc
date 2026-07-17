@@ -11,6 +11,16 @@ export const EMPRESA = {
   facebook: '/CelTuc',
 } as const
 
+/**
+ * Direcciones disponibles para el encabezado. Se elige una desde la página y
+ * se aplica a TODOS los documentos (preview, PDF y Excel).
+ */
+export const DIRECCIONES = ['Salta 186 - Yerba Buena', '(4107) Yerba Buena- Tucumán'] as const
+
+export type Direccion = (typeof DIRECCIONES)[number]
+
+export const DIRECCION_POR_DEFECTO: Direccion = DIRECCIONES[0]
+
 export const RECEPCION_TITULO = 'RECEPCION DE EQUIPO/S'
 
 /** Etiquetas fijas de los campos (idénticas al Excel, con sus mayúsculas). */
