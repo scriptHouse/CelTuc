@@ -126,6 +126,7 @@ export const garantiaAccModule: DocModule<GAccData> = {
   Paper: GarantiaAccPaper,
   loadPdf: async () => (await import('./GarantiaAccPdf')).GarantiaAccPdf,
   loadXlsx: async () => (await import('./garantiaAccXlsx')).construirGarantiaAccXlsx,
+  loadPos80: async () => (await import('./GarantiaAccPos80Pdf')).GarantiaAccPos80Pdf,
 }
 
 /** Documentos operativos (en orden de aparición en el selector).

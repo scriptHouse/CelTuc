@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Clock, Eraser, FileSpreadsheet, FileText, Loader2, MapPin } from 'lucide-react'
+import { Clock, Eraser, FileSpreadsheet, FileText, Loader2, MapPin, Printer } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -45,7 +45,7 @@ export function DocumentosPage() {
   const [estados, setEstados] = useState<Record<string, unknown>>(() =>
     Object.fromEntries(DOC_MODULES.map((m) => [m.id, m.crearVacio()])),
   )
-  const [busy, setBusy] = useState<'pdf' | 'xlsx' | null>(null)
+  const [busy, setBusy] = useState<'pdf' | 'xlsx' | 'pos80' | null>(null)
   const [direccion, setDireccion] = useState<string>(leerDireccion)
 
   const active = useMemo(() => DOC_MODULES.find((m) => m.id === activeId) ?? DOC_MODULES[0], [activeId])
@@ -89,6 +89,37 @@ export function DocumentosPage() {
     } catch (e) {
       console.error(e)
       toast.error('No se pudo generar el Excel', 'Probá de nuevo en un momento.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  /**
+   * Genera el ticket para la impresora térmica POS80 (80mm) y lo abre en una
+   * pestaña nueva, listo para imprimir. El PDF ya viene a 80mm de ancho, así que
+   * conviene imprimirlo a "tamaño real / 100%" en la ticketera. Si el navegador
+   * bloquea la pestaña emergente, se descarga como respaldo.
+   */
+  async function imprimirPos80() {
+    if (busy || !active.loadPos80) return
+    setBusy('pos80')
+    try {
+      const [{ pdf }, Pos80] = await Promise.all([import('@react-pdf/renderer'), active.loadPos80()])
+      const blob = await pdf(<Pos80 direccion={direccion} />).toBlob()
+      const url = URL.createObjectURL(blob)
+      const win = window.open(url, '_blank')
+      if (win) {
+        toast.success('Ticket POS80 listo', 'Imprimí a tamaño real (100%) en la ticketera.')
+        setTimeout(() => URL.revokeObjectURL(url), 60_000)
+      } else {
+        // Popup bloqueado: caemos a descarga.
+        URL.revokeObjectURL(url)
+        descargar(blob, `${active.nombreArchivo(datos)}-ticket.pdf`)
+        toast.success('Ticket POS80 descargado', 'Abrilo e imprimí a tamaño real (100%).')
+      }
+    } catch (e) {
+      console.error(e)
+      toast.error('No se pudo generar el ticket', 'Probá de nuevo en un momento.')
     } finally {
       setBusy(null)
     }
@@ -161,6 +192,12 @@ export function DocumentosPage() {
               {busy === 'xlsx' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
               Excel
             </Button>
+            {active.loadPos80 && (
+              <Button variant="outline" size="sm" onClick={imprimirPos80} disabled={!!busy} title="Imprimir en ticketera térmica POS80 (80mm)">
+                {busy === 'pos80' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                Ticket POS80
+              </Button>
+            )}
             <Button size="sm" onClick={exportarPdf} disabled={!!busy}>
               {busy === 'pdf' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
               PDF

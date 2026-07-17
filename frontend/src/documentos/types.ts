@@ -78,6 +78,12 @@ export interface DocModule<T = unknown> {
   Paper: ComponentType<PaperProps<T>>
   loadPdf: () => Promise<ComponentType<{ datos: T; direccion?: string }>>
   loadXlsx: () => Promise<(datos: T, direccion?: string) => Promise<Blob>>
+  /**
+   * Opcional: versión para ticketera térmica POS80 (80mm). Sólo la definen los
+   * documentos que además pueden imprimirse como ticket. No recibe `datos`
+   * porque el ticket es de contenido fijo (p. ej. la garantía de accesorios).
+   */
+  loadPos80?: () => Promise<ComponentType<{ direccion?: string }>>
 }
 
 /** Fecha de hoy en partes (para prefijar el campo FECHA de los formularios). */
