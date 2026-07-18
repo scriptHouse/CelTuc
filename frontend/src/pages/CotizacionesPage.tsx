@@ -16,6 +16,8 @@ import { AyudaInfo } from '@/components/ui/AyudaInfo'
 import { AyudaCotizacionesPagina } from '@/components/AyudaContenidos'
 import { useToast } from '@/components/ToastProvider'
 import { CotizacionesManager } from '@/components/CotizacionesManager'
+import { MensajeWhatsappModal } from '@/components/MensajeWhatsappModal'
+import { construirMensajeCotizacion, guardarPlantillaWhatsapp, leerPlantillaWhatsapp } from '@/lib/mensajeCotizacion'
 
 /**
  * Cotizaciones de equipos usados. Replica la hoja "Cotizaciones" del Excel:
@@ -23,8 +25,10 @@ import { CotizacionesManager } from '@/components/CotizacionesManager'
  * precios de service (batería, módulo, tapa...). Todo es configurable desde
  * el botón "Configurar" (solo admin).
  *
- * El botón de WhatsApp copia la respuesta tipo de la planilla: el punto medio
- * entre el mínimo más bajo y el máximo más alto del modelo.
+ * El botón de WhatsApp copia una respuesta tipo cuyo precio es el punto medio
+ * entre el mínimo más bajo y el máximo más alto del modelo. El texto es una
+ * plantilla configurable con variables (ver `lib/mensajeCotizacion`), editable
+ * desde el botón "Mensaje".
  */
 
 const TIPS = [
@@ -34,17 +38,18 @@ const TIPS = [
   'Equipo en parte de pago: restauralo de fábrica y arrancá con una SIM para descartar bloqueo de operador.',
 ]
 
-/** Respuesta tipo para WhatsApp (misma redacción que la planilla). */
-function mensajeWhatsapp(modelo: ModeloEquipo): string | null {
+/** Respuesta tipo para WhatsApp: rellena la plantilla con los datos del modelo. */
+function mensajeWhatsapp(modelo: ModeloEquipo, plantilla: string): string | null {
   if (modelo.cotizaciones.length === 0) return null
   const min = Math.min(...modelo.cotizaciones.map((c) => Number(c.precio_min)))
   const max = Math.max(...modelo.cotizaciones.map((c) => Number(c.precio_max)))
   const punta = Math.round((min + max) / 2)
-  return (
-    `Al ${modelo.nombre_completo} podríamos tomarlo en el orden de los USD ${num(punta)}. ` +
-    'Esto siempre y cuando el equipo se encuentre en condiciones estándar y no haya que reacondicionarlo. ' +
-    'La valuación final se pasa en el local a la hora de cotizar el equipo.'
-  )
+  return construirMensajeCotizacion(plantilla, {
+    modelo: modelo.nombre_completo,
+    precio: num(punta),
+    min: num(min),
+    max: num(max),
+  })
 }
 
 export function CotizacionesPage() {
@@ -54,6 +59,8 @@ export function CotizacionesPage() {
 
   const [busqueda, setBusqueda] = useState('')
   const [configOpen, setConfigOpen] = useState(false)
+  const [msgOpen, setMsgOpen] = useState(false)
+  const [plantilla, setPlantilla] = useState(leerPlantillaWhatsapp)
 
   const { data: modelos = [], isLoading } = useQuery({
     queryKey: ['cotizaciones-modelos'],
@@ -85,7 +92,7 @@ export function CotizacionesPage() {
   }, [activos])
 
   async function copiarRespuesta(modelo: ModeloEquipo) {
-    const mensaje = mensajeWhatsapp(modelo)
+    const mensaje = mensajeWhatsapp(modelo, plantilla)
     if (!mensaje) return
     try {
       await navigator.clipboard.writeText(mensaje)
@@ -93,6 +100,13 @@ export function CotizacionesPage() {
     } catch {
       toast.error('No se pudo copiar', 'Copiá el rango a mano desde la tarjeta.')
     }
+  }
+
+  function guardarPlantilla(nueva: string) {
+    guardarPlantillaWhatsapp(nueva)
+    setPlantilla(leerPlantillaWhatsapp())
+    setMsgOpen(false)
+    toast.success('Mensaje guardado', 'Se usará al copiar la respuesta de WhatsApp.')
   }
 
   return (
@@ -108,6 +122,10 @@ export function CotizacionesPage() {
             <AyudaInfo titulo="Cómo cotizar usados">
               <AyudaCotizacionesPagina />
             </AyudaInfo>
+            <Button variant="outline" onClick={() => setMsgOpen(true)}>
+              <MessageCircle className="h-4 w-4" />
+              Mensaje
+            </Button>
             {admin && (
               <Button variant="outline" onClick={() => setConfigOpen(true)}>
                 <SlidersHorizontal className="h-4 w-4" />
@@ -232,6 +250,12 @@ export function CotizacionesPage() {
       )}
 
       <CotizacionesManager open={configOpen} onClose={() => setConfigOpen(false)} />
+      <MensajeWhatsappModal
+        open={msgOpen}
+        onClose={() => setMsgOpen(false)}
+        valorActual={plantilla}
+        onGuardar={guardarPlantilla}
+      />
     </div>
   )
 }
