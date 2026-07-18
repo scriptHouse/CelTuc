@@ -15,13 +15,14 @@ class UsuarioSerializer(serializers.ModelSerializer):
     es_administrador = serializers.BooleanField(read_only=True)
     permisos = serializers.SerializerMethodField()
     rol = serializers.SerializerMethodField()
+    sucursal = serializers.SerializerMethodField()
 
     class Meta:
         model = Usuario
         fields = (
             'id', 'email', 'username',
             'is_active', 'is_staff', 'is_superuser', 'date_joined',
-            'es_administrador', 'permisos', 'rol',
+            'es_administrador', 'permisos', 'rol', 'sucursal',
         )
         read_only_fields = fields
 
@@ -32,6 +33,18 @@ class UsuarioSerializer(serializers.ModelSerializer):
         if not obj.rol_id:
             return None
         return {'id': obj.rol_id, 'nombre': obj.rol.nombre, 'es_admin': obj.rol.es_admin}
+
+    def get_sucursal(self, obj):
+        """Sucursal del empleado vinculado (para preseleccionarla en documentos)."""
+        from django.core.exceptions import ObjectDoesNotExist
+        try:
+            empleado = obj.empleado
+        except ObjectDoesNotExist:
+            return None
+        if empleado is None or empleado.sucursal_id is None:
+            return None
+        suc = empleado.sucursal
+        return {'id': suc.id, 'nombre': suc.nombre, 'codigo_postal': suc.codigo_postal}
 
 
 class LoginSerializer(serializers.Serializer):

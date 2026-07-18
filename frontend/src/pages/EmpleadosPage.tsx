@@ -6,6 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import {
   AtSign,
+  Building2,
   Eye,
   EyeOff,
   KeyRound,
@@ -19,7 +20,7 @@ import {
   UserPlus,
   Users,
 } from 'lucide-react'
-import type { Empleado, Rol } from '@/types'
+import type { Empleado, Rol, Sucursal } from '@/types'
 import {
   actualizarEmpleado,
   type AccesoInput,
@@ -31,6 +32,7 @@ import {
   quitarAcceso,
 } from '@/services/empleados'
 import { listarRoles } from '@/services/roles'
+import { listarSucursales } from '@/services/sucursales'
 import { useAuth } from '@/store/auth'
 import { esAdmin } from '@/lib/permisos'
 import { ApiError } from '@/lib/api'
@@ -48,6 +50,7 @@ import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { RolesManager } from '@/components/RolesManager'
+import { SucursalesManager } from '@/components/SucursalesManager'
 import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
 
@@ -55,6 +58,8 @@ const schema = z
   .object({
     nombre: z.string().trim().min(1, 'Requerido'),
     apellido: z.string().trim(),
+    /** Id de la sucursal como string (lo maneja el Select); '' = sin sucursal. */
+    sucursalId: z.string(),
     tieneAcceso: z.boolean(),
     username: z.string().trim(),
     email: z.string().trim(),
@@ -99,8 +104,16 @@ export function EmpleadosPage() {
     enabled: admin,
   })
 
+  // Sucursales para el selector del formulario (solo las necesita un admin).
+  const { data: sucursales = [] } = useQuery({
+    queryKey: ['sucursales'],
+    queryFn: listarSucursales,
+    enabled: admin,
+  })
+
   const [modalOpen, setModalOpen] = useState(false)
   const [rolesOpen, setRolesOpen] = useState(false)
+  const [sucursalesOpen, setSucursalesOpen] = useState(false)
   const [editando, setEditando] = useState<Empleado | null>(null)
 
   const invalidar = () => {
@@ -163,7 +176,11 @@ export function EmpleadosPage() {
   }
 
   async function handleGuardar(values: FormData) {
-    const input: EmpleadoInput = { nombre: values.nombre, apellido: values.apellido }
+    const input: EmpleadoInput = {
+      nombre: values.nombre,
+      apellido: values.apellido,
+      sucursal: values.sucursalId ? Number(values.sucursalId) : null,
+    }
     const acceso: AccesoInput | null = values.tieneAcceso
       ? {
           username: values.username,
@@ -196,6 +213,10 @@ export function EmpleadosPage() {
         actions={
           admin ? (
             <>
+              <Button variant="outline" onClick={() => setSucursalesOpen(true)}>
+                <Building2 className="h-4 w-4" />
+                Sucursales
+              </Button>
               <Button variant="outline" onClick={() => setRolesOpen(true)}>
                 <SlidersHorizontal className="h-4 w-4" />
                 Roles
@@ -280,8 +301,14 @@ export function EmpleadosPage() {
                 )}
               </div>
 
+              {e.sucursal && (
+                <p className="mt-3 flex items-center gap-1.5 truncate text-xs text-ink-500">
+                  <Building2 className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">{e.sucursal.nombre}</span>
+                </p>
+              )}
+
               {e.usuario?.email && (
-                <p className="mt-3 flex items-center gap-1.5 truncate text-xs text-ink-400">
+                <p className="mt-2 flex items-center gap-1.5 truncate text-xs text-ink-400">
                   <Mail className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">{e.usuario.email}</span>
                 </p>
               )}
@@ -314,12 +341,14 @@ export function EmpleadosPage() {
         open={modalOpen}
         empleado={editando}
         roles={roles}
+        sucursales={sucursales}
         saving={guardar.isPending}
         onClose={() => setModalOpen(false)}
         onSubmit={handleGuardar}
       />
 
       <RolesManager open={rolesOpen} onClose={() => setRolesOpen(false)} />
+      <SucursalesManager open={sucursalesOpen} onClose={() => setSucursalesOpen(false)} />
     </div>
   )
 }
@@ -330,6 +359,7 @@ function EmpleadoFormModal({
   open,
   empleado,
   roles,
+  sucursales,
   saving,
   onClose,
   onSubmit,
@@ -337,12 +367,25 @@ function EmpleadoFormModal({
   open: boolean
   empleado: Empleado | null
   roles: Rol[]
+  sucursales: Sucursal[]
   saving: boolean
   onClose: () => void
   onSubmit: (values: FormData) => Promise<void>
 }) {
   const yaTieneAcceso = Boolean(empleado?.usuario)
   const [showPassword, setShowPassword] = useState(false)
+
+  // Opciones del selector: "Sin sucursal" + las activas (y la actual, aunque esté
+  // inactiva, para no perder la asignación al editar).
+  const sucursalOptions = useMemo(() => {
+    const actual = empleado?.sucursal?.id ? String(empleado.sucursal.id) : ''
+    return [
+      { value: '', label: 'Sin sucursal' },
+      ...sucursales
+        .filter((s) => s.activa || String(s.id) === actual)
+        .map((s) => ({ value: String(s.id), label: s.codigo_postal ? `${s.nombre} · CP ${s.codigo_postal}` : s.nombre })),
+    ]
+  }, [sucursales, empleado])
 
   // Rol "Empleado" del sistema: valor por defecto al crear un acceso nuevo.
   const rolPorDefecto = useMemo(
@@ -361,7 +404,7 @@ function EmpleadoFormModal({
   } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: {
-      nombre: '', apellido: '', tieneAcceso: false, username: '', email: '', password: '', rolId: '',
+      nombre: '', apellido: '', sucursalId: '', tieneAcceso: false, username: '', email: '', password: '', rolId: '',
     },
   })
 
@@ -371,6 +414,7 @@ function EmpleadoFormModal({
     reset({
       nombre: empleado?.nombre ?? '',
       apellido: empleado?.apellido ?? '',
+      sucursalId: empleado?.sucursal?.id ? String(empleado.sucursal.id) : '',
       tieneAcceso: Boolean(empleado?.usuario),
       username: empleado?.usuario?.username ?? '',
       email: empleado?.usuario?.email ?? '',
@@ -385,6 +429,7 @@ function EmpleadoFormModal({
 
   const tieneAcceso = watch('tieneAcceso')
   const rolId = watch('rolId')
+  const sucursalId = watch('sucursalId')
 
   const internalSubmit = (values: FormData) => {
     // La contraseña solo es obligatoria al CREAR un acceso nuevo (al editar uno
@@ -411,6 +456,19 @@ function EmpleadoFormModal({
           <Campo label="Apellido (opcional)" error={errors.apellido?.message}>
             <Input placeholder="Gómez" {...register('apellido')} />
           </Campo>
+        </div>
+
+        <div>
+          <Select
+            label="Sucursal (opcional)"
+            placeholder="Sin sucursal"
+            value={sucursalId}
+            onChange={(v) => setValue('sucursalId', v)}
+            options={sucursalOptions}
+          />
+          <p className="mt-1.5 text-xs text-ink-400">
+            El local al que pertenece. Se preselecciona sola en los documentos.
+          </p>
         </div>
 
         {/* Acceso al sistema */}

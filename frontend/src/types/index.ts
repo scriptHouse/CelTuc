@@ -29,6 +29,8 @@ export interface Usuario {
   permisos?: string[]
   /** Rol asignado a la cuenta, o null si no tiene. */
   rol?: RolBreve | null
+  /** Sucursal del empleado vinculado (para preseleccionarla en documentos). */
+  sucursal?: SucursalBreve | null
 }
 
 /** Permiso del catálogo (un módulo del panel). */
@@ -208,6 +210,23 @@ export interface Comprobante {
 }
 
 // ===== Empleados (backend) =====
+/** Sucursal completa (local del negocio): nombre, código postal y estado. */
+export interface Sucursal {
+  id: number
+  nombre: string
+  codigo_postal: string
+  activa: boolean
+  creado?: string // ISO
+  actualizado?: string // ISO
+}
+
+/** Vista mínima de la sucursal, tal como viaja anidada en el empleado/usuario. */
+export interface SucursalBreve {
+  id: number
+  nombre: string
+  codigo_postal?: string
+}
+
 /** Cuenta de login vinculada a un empleado (subconjunto del Usuario). */
 export interface UsuarioBreve {
   id: number
@@ -229,6 +248,8 @@ export interface Empleado {
   nombre_completo: string
   /** Cuenta con la que el empleado inicia sesión, o null si no tiene acceso. */
   usuario: UsuarioBreve | null
+  /** Sucursal (local) a la que pertenece, o null si no se asignó. */
+  sucursal: SucursalBreve | null
   puede_loguear: boolean
   creado: string // ISO
 }

@@ -3,7 +3,37 @@ from rest_framework import serializers
 
 from usuarios.models import Rol, Usuario, username_validator
 
-from .models import Empleado
+from .models import Empleado, Sucursal
+
+
+class SucursalSerializer(serializers.ModelSerializer):
+    """Alta/edición y listado de sucursales (nombre, código postal y estado)."""
+
+    class Meta:
+        model = Sucursal
+        fields = ('id', 'nombre', 'codigo_postal', 'activa', 'creado', 'actualizado')
+        read_only_fields = ('creado', 'actualizado')
+
+    def validate_nombre(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError('El nombre es obligatorio.')
+        # `todos` incluye los borrados lógicos: el nombre sigue "ocupado" mientras
+        # exista la fila, así no chocamos con la constraint única al validar.
+        qs = Sucursal.todos.filter(nombre__iexact=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError('Ya existe una sucursal con ese nombre.')
+        return value
+
+
+class SucursalBreveSerializer(serializers.ModelSerializer):
+    """Vista mínima de la sucursal, para anidar en el empleado y la sesión."""
+
+    class Meta:
+        model = Sucursal
+        fields = ('id', 'nombre', 'codigo_postal')
 
 
 class UsuarioBreveSerializer(serializers.ModelSerializer):
@@ -26,6 +56,7 @@ class EmpleadoSerializer(serializers.ModelSerializer):
     """Representación de lectura del empleado, con su cuenta (o null)."""
 
     usuario = UsuarioBreveSerializer(read_only=True)
+    sucursal = SucursalBreveSerializer(read_only=True)
     nombre_completo = serializers.CharField(read_only=True)
     puede_loguear = serializers.BooleanField(read_only=True)
 
@@ -33,16 +64,21 @@ class EmpleadoSerializer(serializers.ModelSerializer):
         model = Empleado
         fields = (
             'id', 'nombre', 'apellido', 'nombre_completo',
-            'usuario', 'puede_loguear', 'creado',
+            'usuario', 'sucursal', 'puede_loguear', 'creado',
         )
 
 
 class EmpleadoWriteSerializer(serializers.ModelSerializer):
     """Alta/edición de los datos del empleado (sin tocar la cuenta de login)."""
 
+    # Opcional: el local al que pertenece. `allow_null` para poder desvincularlo.
+    sucursal = serializers.PrimaryKeyRelatedField(
+        queryset=Sucursal.objects.all(), required=False, allow_null=True,
+    )
+
     class Meta:
         model = Empleado
-        fields = ('nombre', 'apellido')
+        fields = ('nombre', 'apellido', 'sucursal')
 
     def validate_nombre(self, value):
         value = value.strip()

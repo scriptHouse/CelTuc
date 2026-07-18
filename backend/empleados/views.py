@@ -6,13 +6,39 @@ from rest_framework.views import APIView
 
 from usuarios.permissions import EsAdministrador, LecturaConPermisoEscrituraAdmin
 
-from .models import Empleado
-from .serializers import AccesoSerializer, EmpleadoSerializer, EmpleadoWriteSerializer
+from .models import Empleado, Sucursal
+from .serializers import (
+    AccesoSerializer,
+    EmpleadoSerializer,
+    EmpleadoWriteSerializer,
+    SucursalSerializer,
+)
+
+
+class SucursalListCreateView(generics.ListCreateAPIView):
+    # Leer: quien tenga el permiso del módulo Empleados. Escribir: solo admin.
+    queryset = Sucursal.objects.all()
+    serializer_class = SucursalSerializer
+    permission_classes = [LecturaConPermisoEscrituraAdmin]
+    permiso_requerido = 'ver_empleados'
+
+
+class SucursalDetailView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = Sucursal.objects.all()
+    serializer_class = SucursalSerializer
+    permission_classes = [LecturaConPermisoEscrituraAdmin]
+    permiso_requerido = 'ver_empleados'
+
+    def perform_destroy(self, instance):
+        # El borrado es lógico (no dispara el SET_NULL de la FK), así que
+        # desvinculamos a mano a los empleados que tenían esta sucursal.
+        Empleado.todos.filter(sucursal=instance).update(sucursal=None)
+        instance.delete()
 
 
 class EmpleadoListCreateView(generics.ListCreateAPIView):
     # Leer: quien tenga el permiso del modulo Empleados. Escribir: solo admin.
-    queryset = Empleado.objects.select_related('usuario', 'usuario__rol').all()
+    queryset = Empleado.objects.select_related('usuario', 'usuario__rol', 'sucursal').all()
     serializer_class = EmpleadoSerializer
     permission_classes = [LecturaConPermisoEscrituraAdmin]
     permiso_requerido = 'ver_empleados'
@@ -25,7 +51,7 @@ class EmpleadoListCreateView(generics.ListCreateAPIView):
 
 
 class EmpleadoDetailView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Empleado.objects.select_related('usuario', 'usuario__rol').all()
+    queryset = Empleado.objects.select_related('usuario', 'usuario__rol', 'sucursal').all()
     serializer_class = EmpleadoSerializer
     permission_classes = [LecturaConPermisoEscrituraAdmin]
     permiso_requerido = 'ver_empleados'

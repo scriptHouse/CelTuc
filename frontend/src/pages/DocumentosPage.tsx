@@ -1,32 +1,37 @@
-import { useMemo, useState } from 'react'
-import { Clock, Eraser, FileSpreadsheet, FileText, Loader2, MapPin, Printer } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Building2, Clock, Eraser, FileSpreadsheet, FileText, Loader2, Printer } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
 import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
+import { useAuth } from '@/store/auth'
 import { cn, ctStagger } from '@/lib/utils'
 import { PaperScaler } from '@/documentos/PaperScaler'
-import { DIRECCION_POR_DEFECTO, DIRECCIONES } from '@/documentos/content'
+import { SUCURSALES_DOC, SUCURSAL_DOC_POR_DEFECTO, direccionDeSucursal } from '@/documentos/content'
 import { DOC_MODULES, PROXIMOS_DOCS } from '@/documentos/registry'
 
-/** Dirección elegida para el encabezado de todos los documentos (se recuerda). */
-const DIR_KEY = 'celtuc:doc:direccion'
-const DIR_OPTIONS = DIRECCIONES.map((d) => ({ value: d, label: d }))
+/** Sucursal elegida para el encabezado de todos los documentos (se recuerda por
+ *  dispositivo). Por defecto es la del empleado logueado; se puede cambiar. */
+const SUC_KEY = 'celtuc:doc:sucursal'
+const SUC_OPTIONS = SUCURSALES_DOC.map((s) => ({ value: s.nombre, label: s.nombre }))
+const SUC_NOMBRES: readonly string[] = SUCURSALES_DOC.map((s) => s.nombre)
 
 /** Celda del selector: 2 columnas en móvil, 3 en sm y 4 en lg. El `p-1` de cada
  *  celda genera la separación entre tarjetas (equivale al gap de la grilla). */
 const CHIP_CELL = 'w-1/2 p-1 sm:w-1/3 lg:w-1/4'
 
-function leerDireccion(): string {
+/** Sucursal inicial: la elegida a mano (recordada) o, si no hay, la del empleado. */
+function leerSucursal(sucursalUsuario?: string | null): string {
   try {
-    const g = localStorage.getItem(DIR_KEY)
-    if (g && (DIRECCIONES as readonly string[]).includes(g)) return g
+    const g = localStorage.getItem(SUC_KEY)
+    if (g && SUC_NOMBRES.includes(g)) return g
   } catch {
     /* localStorage no disponible */
   }
-  return DIRECCION_POR_DEFECTO
+  if (sucursalUsuario && SUC_NOMBRES.includes(sucursalUsuario)) return sucursalUsuario
+  return SUCURSAL_DOC_POR_DEFECTO
 }
 
 function descargar(blob: Blob, filename: string) {
@@ -50,17 +55,32 @@ export function DocumentosPage() {
     Object.fromEntries(DOC_MODULES.map((m) => [m.id, m.crearVacio()])),
   )
   const [busy, setBusy] = useState<'pdf' | 'xlsx' | 'pos80' | null>(null)
-  const [direccion, setDireccion] = useState<string>(leerDireccion)
+  const usuario = useAuth((s) => s.usuario)
+  // Sucursal del encabezado; la dirección impresa se deriva de ella.
+  const [sucursal, setSucursal] = useState<string>(() => leerSucursal(useAuth.getState().usuario?.sucursal?.nombre))
+  const direccion = direccionDeSucursal(sucursal)
 
   const active = useMemo(() => DOC_MODULES.find((m) => m.id === activeId) ?? DOC_MODULES[0], [activeId])
   const datos = estados[active.id]
   const patch = (p: Record<string, unknown>) =>
     setEstados((s) => ({ ...s, [active.id]: { ...(s[active.id] as object), ...p } }))
 
-  function cambiarDireccion(v: string) {
-    setDireccion(v)
+  // Si el empleado no eligió una sucursal a mano, seguimos la de su cuenta (puede
+  // llegar tras el refresco de sesión que hace el Layout al montar la app).
+  useEffect(() => {
     try {
-      localStorage.setItem(DIR_KEY, v)
+      if (localStorage.getItem(SUC_KEY)) return
+    } catch {
+      /* localStorage no disponible */
+    }
+    const suc = usuario?.sucursal?.nombre
+    if (suc && SUC_NOMBRES.includes(suc)) setSucursal(suc)
+  }, [usuario])
+
+  function cambiarSucursal(v: string) {
+    setSucursal(v)
+    try {
+      localStorage.setItem(SUC_KEY, v)
     } catch {
       /* localStorage no disponible */
     }
@@ -185,13 +205,13 @@ export function DocumentosPage() {
             <p className="text-xs text-ink-400">Tocá cualquier campo para completarlo.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-1.5" title="Dirección del encabezado (se aplica a todos los documentos)">
-              <MapPin className="h-4 w-4 shrink-0 text-ink-400" />
+            <div className="flex items-center gap-1.5" title="Sucursal del encabezado (se aplica a todos los documentos)">
+              <Building2 className="h-4 w-4 shrink-0 text-ink-400" />
               <Select
-                options={DIR_OPTIONS}
-                value={direccion}
-                onChange={cambiarDireccion}
-                className="w-52"
+                options={SUC_OPTIONS}
+                value={sucursal}
+                onChange={cambiarSucursal}
+                className="w-44"
                 triggerClassName="h-9 text-xs"
               />
             </div>

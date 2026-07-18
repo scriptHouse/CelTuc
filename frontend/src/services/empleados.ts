@@ -12,6 +12,8 @@ const token = () => useAuth.getState().access
 export interface EmpleadoInput {
   nombre: string
   apellido?: string
+  /** Id de la sucursal (local) del empleado; null para desvincularla. */
+  sucursal?: number | null
 }
 
 /** Datos para crear/actualizar la cuenta de login de un empleado. */

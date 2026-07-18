@@ -15,11 +15,34 @@ export const EMPRESA = {
  * Direcciones disponibles para el encabezado. Se elige una desde la página y
  * se aplica a TODOS los documentos (preview, PDF y Excel).
  */
-export const DIRECCIONES = ['Salta 186 - Yerba Buena', '(4107) Yerba Buena- Tucumán'] as const
+export const DIRECCIONES = ['Salta 186 - Yerba Buena', 'Yerba Buena - Tucumán'] as const
 
 export type Direccion = (typeof DIRECCIONES)[number]
 
 export const DIRECCION_POR_DEFECTO: Direccion = DIRECCIONES[0]
+
+/**
+ * Sucursales que se pueden elegir como encabezado de los documentos, con la
+ * dirección que imprime cada una. La sucursal del empleado logueado se
+ * preselecciona sola (ver DocumentosPage). El código postal vive en el backend
+ * (modelo Sucursal); acá solo mapeamos el nombre a su dirección para el papel.
+ *
+ * Mantener los NOMBRES en sync con la semilla del backend
+ * (empleados/migrations/0004_seed_sucursales). Una sucursal nueva sin entrada
+ * acá cae en la dirección por defecto hasta agregarle su línea.
+ */
+export const SUCURSALES_DOC = [
+  { nombre: 'La Salta', direccion: 'Salta 186 - Yerba Buena' },
+  { nombre: 'YB', direccion: 'Yerba Buena - Tucumán' },
+  { nombre: 'Central YB', direccion: 'Yerba Buena - Tucumán' },
+] as const
+
+export const SUCURSAL_DOC_POR_DEFECTO = SUCURSALES_DOC[0].nombre
+
+/** Dirección del encabezado para una sucursal (por nombre); default si no mapea. */
+export function direccionDeSucursal(nombre: string | null | undefined): string {
+  return SUCURSALES_DOC.find((s) => s.nombre === nombre)?.direccion ?? DIRECCION_POR_DEFECTO
+}
 
 export const RECEPCION_TITULO = 'RECEPCION DE EQUIPO/S'
 
