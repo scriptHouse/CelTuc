@@ -15,6 +15,10 @@ import { DOC_MODULES, PROXIMOS_DOCS } from '@/documentos/registry'
 const DIR_KEY = 'celtuc:doc:direccion'
 const DIR_OPTIONS = DIRECCIONES.map((d) => ({ value: d, label: d }))
 
+/** Celda del selector: 2 columnas en móvil, 3 en sm y 4 en lg. El `p-1` de cada
+ *  celda genera la separación entre tarjetas (equivale al gap de la grilla). */
+const CHIP_CELL = 'w-1/2 p-1 sm:w-1/3 lg:w-1/4'
+
 function leerDireccion(): string {
   try {
     const g = localStorage.getItem(DIR_KEY)
@@ -150,20 +154,26 @@ export function DocumentosPage() {
         className="ct-rise"
       />
 
-      {/* Selector de tipo de documento */}
-      <div className="ct-rise mb-5 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+      {/* Selector de tipo de documento. Flex centrado: mismo ancho por tarjeta
+          que una grilla de 2/3/4 columnas, pero la última fila (si queda
+          incompleta) se centra en lugar de dejar un hueco al costado. */}
+      <div className="ct-rise mb-4 flex flex-wrap justify-center">
         {DOC_MODULES.map((m, i) => (
-          <DocChip
-            key={m.id}
-            nombre={m.nombre}
-            descripcion={m.descripcion}
-            activo={m.id === activeId}
-            index={i}
-            onClick={() => setActiveId(m.id)}
-          />
+          <div key={m.id} className={CHIP_CELL}>
+            <DocChip
+              className="h-full w-full"
+              nombre={m.nombre}
+              descripcion={m.descripcion}
+              activo={m.id === activeId}
+              index={i}
+              onClick={() => setActiveId(m.id)}
+            />
+          </div>
         ))}
         {PROXIMOS_DOCS.map((d, i) => (
-          <DocChip key={d.id} nombre={d.nombre} descripcion={d.descripcion} index={DOC_MODULES.length + i} proximamente />
+          <div key={d.id} className={CHIP_CELL}>
+            <DocChip className="h-full w-full" nombre={d.nombre} descripcion={d.descripcion} index={DOC_MODULES.length + i} proximamente />
+          </div>
         ))}
       </div>
 
@@ -227,6 +237,7 @@ function DocChip({
   proximamente = false,
   index,
   onClick,
+  className,
 }: {
   nombre: string
   descripcion: string
@@ -234,6 +245,7 @@ function DocChip({
   proximamente?: boolean
   index: number
   onClick?: () => void
+  className?: string
 }) {
   return (
     <button
@@ -243,6 +255,7 @@ function DocChip({
       aria-pressed={proximamente ? undefined : activo}
       className={cn(
         'ct-stagger-item flex flex-col gap-1 rounded-2xl border p-3 text-left transition-colors',
+        className,
         proximamente
           ? 'cursor-default border-line bg-surface'
           : activo

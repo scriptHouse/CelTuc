@@ -134,7 +134,9 @@ export const garantiaAccModule: DocModule<GAccData> = {
  *  la página los usa de forma genérica. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const DOC_MODULES: DocModule<any>[] = [
-  recepcionModule,
+  // Recepción queda oculto a pedido: el módulo y sus archivos siguen intactos
+  // (arriba está `recepcionModule`); para volver a mostrarlo, descomentar esta línea.
+  // recepcionModule,
   reparacionModule,
   compraModule,
   mayoristaModule,
