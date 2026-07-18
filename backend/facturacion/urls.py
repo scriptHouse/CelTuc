@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    ClienteDetailView,
     ClienteListView,
     ComprobanteDetailView,
     ComprobanteListCreateView,
@@ -20,4 +21,5 @@ urlpatterns = [
     path('comprobantes/<int:pk>/', ComprobanteDetailView.as_view(), name='comprobante-detail'),
     path('comprobantes/<int:pk>/enviar-email/', EnviarComprobanteEmailView.as_view(), name='comprobante-email'),
     path('clientes/', ClienteListView.as_view(), name='cliente-list'),
+    path('clientes/<int:pk>/', ClienteDetailView.as_view(), name='cliente-detail'),
 ]

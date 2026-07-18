@@ -26,7 +26,9 @@ from .models import Cliente, Comprobante, Emisor
 from .permissions import PuedeFacturar
 from .serializers import (
     ActualizarComprobanteSerializer,
+    ClienteDetalleSerializer,
     ClienteSerializer,
+    ClienteWriteSerializer,
     ComprobanteDetailSerializer,
     ComprobanteListSerializer,
     CrearComprobanteSerializer,
@@ -236,10 +238,11 @@ class EnviarComprobanteEmailView(APIView):
 # ===== Clientes =====
 
 class ClienteListView(generics.ListAPIView):
-    """Base de clientes (para autocompletar el formulario de facturas).
+    """Base de clientes: autocompletado del formulario y lista del gestor.
 
-    Con `?buscar=` filtra por nombre, teléfono o documento (útil para el buscador
-    del formulario). Devuelve como máximo 20 resultados, ordenados por nombre.
+    - `?buscar=` filtra por nombre, teléfono o documento.
+    - `?stats=1` agrega a cada cliente cantidad de compras, total gastado y última
+      compra (lo pide la página de Clientes; el autocompletado no, para ser liviano).
     """
 
     serializer_class = ClienteSerializer
@@ -254,4 +257,40 @@ class ClienteListView(generics.ListAPIView):
             if digitos:
                 filtro |= Q(doc_numero__icontains=digitos) | Q(telefono__icontains=digitos)
             qs = qs.filter(filtro)
-        return qs[:20]
+        # El autocompletado del formulario (sin `stats`) solo necesita unas pocas
+        # sugerencias; el gestor pide la base completa con `?stats=1`.
+        if not self.request.query_params.get('stats'):
+            qs = qs[:20]
+        return qs
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        if self.request.query_params.get('stats'):
+            from .clientes import stats_por_cliente
+            ctx['stats'] = stats_por_cliente()
+        return ctx
+
+
+class ClienteDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Detalle del cliente con su historial de compras; permite editar y eliminar.
+
+    El borrado es lógico (lo saca de la base) y NO toca los comprobantes: son
+    documentos fiscales independientes.
+    """
+
+    queryset = Cliente.objects.all()
+    permission_classes = [PuedeFacturar]
+
+    def get_serializer_class(self):
+        if self.request.method in ('PUT', 'PATCH'):
+            return ClienteWriteSerializer
+        return ClienteDetalleSerializer
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = ClienteWriteSerializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        instance.refresh_from_db()
+        return Response(ClienteDetalleSerializer(instance).data)

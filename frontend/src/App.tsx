@@ -7,6 +7,7 @@ import { PanelPage } from '@/pages/PanelPage'
 import { DolarPage } from '@/pages/DolarPage'
 import { InventarioPage } from '@/pages/InventarioPage'
 import { FacturacionPage } from '@/pages/FacturacionPage'
+import { ClientesPage } from '@/pages/ClientesPage'
 import { CajaPage } from '@/pages/CajaPage'
 import { EmpleadosPage } from '@/pages/EmpleadosPage'
 import { SimuladorPage } from '@/pages/SimuladorPage'
@@ -30,6 +31,7 @@ const router = createBrowserRouter([
       { path: '/dolar', element: <RequirePermiso permiso="ver_dolar"><DolarPage /></RequirePermiso> },
       { path: '/inventario', element: <RequirePermiso permiso="ver_inventario"><InventarioPage /></RequirePermiso> },
       { path: '/facturacion', element: <RequirePermiso permiso="ver_facturacion"><FacturacionPage /></RequirePermiso> },
+      { path: '/clientes', element: <RequirePermiso permiso="ver_facturacion"><ClientesPage /></RequirePermiso> },
       { path: '/caja', element: <RequirePermiso permiso="ver_caja"><CajaPage /></RequirePermiso> },
       { path: '/empleados', element: <RequirePermiso permiso="ver_empleados"><EmpleadosPage /></RequirePermiso> },
       { path: '/simulador', element: <RequirePermiso permiso="ver_simulador"><SimuladorPage /></RequirePermiso> },

@@ -1,4 +1,4 @@
-import type { Cliente, Comprobante, Emisor, EstadoCobro, ItemComprobante } from '@/types'
+import type { Cliente, ClienteDetalle, Comprobante, Emisor, EstadoCobro, ItemComprobante } from '@/types'
 import { api } from '@/lib/api'
 import { useAuth } from '@/store/auth'
 
@@ -105,12 +105,40 @@ export function eliminarComprobante(id: number): Promise<void> {
   return api.del<void>(`/facturacion/comprobantes/${id}/`, token())
 }
 
-// ===== Clientes (base para autocompletar el formulario) =====
+// ===== Clientes (base + gestor con historial de compras) =====
 
-/** Busca clientes por nombre, teléfono o documento (máx. 20). */
+/** Busca clientes por nombre, teléfono o documento (para el autocompletado). */
 export function buscarClientes(busqueda: string): Promise<Cliente[]> {
   const query = busqueda.trim() ? `?buscar=${encodeURIComponent(busqueda.trim())}` : ''
   return api.get<Cliente[]>(`/facturacion/clientes/${query}`, token())
+}
+
+/** Lista los clientes con sus estadísticas de compras (para el gestor). */
+export function listarClientes(busqueda?: string): Promise<Cliente[]> {
+  const params = new URLSearchParams({ stats: '1' })
+  if (busqueda?.trim()) params.set('buscar', busqueda.trim())
+  return api.get<Cliente[]>(`/facturacion/clientes/?${params.toString()}`, token())
+}
+
+/** Trae un cliente con su historial de compras (comprobantes + productos). */
+export function obtenerCliente(id: number): Promise<ClienteDetalle> {
+  return api.get<ClienteDetalle>(`/facturacion/clientes/${id}/`, token())
+}
+
+export interface ClienteInput {
+  nombre: string
+  telefono?: string
+  condicion?: string
+}
+
+/** Edita los datos de contacto del cliente (nombre, teléfono, condición). */
+export function actualizarCliente(id: number, input: ClienteInput): Promise<ClienteDetalle> {
+  return api.patch<ClienteDetalle>(`/facturacion/clientes/${id}/`, input, token())
+}
+
+/** Elimina el cliente de la base (borrado lógico; no toca las facturas). */
+export function eliminarCliente(id: number): Promise<void> {
+  return api.del<void>(`/facturacion/clientes/${id}/`, token())
 }
 
 /** Envía por email el PDF (ya generado en el front, en base64) de un comprobante. */

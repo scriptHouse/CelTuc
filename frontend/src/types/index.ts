@@ -221,6 +221,35 @@ export interface Cliente {
   telefono: string
   creado?: string // ISO
   actualizado?: string // ISO
+  /** Estadísticas: solo vienen cuando la lista se pide con `stats` (gestor). */
+  cantidad_compras?: number | null
+  total_gastado?: number | null
+  ultima_compra?: string | null // ISO
+}
+
+/** Una compra del cliente: un comprobante con sus productos. */
+export interface CompraCliente {
+  id: number
+  tipo: TipoComprobante
+  numero_formateado: string
+  fecha: string // ISO
+  total: number
+  estado_cobro: EstadoCobro
+  emisor_nombre: string
+  items: ItemComprobante[]
+}
+
+/** Resumen de compras del cliente. */
+export interface ResumenCliente {
+  cantidad: number
+  total: number
+  ultima: string | null // ISO
+}
+
+/** Cliente con su historial de compras (para el detalle del gestor). */
+export interface ClienteDetalle extends Cliente {
+  resumen: ResumenCliente
+  compras: CompraCliente[]
 }
 
 // ===== Empleados (backend) =====

@@ -11,6 +11,7 @@
 import re
 from decimal import Decimal
 
+from django.db.models import Count, Max, Sum
 from rest_framework import serializers
 
 from inventario.models import Sucursal
@@ -210,12 +211,113 @@ class EnviarEmailSerializer(serializers.Serializer):
 # ===== Clientes (base alimentada por las facturas) =====
 
 class ClienteSerializer(serializers.ModelSerializer):
-    """Cliente de la base, para el autocompletado del formulario de facturas."""
+    """Cliente de la base (autocompletado del formulario y lista del gestor).
+
+    Las estadísticas (`cantidad_compras`, `total_gastado`, `ultima_compra`) solo
+    se completan si la vista pasa `stats` en el contexto (la lista del gestor lo
+    pide con `?stats=1`); en el autocompletado quedan en null y no cuestan nada.
+    """
+
+    cantidad_compras = serializers.SerializerMethodField()
+    total_gastado = serializers.SerializerMethodField()
+    ultima_compra = serializers.SerializerMethodField()
 
     class Meta:
         model = Cliente
         fields = (
             'id', 'nombre', 'doc_tipo', 'doc_numero', 'condicion', 'telefono',
             'creado', 'actualizado',
+            'cantidad_compras', 'total_gastado', 'ultima_compra',
         )
         read_only_fields = fields
+
+    def _stat(self, obj):
+        stats = self.context.get('stats')
+        if not stats:
+            return None
+        if obj.doc_numero:
+            return stats['doc'].get(obj.doc_numero)
+        if obj.telefono:
+            return stats['tel'].get(obj.telefono)
+        return None
+
+    def get_cantidad_compras(self, obj):
+        if 'stats' not in self.context:
+            return None
+        fila = self._stat(obj)
+        return fila['cantidad'] if fila else 0
+
+    def get_total_gastado(self, obj):
+        if 'stats' not in self.context:
+            return None
+        fila = self._stat(obj)
+        return float(fila['total']) if fila and fila['total'] is not None else 0
+
+    def get_ultima_compra(self, obj):
+        if 'stats' not in self.context:
+            return None
+        fila = self._stat(obj)
+        return fila['ultima'].isoformat() if fila and fila['ultima'] else None
+
+
+class CompraSerializer(serializers.ModelSerializer):
+    """Un comprobante visto como una compra del cliente (con sus productos)."""
+
+    numero_formateado = serializers.CharField(read_only=True)
+    emisor_nombre = serializers.CharField(source='emisor.nombre', read_only=True)
+    items = ItemComprobanteSerializer(many=True, read_only=True)
+    total = serializers.DecimalField(max_digits=14, decimal_places=2, coerce_to_string=False)
+
+    class Meta:
+        model = Comprobante
+        fields = (
+            'id', 'tipo', 'numero_formateado', 'fecha', 'total', 'estado_cobro',
+            'emisor_nombre', 'items',
+        )
+
+
+class ClienteDetalleSerializer(serializers.ModelSerializer):
+    """Cliente con su historial de compras (comprobantes + productos + fechas)."""
+
+    resumen = serializers.SerializerMethodField()
+    compras = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Cliente
+        fields = (
+            'id', 'nombre', 'doc_tipo', 'doc_numero', 'condicion', 'telefono',
+            'creado', 'actualizado', 'resumen', 'compras',
+        )
+
+    def get_compras(self, obj):
+        from .clientes import comprobantes_de_cliente
+        return CompraSerializer(comprobantes_de_cliente(obj), many=True).data
+
+    def get_resumen(self, obj):
+        from .clientes import comprobantes_de_cliente
+        agg = comprobantes_de_cliente(obj).aggregate(
+            cantidad=Count('id'), total=Sum('total'), ultima=Max('fecha'),
+        )
+        return {
+            'cantidad': agg['cantidad'] or 0,
+            'total': float(agg['total']) if agg['total'] is not None else 0,
+            'ultima': agg['ultima'].isoformat() if agg['ultima'] else None,
+        }
+
+
+class ClienteWriteSerializer(serializers.ModelSerializer):
+    """Edición de los datos de contacto del cliente (nombre, teléfono, condición).
+
+    No se editan el tipo/numero de documento: son la identidad con la que se
+    cruzan sus compras.
+    """
+
+    class Meta:
+        model = Cliente
+        fields = ('nombre', 'telefono', 'condicion')
+
+    def validate_nombre(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError('El nombre es obligatorio.')
+        return value
