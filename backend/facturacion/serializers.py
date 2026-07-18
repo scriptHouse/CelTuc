@@ -17,7 +17,7 @@ from inventario.models import Sucursal
 from productos.models import Producto
 
 from .arca import qr
-from .models import Comprobante, Emisor, ItemComprobante
+from .models import Cliente, Comprobante, Emisor, ItemComprobante
 
 
 def _solo_digitos(valor: str) -> str:
@@ -113,6 +113,7 @@ class CrearComprobanteSerializer(serializers.Serializer):
     )
     cliente_doc_numero = serializers.CharField(max_length=11, required=False, allow_blank=True)
     cliente_condicion = serializers.ChoiceField(choices=Comprobante.CondicionReceptor.choices)
+    cliente_telefono = serializers.CharField(max_length=30, required=False, allow_blank=True)
     fecha = serializers.DateField(required=False)
     vencimiento = serializers.DateField(required=False, allow_null=True)
     alicuota_iva = serializers.DecimalField(
@@ -137,6 +138,9 @@ class CrearComprobanteSerializer(serializers.Serializer):
 
     def validate_cliente_doc_numero(self, value):
         return _solo_digitos(value)
+
+    def validate_cliente_telefono(self, value):
+        return (value or '').strip()
 
     def validate_items(self, value):
         if not value:
@@ -176,7 +180,7 @@ class ComprobanteDetailSerializer(serializers.ModelSerializer):
             'id', 'emisor', 'emisor_nombre', 'emisor_cuit', 'emisor_condicion',
             'tipo', 'concepto', 'punto_venta',
             'numero', 'numero_formateado', 'cliente_nombre', 'cliente_doc_tipo',
-            'cliente_doc_numero', 'cliente_condicion', 'fecha', 'vencimiento',
+            'cliente_doc_numero', 'cliente_condicion', 'cliente_telefono', 'fecha', 'vencimiento',
             'alicuota_iva', 'neto', 'iva', 'total', 'cae', 'cae_vencimiento',
             'qr_url', 'qr', 'estado_cobro', 'observaciones', 'items', 'creado',
         )
@@ -201,3 +205,17 @@ class EnviarEmailSerializer(serializers.Serializer):
     email = serializers.EmailField()
     pdf_base64 = serializers.CharField()
     mensaje = serializers.CharField(required=False, allow_blank=True)
+
+
+# ===== Clientes (base alimentada por las facturas) =====
+
+class ClienteSerializer(serializers.ModelSerializer):
+    """Cliente de la base, para el autocompletado del formulario de facturas."""
+
+    class Meta:
+        model = Cliente
+        fields = (
+            'id', 'nombre', 'doc_tipo', 'doc_numero', 'condicion', 'telefono',
+            'creado', 'actualizado',
+        )
+        read_only_fields = fields

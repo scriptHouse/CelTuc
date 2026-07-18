@@ -196,6 +196,9 @@ class Comprobante(ModeloBase):
         choices=CondicionReceptor.choices,
         default=CondicionReceptor.CONSUMIDOR_FINAL,
     )
+    # Telefono/celular del cliente. Dato INTERNO (no se manda a ARCA): sirve para
+    # el contacto y para ir armando la base de clientes (ver `Cliente`).
+    cliente_telefono = models.CharField('telefono del cliente', max_length=30, blank=True)
 
     fecha = models.DateField('fecha de emision', default=timezone.localdate)
     vencimiento = models.DateField('vencimiento de pago', null=True, blank=True)
@@ -241,6 +244,53 @@ class Comprobante(ModeloBase):
     def numero_formateado(self) -> str:
         """Numero con formato AFIP: 0001-00000007."""
         return f'{self.punto_venta:04d}-{self.numero:08d}'
+
+
+class Cliente(ModeloBase):
+    """Cliente del negocio, alimentado con los datos cargados en las facturas.
+
+    No se cargan a mano: cada vez que se emite un comprobante se crea o actualiza
+    el cliente con lo que se puso en la factura, armando una base reutilizable
+    (para autocompletar la proxima factura del mismo cliente). Se identifica por
+    numero de documento y, si no hay (Consumidor Final), por telefono; si no hay
+    ninguno de los dos, no se registra (no habria como reconocerlo despues).
+
+    Los campos espejan a los del receptor del comprobante.
+    """
+
+    nombre = models.CharField('nombre / razon social', max_length=160)
+    doc_tipo = models.CharField(
+        'tipo de documento', max_length=4,
+        choices=Comprobante.DocTipo.choices, default=Comprobante.DocTipo.CF,
+    )
+    doc_numero = models.CharField('numero de documento', max_length=11, blank=True)
+    condicion = models.CharField(
+        'condicion fiscal', max_length=30,
+        choices=Comprobante.CondicionReceptor.choices,
+        default=Comprobante.CondicionReceptor.CONSUMIDOR_FINAL,
+    )
+    telefono = models.CharField('telefono', max_length=30, blank=True)
+
+    # creado / actualizado / *_por / borrado* los aporta ModeloBase.
+
+    class Meta:
+        db_table = 'facturacion_clientes'
+        verbose_name = 'cliente'
+        verbose_name_plural = 'clientes'
+        ordering = ('nombre',)
+        constraints = [
+            # Un documento identifica a un unico cliente vivo. El dedup por
+            # telefono (para los sin documento) se maneja en la logica de alta,
+            # porque su unicidad depende de que el documento este vacio.
+            models.UniqueConstraint(
+                fields=('doc_numero',),
+                condition=models.Q(borrado=False) & ~models.Q(doc_numero=''),
+                name='uq_cliente_doc_vivo',
+            ),
+        ]
+
+    def __str__(self):
+        return self.nombre
 
 
 class ItemComprobante(models.Model):

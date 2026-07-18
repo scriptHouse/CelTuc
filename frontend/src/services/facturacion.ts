@@ -1,4 +1,4 @@
-import type { Comprobante, Emisor, EstadoCobro, ItemComprobante } from '@/types'
+import type { Cliente, Comprobante, Emisor, EstadoCobro, ItemComprobante } from '@/types'
 import { api } from '@/lib/api'
 import { useAuth } from '@/store/auth'
 
@@ -75,6 +75,8 @@ export interface NuevoComprobante {
   cliente_doc_tipo: string
   cliente_doc_numero?: string
   cliente_condicion: string
+  /** Teléfono/celular del cliente (dato interno; alimenta la base de clientes). */
+  cliente_telefono?: string
   fecha?: string
   vencimiento?: string | null
   alicuota_iva?: number
@@ -101,6 +103,14 @@ export function cambiarEstadoCobro(id: number, estado: EstadoCobro): Promise<Com
 
 export function eliminarComprobante(id: number): Promise<void> {
   return api.del<void>(`/facturacion/comprobantes/${id}/`, token())
+}
+
+// ===== Clientes (base para autocompletar el formulario) =====
+
+/** Busca clientes por nombre, teléfono o documento (máx. 20). */
+export function buscarClientes(busqueda: string): Promise<Cliente[]> {
+  const query = busqueda.trim() ? `?buscar=${encodeURIComponent(busqueda.trim())}` : ''
+  return api.get<Cliente[]>(`/facturacion/clientes/${query}`, token())
 }
 
 /** Envía por email el PDF (ya generado en el front, en base64) de un comprobante. */

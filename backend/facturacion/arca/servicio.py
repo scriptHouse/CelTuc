@@ -92,6 +92,7 @@ def emitir(emisor, datos: dict, usuario=None):
             cliente_doc_tipo=doc_tipo,
             cliente_doc_numero=doc_numero,
             cliente_condicion=datos['cliente_condicion'],
+            cliente_telefono=(datos.get('cliente_telefono') or '').strip(),
             fecha=fecha,
             vencimiento=datos.get('vencimiento'),
             alicuota_iva=alicuota,

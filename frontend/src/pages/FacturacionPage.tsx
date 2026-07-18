@@ -9,10 +9,12 @@ import {
   FileText,
   Mail,
   Pencil,
+  Phone,
   Plus,
   PlugZap,
   QrCode,
   ReceiptText,
+  Search,
   ShieldAlert,
   ShieldCheck,
   Trash2,
@@ -21,6 +23,7 @@ import {
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type {
+  Cliente,
   Comprobante,
   CondicionEmisor,
   CondicionFiscal,
@@ -30,6 +33,7 @@ import type {
 } from '@/types'
 import {
   actualizarEmisor,
+  buscarClientes,
   cambiarEstadoCobro,
   crearEmisor,
   eliminarComprobante,
@@ -607,6 +611,7 @@ function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void 
                 label={c.cliente_doc_tipo ? DOC_LABEL[c.cliente_doc_tipo] : 'Documento'}
                 value={c.cliente_doc_numero || '—'}
               />
+              <Dato label="Teléfono" value={c.cliente_telefono || '—'} />
               <Dato label="Estado" value={<FacturaEstadoBadge estado={estadoComprobante(c)} />} />
               <Dato label="Emisión" value={fecha(c.fecha)} />
               <Dato label="Vencimiento" value={c.vencimiento ? fecha(c.vencimiento) : '—'} />
@@ -751,6 +756,21 @@ function NuevaFacturaModal({
   const [observaciones, setObservaciones] = useState('')
   const [items, setItems] = useState<BorradorItem[]>([])
   const [sucursalStock, setSucursalStock] = useState('')
+  const [telefono, setTelefono] = useState('')
+
+  // Autocompletado de clientes: al escribir el nombre se busca en la base (por
+  // nombre, teléfono o documento) y se puede precargar un cliente ya guardado.
+  const [sugerenciasAbiertas, setSugerenciasAbiertas] = useState(false)
+  const [busquedaCliente, setBusquedaCliente] = useState('')
+  useEffect(() => {
+    const id = setTimeout(() => setBusquedaCliente(nombre.trim()), 250)
+    return () => clearTimeout(id)
+  }, [nombre])
+  const { data: sugerenciasClientes = [] } = useQuery({
+    queryKey: ['fact-clientes', busquedaCliente],
+    queryFn: () => buscarClientes(busquedaCliente),
+    enabled: open && sugerenciasAbiertas && busquedaCliente.length >= 2,
+  })
 
   // Sucursales del Inventario: si la cuenta no tiene permiso (403) el selector
   // de stock directamente no se muestra y la factura sale como siempre.
@@ -782,6 +802,8 @@ function NuevaFacturaModal({
     setObservaciones('')
     setItems([{ key: nextKey(), descripcion: '', cantidad: 1, precioUnitario: 0 }])
     setSucursalStock('')
+    setTelefono('')
+    setSugerenciasAbiertas(false)
   }, [open, emisor])
 
   const tipo = tipoComprobante(emisor.condicion, condicion)
@@ -850,6 +872,7 @@ function NuevaFacturaModal({
       cliente_doc_tipo: docTipo,
       cliente_doc_numero: docNumero.replace(/\D/g, ''),
       cliente_condicion: condicion,
+      cliente_telefono: telefono.trim() || undefined,
       fecha: fechaEmision,
       vencimiento: vencimiento || null,
       observaciones: observaciones.trim() || undefined,
@@ -857,6 +880,20 @@ function NuevaFacturaModal({
       items: validos,
       sucursal_stock: sucursalStock ? Number(sucursalStock) : undefined,
     })
+  }
+
+  function elegirCliente(c: Cliente) {
+    // Precarga los datos del cliente guardado, respetando lo que este emisor
+    // puede facturar (condición/tipo de documento válidos).
+    setNombre(c.nombre)
+    const condsValidas = condicionesClientePara(emisor.condicion)
+    const cond = condsValidas.includes(c.condicion) ? c.condicion : condicion
+    setCondicion(cond)
+    const tipos = docTiposPara(cond)
+    setDocTipo(tipos.includes(c.doc_tipo) ? c.doc_tipo : tipos[0])
+    setDocNumero(c.doc_numero || '')
+    setTelefono(c.telefono || '')
+    setSugerenciasAbiertas(false)
   }
 
   function handleDocChange(value: string) {
@@ -892,8 +929,68 @@ function NuevaFacturaModal({
         <section className="space-y-3">
           <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-400">Cliente</h3>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Campo label="Nombre / razón social">
-              <Input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Juan Pérez" />
+            <div className="sm:col-span-2">
+              <Campo label="Nombre / razón social">
+                <div className="relative">
+                  <Input
+                    value={nombre}
+                    onChange={(e) => {
+                      setNombre(e.target.value)
+                      setSugerenciasAbiertas(true)
+                    }}
+                    onFocus={() => setSugerenciasAbiertas(true)}
+                    onBlur={() => setSugerenciasAbiertas(false)}
+                    placeholder="Juan Pérez"
+                    autoComplete="off"
+                  />
+                  {sugerenciasAbiertas && sugerenciasClientes.length > 0 && (
+                    <div
+                      onMouseDown={(e) => e.preventDefault()}
+                      className="ct-dropdown absolute left-0 right-0 z-40 mt-2 max-h-60 overflow-y-auto rounded-xl border border-line bg-surface p-1.5 shadow-[0_18px_50px_rgba(10,10,11,0.16)]"
+                    >
+                      <p className="flex items-center gap-1.5 px-2 py-1 text-[0.7rem] font-medium uppercase tracking-[0.12em] text-ink-400">
+                        <Search className="h-3 w-3" /> Clientes guardados
+                      </p>
+                      {sugerenciasClientes.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => elegirCliente(c)}
+                          className="flex w-full flex-col items-start gap-0.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-ink-50"
+                        >
+                          <span className="w-full truncate text-sm font-medium text-ink-900">{c.nombre}</span>
+                          <span className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-ink-400">
+                            {c.telefono && (
+                              <span className="inline-flex items-center gap-1">
+                                <Phone className="h-3 w-3" />
+                                {c.telefono}
+                              </span>
+                            )}
+                            {c.doc_numero && (
+                              <span>
+                                {DOC_LABEL[c.doc_tipo]} {c.doc_numero}
+                              </span>
+                            )}
+                            <span>{CONDICION_LABEL[c.condicion]}</span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </Campo>
+            </div>
+            <Campo label="Teléfono / celular">
+              <div className="relative">
+                <Phone className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
+                <Input
+                  value={telefono}
+                  onChange={(e) => setTelefono(e.target.value)}
+                  placeholder="381 555 1234"
+                  inputMode="tel"
+                  className="pl-10"
+                />
+              </div>
             </Campo>
             <Campo label="Condición fiscal">
               <Select

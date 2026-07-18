@@ -9,6 +9,7 @@
 import base64
 import logging
 
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
 from rest_framework.response import Response
@@ -19,11 +20,13 @@ from usuarios.permissions import LecturaConPermisoEscrituraSuperadmin
 
 from .arca import servicio
 from .arca.errores import ErrorARCA
+from .clientes import registrar_cliente_desde_comprobante
 from .email import EmailNoConfigurado, enviar_comprobante
-from .models import Comprobante, Emisor
+from .models import Cliente, Comprobante, Emisor
 from .permissions import PuedeFacturar
 from .serializers import (
     ActualizarComprobanteSerializer,
+    ClienteSerializer,
     ComprobanteDetailSerializer,
     ComprobanteListSerializer,
     CrearComprobanteSerializer,
@@ -32,6 +35,11 @@ from .serializers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _solo_digitos(valor: str) -> str:
+    import re
+    return re.sub(r'\D', '', valor or '')
 
 
 def _descontar_stock(comprobante, sucursal, items, productos, usuario):
@@ -156,6 +164,12 @@ class ComprobanteListCreateView(generics.ListCreateAPIView):
         # anula la emision ni se deja stock negativo.
         avisos_stock = _descontar_stock(comprobante, sucursal_stock, items_limpios,
                                         productos_stock, usuario)
+        # Alimenta la base de clientes con lo cargado en la factura. Es secundario:
+        # jamas puede voltear una emision ya autorizada (por eso el try/except).
+        try:
+            registrar_cliente_desde_comprobante(comprobante)
+        except Exception:
+            logger.exception('No se pudo registrar el cliente del comprobante %s', comprobante.pk)
         salida = ComprobanteDetailSerializer(comprobante, context=self.get_serializer_context())
         cuerpo = dict(salida.data)
         if avisos_stock:
@@ -217,3 +231,27 @@ class EnviarComprobanteEmailView(APIView):
                 status=status.HTTP_502_BAD_GATEWAY,
             )
         return Response({'detail': f'Factura enviada a {datos["email"]}.'})
+
+
+# ===== Clientes =====
+
+class ClienteListView(generics.ListAPIView):
+    """Base de clientes (para autocompletar el formulario de facturas).
+
+    Con `?buscar=` filtra por nombre, teléfono o documento (útil para el buscador
+    del formulario). Devuelve como máximo 20 resultados, ordenados por nombre.
+    """
+
+    serializer_class = ClienteSerializer
+    permission_classes = [PuedeFacturar]
+
+    def get_queryset(self):
+        qs = Cliente.objects.all()
+        buscar = (self.request.query_params.get('buscar') or '').strip()
+        if buscar:
+            filtro = Q(nombre__icontains=buscar) | Q(telefono__icontains=buscar)
+            digitos = _solo_digitos(buscar)
+            if digitos:
+                filtro |= Q(doc_numero__icontains=digitos) | Q(telefono__icontains=digitos)
+            qs = qs.filter(filtro)
+        return qs[:20]

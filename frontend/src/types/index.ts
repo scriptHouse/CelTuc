@@ -191,6 +191,8 @@ export interface Comprobante {
   cliente_doc_tipo?: DocTipo
   cliente_doc_numero?: string
   cliente_condicion: CondicionFiscal
+  /** Teléfono/celular del cliente (dato interno, no fiscal). */
+  cliente_telefono?: string
   fecha: string
   vencimiento: string | null
   alicuota_iva?: number
@@ -207,6 +209,18 @@ export interface Comprobante {
   observaciones?: string
   items?: ItemComprobante[]
   creado?: string
+}
+
+/** Cliente de la base (se arma solo con los datos cargados en las facturas). */
+export interface Cliente {
+  id: number
+  nombre: string
+  doc_tipo: DocTipo
+  doc_numero: string
+  condicion: CondicionFiscal
+  telefono: string
+  creado?: string // ISO
+  actualizado?: string // ISO
 }
 
 // ===== Empleados (backend) =====
