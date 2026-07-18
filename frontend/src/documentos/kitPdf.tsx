@@ -12,6 +12,36 @@ import { BOX, FRAME, INK, STD_CONTENT_W, STD_PAD, STD_W, pt, type Run } from './
 export const REG = 'Helvetica'
 export const BOLD = 'Helvetica-Bold'
 
+/**
+ * Tamaño de página (en pt) con la proporción ISO √2 —la misma de A4 y A5— que
+ * contiene un contenido de `w × h` con un margen mínimo `m` alrededor.
+ *
+ * Como A4 y A5 comparten exactamente esta proporción (A5 es una A4 partida al
+ * medio), un PDF con esta página sale idéntico y sin deformarse en ambos
+ * tamaños: alcanza con imprimir "Ajustar a la página". Elige orientación
+ * vertical u horizontal según la forma del contenido.
+ */
+export function paginaISO(w: number, h: number, m: number): [number, number] {
+  const SQRT2 = Math.SQRT2
+  const minW = w + 2 * m
+  const minH = h + 2 * m
+  if (w >= h) {
+    // Apaisado: ancho / alto = √2
+    const pageH = Math.max(minH, minW / SQRT2)
+    return [pageH * SQRT2, pageH]
+  }
+  // Vertical: alto / ancho = √2
+  const pageW = Math.max(minW, minH / SQRT2)
+  return [pageW, pageW * SQRT2]
+}
+
+/** Estilo de página que centra el contenido dentro de la hoja ISO. */
+export const PAGINA_ISO_STYLE = {
+  backgroundColor: '#fff',
+  justifyContent: 'center' as const,
+  alignItems: 'center' as const,
+}
+
 const s = StyleSheet.create({
   paper: { borderWidth: FRAME, borderColor: INK, color: INK, fontFamily: REG },
   title: {
@@ -161,7 +191,7 @@ export function PdfDocShell({
   const M = 28
   return (
     <Document title={`${titulo} — CelTuc`} author="CelTuc">
-      <Page size={[STD_W + M * 2, height + M * 2]} style={{ backgroundColor: '#fff', padding: M }}>
+      <Page size={paginaISO(STD_W, height, M)} style={PAGINA_ISO_STYLE}>
         <PdfPaper width={STD_W} height={height}>
           <PdfTitle height={20} fontSize={pt(10)}>
             {titulo}

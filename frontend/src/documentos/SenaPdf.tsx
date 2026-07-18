@@ -1,6 +1,6 @@
 import { Document, Image, Page, Text, View } from '@react-pdf/renderer'
 import type { ReactNode } from 'react'
-import { BOLD, PdfLine, PdfPaper } from './kitPdf'
+import { BOLD, PAGINA_ISO_STYLE, PdfLine, PdfPaper, paginaISO } from './kitPdf'
 import { BOX, INK, pt } from './kit'
 import { LOGO_CELTUC } from './assets'
 import { SENA, SENA_H, SENA_W, type SenaData } from './senaContent'
@@ -10,7 +10,7 @@ const M = 28
 export function SenaPdf({ datos, direccion = SENA.direccion }: { datos: SenaData; direccion?: string }) {
   return (
     <Document title="Comprobante de seña — CelTuc" author="CelTuc">
-      <Page size={[SENA_W + M * 2, SENA_H + M * 2]} style={{ backgroundColor: '#fff', padding: M }}>
+      <Page size={paginaISO(SENA_W, SENA_H, M)} style={PAGINA_ISO_STYLE}>
         <PdfPaper width={SENA_W} height={SENA_H}>
           <View style={{ flex: 1, padding: '7 16 7 21' }}>
             {/* Encabezado */}

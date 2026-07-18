@@ -1,5 +1,5 @@
 import { Document, Image, Page, Text, View } from '@react-pdf/renderer'
-import { BOLD, PdfBody, PdfGarantia, PdfPaper, PdfTitle } from './kitPdf'
+import { BOLD, PAGINA_ISO_STYLE, PdfBody, PdfGarantia, PdfPaper, PdfTitle, paginaISO } from './kitPdf'
 import { pt } from './kit'
 import { LOGO_CELTUC, ICON_FACEBOOK, ICON_INSTAGRAM } from './assets'
 import { EMPRESA } from './content'
@@ -10,7 +10,7 @@ const M = 28
 export function GarantiaAccPdf({ direccion = EMPRESA.direccion }: { datos: GAccData; direccion?: string }) {
   return (
     <Document title={`${GACC_TITULO} — CelTuc`} author="CelTuc">
-      <Page size={[GACC_W + M * 2, GACC_H + M * 2]} style={{ backgroundColor: '#fff', padding: M }}>
+      <Page size={paginaISO(GACC_W, GACC_H, M)} style={PAGINA_ISO_STYLE}>
         <PdfPaper width={GACC_W} height={GACC_H}>
           <PdfTitle>{GACC_TITULO}</PdfTitle>
           <PdfBody padL={14} padR={14}>

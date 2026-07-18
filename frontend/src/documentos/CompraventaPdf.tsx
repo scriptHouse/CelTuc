@@ -1,5 +1,5 @@
 import { Document, Page, Text, View } from '@react-pdf/renderer'
-import { BOLD, PdfBody, PdfCtHeader, PdfPaper, PdfTitle, REG } from './kitPdf'
+import { BOLD, PAGINA_ISO_STYLE, PdfBody, PdfCtHeader, PdfPaper, PdfTitle, REG, paginaISO } from './kitPdf'
 import { INK, STD_CONTENT_W, STD_PAD, STD_W, pt } from './kit'
 import {
   CV_CARACTERISTICAS,
@@ -27,7 +27,7 @@ const SIGN_GAP = STD_CONTENT_W - SIGN_COL * 2
 export function CompraventaPdf({ datos, direccion }: { datos: CompraventaData; direccion?: string }) {
   return (
     <Document title={`${CV_TITULO} — CelTuc`} author="CelTuc">
-      <Page size={[STD_W + M * 2, CV_H + M * 2]} style={{ backgroundColor: '#fff', padding: M }}>
+      <Page size={paginaISO(STD_W, CV_H, M)} style={PAGINA_ISO_STYLE}>
         <PdfPaper width={STD_W} height={CV_H}>
           <PdfTitle height={20} fontSize={pt(10)}>
             {CV_TITULO}
