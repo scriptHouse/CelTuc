@@ -111,6 +111,24 @@ export function ProductosPage() {
   }, [categorias])
   const categoriaPorId = useMemo(() => new Map(categorias.map((c) => [c.id, c])), [categorias])
 
+  // Resumen de las categorías con descuento cash propio distinto del general
+  // (antes era un texto fijo «auriculares y smartwatch −30 %»). Agrupa por %:
+  // «Auriculares, Smartwatch −30 %».
+  const excepcionesCash = useMemo(() => {
+    if (!config) return ''
+    const general = Number(config.descuento_cash_pct)
+    const porPct = new Map<number, string[]>()
+    for (const c of categorias) {
+      if (!c.activo || !c.muestra_cash || c.descuento_cash_pct === null) continue
+      const pct = Number(c.descuento_cash_pct)
+      if (pct === general) continue
+      porPct.set(pct, [...(porPct.get(pct) ?? []), c.nombre])
+    }
+    return [...porPct.entries()]
+      .map(([pct, nombres]) => `${nombres.join(', ')} −${num(pct)} %`)
+      .join(' · ')
+  }, [categorias, config])
+
   const query = busqueda.trim()
   const filtrando = Boolean(query) || Boolean(filtroMarca) || Boolean(filtroCalidad)
 
@@ -258,7 +276,9 @@ export function ProductosPage() {
                 </p>
                 <p className="tnum">
                   Cash <b className="text-ink-950">−{num(Number(config.descuento_cash_pct))} %</b>
-                  <span className="text-xs text-ink-400"> (auriculares y smartwatch −30 %)</span>
+                  {excepcionesCash && (
+                    <span className="text-xs text-ink-400"> ({excepcionesCash})</span>
+                  )}
                 </p>
                 <p className="text-xs leading-relaxed text-ink-400">
                   Es el mismo dólar de Service: cambiarlo actualiza las dos listas

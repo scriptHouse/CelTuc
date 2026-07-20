@@ -125,6 +125,23 @@ export function PreciosServicePage() {
 
   const query = busqueda.trim()
 
+  // Resumen de las secciones con descuento cash propio distinto del general
+  // (promos tipo «Tapa trasera −30 %»), agrupadas por %.
+  const excepcionesCash = useMemo(() => {
+    if (!config) return ''
+    const general = Number(config.descuento_cash_pct)
+    const porPct = new Map<number, string[]>()
+    for (const s of secciones) {
+      if (!s.activo || s.descuento_cash_pct === null) continue
+      const pct = Number(s.descuento_cash_pct)
+      if (pct === general) continue
+      porPct.set(pct, [...(porPct.get(pct) ?? []), s.nombre])
+    }
+    return [...porPct.entries()]
+      .map(([pct, nombres]) => `${nombres.join(', ')} −${num(pct)} %`)
+      .join(' · ')
+  }, [secciones, config])
+
   const dispositivosActivos = useMemo(
     () =>
       dispositivos
@@ -256,7 +273,9 @@ export function PreciosServicePage() {
                 </p>
                 <p className="tnum">
                   Cash <b className="text-ink-950">−{num(Number(config.descuento_cash_pct))} %</b>
-                  <span className="text-xs text-ink-400"> sobre el precio de lista</span>
+                  <span className="text-xs text-ink-400">
+                    {' '}sobre el precio de lista{excepcionesCash && ` (${excepcionesCash})`}
+                  </span>
                 </p>
                 <p className="text-xs leading-relaxed text-ink-400">
                   Los pesos salen del dólar y se redondean para arriba

@@ -10,6 +10,7 @@ from .models import (
     CategoriaProducto,
     ConfiguracionProductos,
     Producto,
+    resolver_descuento_cash,
     resolver_precio_producto,
 )
 from .serializers import CategoriaProductoSerializer
@@ -49,6 +50,20 @@ class DerivacionProductosTests(TestCase):
         # Xiaomi Earphones USB-C: 17.34 -> 12.14 (30 % off, celda D83).
         e = self._efectivo('Auriculares', 'Xiaomi Earphones USB-C')
         self.assertEqual(e['cash_usd'], Decimal('12.14'))
+
+    def test_subgrupo_hereda_el_descuento_de_la_madre(self):
+        cables = CategoriaProducto.objects.get(nombre='Cables', padre__isnull=True)
+        hija = cables.hijas.first()
+        # Sin valores propios cae al general (20 %).
+        self.assertEqual(resolver_descuento_cash(hija, self.config), Decimal('20'))
+        # La madre define 30 %: el subgrupo la sigue.
+        cables.descuento_cash_pct = Decimal('30')
+        cables.save(update_fields=['descuento_cash_pct'])
+        hija.refresh_from_db()
+        self.assertEqual(resolver_descuento_cash(hija, self.config), Decimal('30'))
+        # Un % propio del subgrupo pisa al de la madre.
+        hija.descuento_cash_pct = Decimal('10')
+        self.assertEqual(resolver_descuento_cash(hija, self.config), Decimal('10'))
 
     def test_samsung_sin_cash_y_redondeo_1000(self):
         e = self._efectivo('Samsung', 'S25 FE 8GB/256GB')

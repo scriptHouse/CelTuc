@@ -29,7 +29,7 @@ class _BaseProductos:
 
 
 def _productos_queryset():
-    return Producto.objects.select_related('categoria').prefetch_related('dispositivos')
+    return Producto.objects.select_related('categoria__padre').prefetch_related('dispositivos')
 
 
 class ConfiguracionProductosView(_BaseProductos, AuditoriaMixin, generics.RetrieveUpdateAPIView):

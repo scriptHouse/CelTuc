@@ -35,6 +35,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { AyudaInfo } from '@/components/ui/AyudaInfo'
 import { AyudaServiceManager } from '@/components/AyudaContenidos'
 import { GestorDolar } from '@/components/GestorDolar'
+import { DescuentoCashEditor, type FilaDescuento } from '@/components/DescuentoCashEditor'
 import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
 
@@ -121,6 +122,21 @@ export function PreciosServiceManager({ open, onClose }: { open: boolean; onClos
   )
   const seleccionada = ordenadas.find((s) => s.id === seccionId) ?? ordenadas[0]
 
+  // Filas de la tarjeta «Descuento cash»: cada sección con el % que le aplica
+  // hoy (propio, o el general).
+  const filasDescuento = useMemo<FilaDescuento[]>(() => {
+    if (!config) return []
+    const general = Number(config.descuento_cash_pct)
+    return ordenadas.map((s) => ({
+      id: s.id,
+      nombre: s.nombre,
+      nivel: 0 as const,
+      propio: s.descuento_cash_pct,
+      efectivo: Number(s.descuento_cash_pct ?? general),
+      origen: s.descuento_cash_pct !== null ? '' : 'general',
+    }))
+  }, [ordenadas, config])
+
   return (
     <Modal open={open} onClose={onClose} size="xl">
       <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-4">
@@ -183,6 +199,13 @@ export function PreciosServiceManager({ open, onClose }: { open: boolean; onClos
           <>
             <GestorDolar />
             <ConfigEditor config={config} onListo={invalidar} />
+            <DescuentoCashEditor
+              general={Number(config.descuento_cash_pct)}
+              filas={filasDescuento}
+              guardarGeneral={(pct) => actualizarConfiguracion({ descuento_cash_pct: pct })}
+              guardarFila={(id, pct) => actualizarSeccion(id, { descuento_cash_pct: pct })}
+              onListo={invalidar}
+            />
 
             {/* Selector de sección */}
             <div>
@@ -269,34 +292,21 @@ function ConfigEditor({
   onListo: () => void
 }) {
   const toast = useToast()
-  const [descuento, setDescuento] = useState(aTexto(config.descuento_cash_pct))
   const [redondeo, setRedondeo] = useState(aTexto(config.redondeo_ars))
 
   useEffect(() => {
-    setDescuento(aTexto(config.descuento_cash_pct))
     setRedondeo(aTexto(config.redondeo_ars))
   }, [config])
 
-  const sucio =
-    descuento !== aTexto(config.descuento_cash_pct) ||
-    redondeo !== aTexto(config.redondeo_ars)
+  const sucio = redondeo !== aTexto(config.redondeo_ars)
 
   const guardar = useMutation({
     mutationFn: () => {
-      const valores = {
-        descuento_cash_pct: aNumero(descuento),
-        redondeo_ars: aNumero(redondeo),
-      }
-      if (valores.descuento_cash_pct === null || valores.descuento_cash_pct < 0 || valores.descuento_cash_pct > 100) {
-        throw new ApiError(0, 'El descuento tiene que estar entre 0 y 100.', null)
-      }
-      if (valores.redondeo_ars === null || valores.redondeo_ars < 1) {
+      const valor = aNumero(redondeo)
+      if (valor === null || valor < 1) {
         throw new ApiError(0, 'Poné un redondeo válido (ej: 1000).', null)
       }
-      return actualizarConfiguracion({
-        descuento_cash_pct: valores.descuento_cash_pct,
-        redondeo_ars: Math.trunc(valores.redondeo_ars),
-      })
+      return actualizarConfiguracion({ redondeo_ars: Math.trunc(valor) })
     },
     onSuccess: () => {
       toast.success('Parámetros guardados', 'Toda la lista derivada quedó recalculada.')
@@ -311,12 +321,11 @@ function ConfigEditor({
         <Settings2 className="h-3.5 w-3.5" /> Parámetros de la lista
       </p>
       <div className="grid grid-cols-2 gap-2">
-        <CampoNumero etiqueta="Desc. cash" valor={descuento} onChange={setDescuento} sufijo="%" />
         <CampoNumero etiqueta="Redondeo $" valor={redondeo} onChange={setRedondeo} />
       </div>
       <div className="mt-2.5 flex items-center justify-between gap-3">
         <p className="text-xs leading-relaxed text-ink-400">
-          El dólar se cambia arriba, en el Gestor de dólar (compartido con Productos).
+          El dólar se cambia arriba (compartido con Productos); el descuento cash, en su tarjeta.
         </p>
         <Button size="sm" onClick={() => guardar.mutate()} disabled={!sucio || guardar.isPending}>
           {guardar.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Guardar'}
@@ -515,7 +524,6 @@ function SeccionForm({
 
   const [nombre, setNombre] = useState(seccion?.nombre ?? '')
   const [nota, setNota] = useState(seccion?.nota ?? '')
-  const [descuento, setDescuento] = useState(aTexto(seccion?.descuento_cash_pct ?? null))
   const [variantes, setVariantes] = useState<VarianteDraft[]>(() =>
     modoCreacion ? [{ key: claveRef.current--, nombre: 'Estándar' }] : aDrafts(seccion),
   )
@@ -524,7 +532,6 @@ function SeccionForm({
     if (!modoCreacion) {
       setNombre(seccion?.nombre ?? '')
       setNota(seccion?.nota ?? '')
-      setDescuento(aTexto(seccion?.descuento_cash_pct ?? null))
       setVariantes(aDrafts(seccion))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -535,7 +542,6 @@ function SeccionForm({
     modoCreacion ||
     nombre.trim() !== (seccion?.nombre ?? '') ||
     nota.trim() !== (seccion?.nota ?? '') ||
-    descuento !== aTexto(seccion?.descuento_cash_pct ?? null) ||
     firma(variantes) !== firma(aDrafts(seccion))
 
   const guardar = useMutation({
@@ -567,12 +573,6 @@ function SeccionForm({
       toast.error('Cada variante necesita un nombre (y tiene que quedar al menos una)')
       return
     }
-    const descuentoValor = descuento.trim() ? aNumero(descuento) : null
-    if (descuento.trim() && (descuentoValor === null || descuentoValor < 0 || descuentoValor > 100)) {
-      toast.error('El descuento propio tiene que estar entre 0 y 100 (o vacío para usar el global)')
-      return
-    }
-
     const eliminadas = (seccion?.variantes ?? []).filter(
       (original) => !limpias.some((v) => v.id === original.id),
     )
@@ -589,7 +589,6 @@ function SeccionForm({
     guardar.mutate({
       nombre: nombre.trim(),
       nota: nota.trim(),
-      descuento_cash_pct: descuentoValor,
       ...(modoCreacion ? { orden: ordenSiguiente } : {}),
       variantes: limpias.map((v, i) => ({ ...(v.id ? { id: v.id } : {}), nombre: v.nombre, orden: i })),
     })
@@ -621,16 +620,6 @@ function SeccionForm({
         rows={2}
         className="mt-2.5 w-full rounded-xl border border-line-strong bg-surface px-3.5 py-2.5 text-sm text-ink-900 placeholder:text-ink-400 transition-[border-color,box-shadow] duration-150 focus:border-ink-900 focus:outline-none focus:ring-2 focus:ring-ink-900/12"
       />
-      <div className="mt-2.5 w-40">
-        <CampoNumero
-          etiqueta="Desc. cash propio"
-          valor={descuento}
-          onChange={setDescuento}
-          sufijo="%"
-          placeholder="global"
-        />
-      </div>
-
       <div className="mt-3.5">
         <p className="mb-1.5 px-0.5 text-[0.7rem] font-medium uppercase tracking-[0.08em] text-ink-400">
           Variantes (calidades)

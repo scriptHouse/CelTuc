@@ -32,6 +32,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { AyudaInfo } from '@/components/ui/AyudaInfo'
 import { AyudaProductosManager } from '@/components/AyudaContenidos'
 import { GestorDolar } from '@/components/GestorDolar'
+import { DescuentoCashEditor, type FilaDescuento } from '@/components/DescuentoCashEditor'
 import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
 
@@ -186,6 +187,33 @@ export function ProductosManager({ open, onClose }: { open: boolean; onClose: ()
   }, [categorias])
   const seleccionada = ordenadas.find((c) => c.id === categoriaId) ?? ordenadas[0]
 
+  // Filas de la tarjeta «Descuento cash»: cada categoría con el % que le aplica
+  // hoy (propio, o el de la madre, o el general). Las que no muestran precio
+  // cash (Samsung/Apple: lista + cuotas) no participan.
+  const filasDescuento = useMemo<FilaDescuento[]>(() => {
+    if (!config) return []
+    const general = Number(config.descuento_cash_pct)
+    return ordenadas
+      .filter((c) => c.muestra_cash)
+      .map((c) => {
+        const madre = c.padre !== null ? porId.get(c.padre) : undefined
+        const heredado = madre?.descuento_cash_pct ?? null
+        return {
+          id: c.id,
+          nombre: c.nombre,
+          nivel: c.padre !== null ? (1 as const) : (0 as const),
+          propio: c.descuento_cash_pct,
+          efectivo: Number(c.descuento_cash_pct ?? heredado ?? general),
+          origen:
+            c.descuento_cash_pct !== null
+              ? ''
+              : heredado !== null
+                ? `como ${madre!.nombre}`
+                : 'general',
+        }
+      })
+  }, [ordenadas, porId, config])
+
   const dispositivosActivos = useMemo(
     () =>
       dispositivos
@@ -233,6 +261,13 @@ export function ProductosManager({ open, onClose }: { open: boolean; onClose: ()
           <>
             <GestorDolar />
             <ConfigEditor config={config} onListo={invalidar} />
+            <DescuentoCashEditor
+              general={Number(config.descuento_cash_pct)}
+              filas={filasDescuento}
+              guardarGeneral={(pct) => actualizarConfiguracionCatalogo({ descuento_cash_pct: pct })}
+              guardarFila={(id, pct) => actualizarCategoria(id, { descuento_cash_pct: pct })}
+              onListo={invalidar}
+            />
 
             <div>
               <p className="mb-1.5 px-0.5 text-[0.7rem] font-medium uppercase tracking-[0.08em] text-ink-400">
@@ -322,40 +357,28 @@ function ConfigEditor({
   onListo: () => void
 }) {
   const toast = useToast()
-  const [descuento, setDescuento] = useState(aTexto(config.descuento_cash_pct))
   const [redLista, setRedLista] = useState(aTexto(config.redondeo_lista_ars))
   const [redCash, setRedCash] = useState(aTexto(config.redondeo_cash_ars))
 
   useEffect(() => {
-    setDescuento(aTexto(config.descuento_cash_pct))
     setRedLista(aTexto(config.redondeo_lista_ars))
     setRedCash(aTexto(config.redondeo_cash_ars))
   }, [config])
 
   const sucio =
-    descuento !== aTexto(config.descuento_cash_pct) ||
     redLista !== aTexto(config.redondeo_lista_ars) ||
     redCash !== aTexto(config.redondeo_cash_ars)
 
   const guardar = useMutation({
     mutationFn: () => {
       const valores = {
-        descuento_cash_pct: aNumero(descuento),
         redondeo_lista_ars: aNumero(redLista),
         redondeo_cash_ars: aNumero(redCash),
-      }
-      if (
-        valores.descuento_cash_pct === null ||
-        valores.descuento_cash_pct < 0 ||
-        valores.descuento_cash_pct > 100
-      ) {
-        throw new ApiError(0, 'El descuento tiene que estar entre 0 y 100.', null)
       }
       if (!valores.redondeo_lista_ars || !valores.redondeo_cash_ars) {
         throw new ApiError(0, 'Poné redondeos válidos (ej: 100 y 1000).', null)
       }
       return actualizarConfiguracionCatalogo({
-        descuento_cash_pct: valores.descuento_cash_pct,
         redondeo_lista_ars: Math.trunc(valores.redondeo_lista_ars),
         redondeo_cash_ars: Math.trunc(valores.redondeo_cash_ars),
       })
@@ -372,14 +395,13 @@ function ConfigEditor({
       <p className="mb-2.5 flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-ink-400">
         <Settings2 className="h-3.5 w-3.5" /> Parámetros del catálogo
       </p>
-      <div className="grid grid-cols-3 gap-2">
-        <CampoNumero etiqueta="Desc. cash" valor={descuento} onChange={setDescuento} sufijo="%" />
+      <div className="grid grid-cols-2 gap-2">
         <CampoNumero etiqueta="Redondeo lista $" valor={redLista} onChange={setRedLista} />
         <CampoNumero etiqueta="Redondeo cash $" valor={redCash} onChange={setRedCash} />
       </div>
       <div className="mt-2.5 flex items-center justify-between gap-3">
         <p className="text-xs leading-relaxed text-ink-400">
-          El dólar se cambia arriba, en el Gestor de dólar (compartido con Service).
+          El dólar se cambia arriba (compartido con Service); el descuento cash, en su tarjeta.
         </p>
         <Button size="sm" onClick={() => guardar.mutate()} disabled={!sucio || guardar.isPending}>
           {guardar.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Guardar'}
@@ -526,7 +548,6 @@ function CategoriaForm({
   const [nombre, setNombre] = useState(categoria?.nombre ?? '')
   const [nota, setNota] = useState(categoria?.nota ?? '')
   const [padre, setPadre] = useState(categoria?.padre !== null && categoria !== undefined ? String(categoria.padre) : '')
-  const [descuento, setDescuento] = useState(aTexto(categoria?.descuento_cash_pct ?? null))
   const [redondeo, setRedondeo] = useState(aTexto(categoria?.redondeo_ars ?? null))
   const [muestraCash, setMuestraCash] = useState(categoria?.muestra_cash ?? true)
   const [tarifa, setTarifa] = useState<'accesorios' | 'equipos'>(categoria?.tarifa_cuotas ?? 'accesorios')
@@ -539,7 +560,6 @@ function CategoriaForm({
     nombre.trim() !== (categoria?.nombre ?? '') ||
     nota.trim() !== (categoria?.nota ?? '') ||
     padre !== (categoria?.padre !== null && categoria !== undefined ? String(categoria.padre) : '') ||
-    descuento !== aTexto(categoria?.descuento_cash_pct ?? null) ||
     redondeo !== aTexto(categoria?.redondeo_ars ?? null) ||
     muestraCash !== (categoria?.muestra_cash ?? true) ||
     tarifa !== (categoria?.tarifa_cuotas ?? 'accesorios') ||
@@ -569,11 +589,6 @@ function CategoriaForm({
       toast.error('Poné el nombre de la categoría')
       return
     }
-    const descuentoValor = descuento.trim() ? aNumero(descuento) : null
-    if (descuento.trim() && (descuentoValor === null || descuentoValor < 0 || descuentoValor > 100)) {
-      toast.error('El descuento propio tiene que estar entre 0 y 100 (o vacío)')
-      return
-    }
     const redondeoValor = redondeo.trim() ? aNumero(redondeo) : null
     if (redondeo.trim() && (!redondeoValor || redondeoValor < 1)) {
       toast.error('El redondeo propio tiene que ser 1 o más (o vacío)')
@@ -583,7 +598,6 @@ function CategoriaForm({
       nombre: nombre.trim(),
       nota: nota.trim(),
       padre: padre ? Number(padre) : null,
-      descuento_cash_pct: descuentoValor,
       redondeo_ars: redondeoValor ? Math.trunc(redondeoValor) : null,
       muestra_cash: muestraCash,
       tarifa_cuotas: tarifa,
@@ -630,8 +644,7 @@ function CategoriaForm({
         className="mt-2.5 w-full rounded-xl border border-line-strong bg-surface px-3.5 py-2.5 text-sm text-ink-900 placeholder:text-ink-400 transition-[border-color,box-shadow] duration-150 focus:border-ink-900 focus:outline-none focus:ring-2 focus:ring-ink-900/12"
       />
 
-      <div className="mt-2.5 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <CampoNumero etiqueta="Desc. cash propio" valor={descuento} onChange={setDescuento} sufijo="%" placeholder="global" />
+      <div className="mt-2.5 grid grid-cols-2 gap-2 sm:grid-cols-3">
         <CampoNumero etiqueta="Redondeo propio $" valor={redondeo} onChange={setRedondeo} placeholder="global" />
         <div className="col-span-2">
           <span className="mb-1 block text-[0.68rem] font-medium uppercase tracking-[0.06em] text-ink-400">

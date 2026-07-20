@@ -58,7 +58,7 @@ export function AyudaProductosPagina() {
             ['Apple original / Calidad original / Original', 'La calidad de la pieza. "Calidad original" (CO) es compatible de primera línea; "Apple original" es pieza genuina.'],
             ['A pedido', 'No hay stock inmediato: se encarga con seña previa.'],
             ['Nuevo', 'Producto recién ingresado al catálogo.'],
-            ['Cash −30 %', 'Esa categoría tiene un descuento cash distinto del general (auriculares y smartwatch).'],
+            ['Cash −30 %', 'Esa categoría tiene un descuento cash propio, distinto del general. Los admins lo cambian desde Configurar → Descuento cash.'],
           ]}
         />
       </AyudaSeccion>

@@ -238,6 +238,18 @@ def _ceil_multiplo(valor, multiplo):
     return Decimal(math.ceil(Decimal(valor) / multiplo) * multiplo)
 
 
+def resolver_descuento_cash(categoria, config):
+    """Descuento cash efectivo de una categoria: propio, si no el de la madre,
+    si no el general. Asi un subgrupo sigue a su categoria madre salvo que
+    tenga un valor propio."""
+    descuento = categoria.descuento_cash_pct
+    if descuento is None and categoria.padre_id:
+        descuento = categoria.padre.descuento_cash_pct
+    if descuento is None:
+        descuento = config.descuento_cash_pct
+    return descuento
+
+
 def resolver_precio_producto(producto, config, categoria=None):
     """Los 4 precios efectivos de un producto (override si hay, formula si no).
 
@@ -246,9 +258,7 @@ def resolver_precio_producto(producto, config, categoria=None):
     explicito produce valor.
     """
     categoria = categoria or producto.categoria
-    descuento = categoria.descuento_cash_pct
-    if descuento is None:
-        descuento = config.descuento_cash_pct
+    descuento = resolver_descuento_cash(categoria, config)
     factor = (Decimal('100') - Decimal(descuento)) / Decimal('100')
     dolar = config.dolar
 
