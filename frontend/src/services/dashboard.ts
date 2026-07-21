@@ -2,8 +2,9 @@ import type { Cuenta, Factura } from '@/types'
 import { getDB, wait } from '@/lib/db'
 import { estadoEfectivo } from '@/lib/afip'
 import { listarEmpleados } from '@/services/empleados'
+import { listarComprobantes } from '@/services/facturacion'
 import { listarProductos as listarCatalogo } from '@/services/productos'
-import { listarStock, listarSucursales } from '@/services/inventario'
+import { listarStock, listarSucursales, listarVentas } from '@/services/inventario'
 
 export interface FacturaConCuenta extends Factura {
   cuenta?: Cuenta
@@ -40,6 +41,19 @@ export interface ResumenDashboard {
   empleados: {
     total: number
     conAcceso: number
+  }
+  /** Facturación REAL (ARCA) del mes en curso, separada por condición fiscal
+   * del emisor: A/B las emite un Responsable Inscripto y C un Monotributista. */
+  facturacionReal: {
+    riMes: number
+    riCount: number
+    monoMes: number
+    monoCount: number
+  }
+  /** Ventas de mostrador del mes cobradas por transferencia. */
+  transferencias: {
+    totalMes: number
+    operacionesMes: number
   }
 }
 
@@ -157,6 +171,41 @@ export async function obtenerResumen(): Promise<ResumenDashboard> {
     /* sin conexión / sin sesión: dejamos los contadores en 0 */
   }
 
+  // --- Facturación REAL (ARCA) del mes, por condición del emisor ---
+  // El tipo de comprobante delata quién lo emite: A/B = Responsable Inscripto,
+  // C = Monotributista. La fecha es 'yyyy-mm-dd', se compara por prefijo para
+  // no correrse un día por zona horaria. Sin permiso de facturación queda en 0.
+  const prefijoMes = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}`
+  const facturacionReal = { riMes: 0, riCount: 0, monoMes: 0, monoCount: 0 }
+  try {
+    const comprobantes = await listarComprobantes()
+    for (const c of comprobantes) {
+      if (!c.fecha.startsWith(prefijoMes)) continue
+      if (c.tipo === 'C') {
+        facturacionReal.monoMes += Number(c.total)
+        facturacionReal.monoCount += 1
+      } else {
+        facturacionReal.riMes += Number(c.total)
+        facturacionReal.riCount += 1
+      }
+    }
+  } catch {
+    /* sin permiso o sin conexión: contadores en 0 */
+  }
+
+  // --- Ventas de mostrador cobradas por transferencia (mes en curso) ---
+  const transferencias = { totalMes: 0, operacionesMes: 0 }
+  try {
+    const ventas = await listarVentas({ limite: 500 })
+    for (const v of ventas) {
+      if (v.forma_pago !== 'transferencia' || !mismoMes(v.creado, hoy)) continue
+      transferencias.totalMes += Number(v.total)
+      transferencias.operacionesMes += 1
+    }
+  } catch {
+    /* sin permiso o sin conexión: contadores en 0 */
+  }
+
   return {
     inventario,
     facturacion: {
@@ -170,5 +219,7 @@ export async function obtenerResumen(): Promise<ResumenDashboard> {
       serie,
     },
     empleados,
+    facturacionReal,
+    transferencias,
   }
 }

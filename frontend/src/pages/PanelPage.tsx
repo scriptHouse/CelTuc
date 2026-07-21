@@ -1,9 +1,12 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
+  ArrowRightLeft,
   Boxes,
+  Landmark,
   LayoutDashboard,
   PackageSearch,
+  Receipt,
   ReceiptText,
   RefreshCw,
   Users,
@@ -111,6 +114,46 @@ export function PanelPage() {
               value={num(data.empleados.total)}
               hint={`${data.empleados.conAcceso} con acceso`}
               icon={Users}
+            />
+          </div>
+
+          {/* Facturación real (ARCA) del mes por condición fiscal + transferencias */}
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+            <StatCard
+              className="ct-stagger-item"
+              style={ctStagger(4)}
+              label="Resp. Inscripto (mes)"
+              value={moneyCompact(data.facturacionReal.riMes)}
+              hint={
+                data.facturacionReal.riCount > 0
+                  ? `${num(data.facturacionReal.riCount)} facturas A/B`
+                  : 'Sin facturas A/B este mes'
+              }
+              icon={Landmark}
+            />
+            <StatCard
+              className="ct-stagger-item"
+              style={ctStagger(5)}
+              label="Monotributo (mes)"
+              value={moneyCompact(data.facturacionReal.monoMes)}
+              hint={
+                data.facturacionReal.monoCount > 0
+                  ? `${num(data.facturacionReal.monoCount)} facturas C`
+                  : 'Sin facturas C este mes'
+              }
+              icon={Receipt}
+            />
+            <StatCard
+              className="ct-stagger-item"
+              style={ctStagger(6)}
+              label="Transferencias (mes)"
+              value={moneyCompact(data.transferencias.totalMes)}
+              hint={
+                data.transferencias.operacionesMes > 0
+                  ? `${num(data.transferencias.operacionesMes)} ventas de mostrador`
+                  : 'Sin ventas por transferencia'
+              }
+              icon={ArrowRightLeft}
             />
           </div>
 
@@ -238,6 +281,15 @@ function PanelSkeleton() {
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="rounded-2xl border border-line bg-surface p-5">
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="mt-3 h-7 w-28" />
+            <Skeleton className="mt-2 h-3 w-20" />
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+        {Array.from({ length: 3 }).map((_, i) => (
           <div key={i} className="rounded-2xl border border-line bg-surface p-5">
             <Skeleton className="h-3 w-24" />
             <Skeleton className="mt-3 h-7 w-28" />
