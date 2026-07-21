@@ -3,7 +3,7 @@ from unfold.admin import ModelAdmin, TabularInline
 
 from comun.admin import ModeloBaseAdminMixin
 
-from .models import Cliente, Comprobante, Emisor, ItemComprobante, TicketAcceso
+from .models import Cliente, Comprobante, Emisor, ItemComprobante, LimiteMensual, TicketAcceso
 
 
 @admin.register(Emisor)
@@ -17,6 +17,17 @@ class EmisorAdmin(ModeloBaseAdminMixin, ModelAdmin):
     readonly_fields = (
         'tiene_credenciales', 'creado', 'actualizado', 'creado_por',
         'actualizado_por', 'fecha_borrado', 'borrado_por',
+    )
+    actions = ('restaurar',)
+
+
+@admin.register(LimiteMensual)
+class LimiteMensualAdmin(ModeloBaseAdminMixin, ModelAdmin):
+    list_display = ('emisor', 'anio', 'mes', 'monto', 'borrado', 'actualizado')
+    list_filter = ('emisor', 'anio', 'borrado')
+    readonly_fields = (
+        'creado', 'actualizado', 'creado_por', 'actualizado_por',
+        'fecha_borrado', 'borrado_por',
     )
     actions = ('restaurar',)
 

@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  AlertTriangle,
   Building2,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Download,
   Eye,
   FileText,
+  Gauge,
   Mail,
   Pencil,
   Phone,
@@ -39,11 +43,15 @@ import {
   eliminarComprobante,
   emitirComprobante,
   enviarComprobanteEmail,
+  guardarLimites,
   listarComprobantes,
   listarEmisores,
   obtenerComprobante,
+  obtenerLimites,
   probarConexion,
   type EmisorInput,
+  type LimiteExcedido,
+  type LimiteMes,
   type NuevoComprobante,
 } from '@/services/facturacion'
 import { listarProductos } from '@/services/productos'
@@ -56,7 +64,8 @@ import {
   IVA_RATE,
   tipoComprobante,
 } from '@/lib/afip'
-import { fecha, money, num, pad } from '@/lib/format'
+import { fecha, money, money0, num, pad } from '@/lib/format'
+import { ApiError } from '@/lib/api'
 import { cn, ctStagger } from '@/lib/utils'
 import { useAuth } from '@/store/auth'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -81,10 +90,25 @@ const DOC_LABEL: Record<DocTipo, string> = {
   CF: 'Consumidor Final',
 }
 
+const MESES = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+] as const
+
+function nombreMes(mes: number): string {
+  return MESES[mes - 1] ?? String(mes)
+}
+
 /** Tipos de documento válidos según la condición del cliente. */
 function docTiposPara(condicion: CondicionFiscal): DocTipo[] {
   if (condicion === 'consumidor_final') return ['CF', 'DNI', 'CUIT']
   return ['CUIT'] // Responsable Inscripto / Monotributo / Exento -> CUIT
+}
+
+/** Formatea un monto con separador de miles (1234567 → 1.234.567) al escribir. */
+function formatMiles(value: string): string {
+  const d = value.replace(/\D/g, '')
+  return d ? Number(d).toLocaleString('es-AR') : ''
 }
 
 /** Formatea un CUIT/CUIL como 20-14343433-6 a medida que se escribe. */
@@ -185,11 +209,24 @@ export function FacturacionPage() {
   const [facturaModal, setFacturaModal] = useState(false)
   const [emisorModal, setEmisorModal] = useState(false)
   const [emisorEdit, setEmisorEdit] = useState<Emisor | null>(null)
+  const [limitesModal, setLimitesModal] = useState(false)
   const [detalleId, setDetalleId] = useState<number | null>(null)
+
+  // Límite de facturación del mes en curso (para la barra de uso de la cuenta).
+  const hoyAR = hoyInput()
+  const anioActual = Number(hoyAR.slice(0, 4))
+  const mesActual = Number(hoyAR.slice(5, 7))
+  const { data: limitesAnio } = useQuery({
+    queryKey: ['fact-limites', emisorId, anioActual],
+    queryFn: () => obtenerLimites(emisorId as number, anioActual),
+    enabled: emisorId != null,
+  })
+  const limiteMesActual = limitesAnio?.limites.find((l) => l.mes === mesActual)
 
   const invalidarComprobantes = () => {
     queryClient.invalidateQueries({ queryKey: ['comprobantes'] })
     queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    queryClient.invalidateQueries({ queryKey: ['fact-limites'] })
   }
 
   const emitirMut = useMutation({
@@ -204,7 +241,52 @@ export function FacturacionPage() {
       // La factura salió igual: esto es solo lo que NO se pudo descontar.
       if (c.avisos_stock?.length) toast.info('Stock sin descontar', c.avisos_stock.join(' '))
     },
-    onError: (e: Error) => toast.error('No se pudo emitir', e.message),
+    onError: async (e: Error, variables) => {
+      // El backend avisa (409) ANTES de pedir el CAE si el mes queda pasado del
+      // tope. Se muestra el detalle y, si el usuario confirma, se emite igual.
+      const aviso = e instanceof ApiError && e.status === 409
+        ? (e.data as Partial<LimiteExcedido> | null)
+        : null
+      if (aviso?.codigo === 'limite_mensual_excedido') {
+        const ok = await confirm({
+          title: `Se supera el límite de ${aviso.mes_nombre ?? 'este mes'}`,
+          tone: 'warning',
+          icon: Gauge,
+          confirmLabel: 'Emitir de todas formas',
+          cancelLabel: 'No emitir',
+          description: (
+            <span className="block space-y-2.5">
+              <span className="block">
+                Esta factura pasa el <strong>límite de facturación mensual</strong> configurado
+                para la cuenta.
+              </span>
+              <span className="block space-y-1 rounded-xl bg-ink-50 px-3.5 py-2.5 text-left">
+                <span className="flex items-center justify-between gap-3">
+                  <span>Límite de {aviso.mes_nombre ?? 'el mes'}</span>
+                  <span className="tnum font-medium text-ink-900">{money(aviso.limite ?? 0)}</span>
+                </span>
+                <span className="flex items-center justify-between gap-3">
+                  <span>Ya facturado</span>
+                  <span className="tnum font-medium text-ink-900">{money(aviso.facturado ?? 0)}</span>
+                </span>
+                <span className="flex items-center justify-between gap-3">
+                  <span>Esta factura</span>
+                  <span className="tnum font-medium text-ink-900">{money(aviso.total_factura ?? 0)}</span>
+                </span>
+                <span className="flex items-center justify-between gap-3 border-t border-line pt-1.5 font-semibold text-ink-950">
+                  <span>Se pasa por</span>
+                  <span className="tnum">{money(aviso.excedente ?? 0)}</span>
+                </span>
+              </span>
+              <span className="block">¿Querés emitirla de todas formas?</span>
+            </span>
+          ),
+        })
+        if (ok) emitirMut.mutate({ ...variables, confirmar_limite: true })
+        return
+      }
+      toast.error('No se pudo emitir', e.message)
+    },
   })
 
   const emisorMut = useMutation({
@@ -383,40 +465,55 @@ export function FacturacionPage() {
 
           {/* Barra de estado del emisor seleccionado */}
           {emisor && (
-            <Card className="ct-rise mb-5 flex flex-col gap-3 p-3.5 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <Badge tone={emisor.produccion ? 'solid' : 'outline'}>
-                  {emisor.produccion ? 'Producción' : 'Homologación'}
-                </Badge>
-                {!emisor.activo && <Badge tone="outline">Inactivo</Badge>}
-                {emisor.tiene_credenciales ? (
-                  <span className="inline-flex items-center gap-1.5 font-medium text-ink-600">
-                    <ShieldCheck className="h-3.5 w-3.5" /> Credenciales cargadas
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1.5 font-medium text-ink-600">
-                    <ShieldAlert className="h-3.5 w-3.5" /> Faltan certificado y clave
-                  </span>
-                )}
-                <span className="tnum text-ink-400">CUIT {emisor.cuit}</span>
-              </div>
-              <div className="flex shrink-0 gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => probarMut.mutate(emisor.id)}
-                  disabled={probarMut.isPending}
-                >
-                  <PlugZap className="h-4 w-4" />
-                  {probarMut.isPending ? 'Probando…' : 'Probar conexión'}
-                </Button>
-                {soySuper && (
-                  <Button variant="outline" size="sm" onClick={abrirEditarCuenta}>
-                    <Pencil className="h-4 w-4" />
-                    Editar
+            <Card className="ct-rise mb-5 space-y-3 p-3.5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <Badge tone={emisor.produccion ? 'solid' : 'outline'}>
+                    {emisor.produccion ? 'Producción' : 'Homologación'}
+                  </Badge>
+                  {!emisor.activo && <Badge tone="outline">Inactivo</Badge>}
+                  {emisor.tiene_credenciales ? (
+                    <span className="inline-flex items-center gap-1.5 font-medium text-ink-600">
+                      <ShieldCheck className="h-3.5 w-3.5" /> Credenciales cargadas
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 font-medium text-ink-600">
+                      <ShieldAlert className="h-3.5 w-3.5" /> Faltan certificado y clave
+                    </span>
+                  )}
+                  <span className="tnum text-ink-400">CUIT {emisor.cuit}</span>
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => probarMut.mutate(emisor.id)}
+                    disabled={probarMut.isPending}
+                  >
+                    <PlugZap className="h-4 w-4" />
+                    {probarMut.isPending ? 'Probando…' : 'Probar conexión'}
                   </Button>
-                )}
+                  {soySuper && (
+                    <Button variant="outline" size="sm" onClick={() => setLimitesModal(true)}>
+                      <Gauge className="h-4 w-4" />
+                      Límites
+                    </Button>
+                  )}
+                  {soySuper && (
+                    <Button variant="outline" size="sm" onClick={abrirEditarCuenta}>
+                      <Pencil className="h-4 w-4" />
+                      Editar
+                    </Button>
+                  )}
+                </div>
               </div>
+              {limiteMesActual?.monto != null && (
+                <LimiteUsoBar
+                  mesNombre={nombreMes(mesActual)}
+                  limite={limiteMesActual.monto}
+                  facturado={limiteMesActual.facturado}
+                />
+              )}
             </Card>
           )}
         </>
@@ -508,9 +605,19 @@ export function FacturacionPage() {
           open={facturaModal}
           emisor={emisor}
           productos={productos}
+          limites={limitesAnio?.limites}
+          anioLimites={limitesAnio?.anio}
           saving={emitirMut.isPending}
           onClose={() => setFacturaModal(false)}
           onSubmit={(payload) => emitirMut.mutate({ ...payload, emisor: emisor.id })}
+        />
+      )}
+
+      {emisor && (
+        <LimitesModal
+          open={limitesModal}
+          emisor={emisor}
+          onClose={() => setLimitesModal(false)}
         />
       )}
 
@@ -734,6 +841,8 @@ function NuevaFacturaModal({
   open,
   emisor,
   productos,
+  limites,
+  anioLimites,
   saving,
   onClose,
   onSubmit,
@@ -741,6 +850,9 @@ function NuevaFacturaModal({
   open: boolean
   emisor: Emisor
   productos: { id: string; nombre: string; precio: number }[]
+  /** Límites mensuales del año en curso de la cuenta (para avisar antes de emitir). */
+  limites?: LimiteMes[]
+  anioLimites?: number
   saving: boolean
   onClose: () => void
   onSubmit: (payload: Omit<NuevoComprobante, 'emisor'>) => void
@@ -815,6 +927,17 @@ function NuevaFacturaModal({
       ),
     [items, tipo],
   )
+
+  // Aviso preventivo: si con este total el mes de la fecha de emisión queda
+  // pasado del límite de la cuenta, se avisa acá mismo (y al emitir el backend
+  // vuelve a chequear y pide confirmación).
+  const [anioFactura, mesFactura] = fechaEmision.split('-').map(Number)
+  const limiteMesFactura =
+    anioLimites === anioFactura ? limites?.find((l) => l.mes === mesFactura) : undefined
+  const superaLimite =
+    limiteMesFactura?.monto != null &&
+    totales.total > 0 &&
+    limiteMesFactura.facturado + totales.total > limiteMesFactura.monto
 
   const condicionOptions = condicionesClientePara(emisor.condicion).map((c) => ({
     value: c,
@@ -1141,6 +1264,18 @@ function NuevaFacturaModal({
           />
         </Campo>
 
+        {/* Aviso de límite mensual (control interno de la cuenta) */}
+        {superaLimite && limiteMesFactura?.monto != null && (
+          <div className="flex items-start gap-2.5 rounded-xl border border-ink-950 bg-ink-50 px-4 py-3 text-sm text-ink-800">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              <strong>Esta factura supera el límite mensual de la cuenta.</strong>{' '}
+              Límite de {nombreMes(mesFactura)}: {money(limiteMesFactura.monto)} · ya facturado{' '}
+              {money(limiteMesFactura.facturado)}. Al emitir se va a pedir confirmación.
+            </span>
+          </div>
+        )}
+
         {/* Totales */}
         <div className="ml-auto w-full max-w-xs space-y-1.5 text-sm">
           {tipo !== 'C' && (
@@ -1341,6 +1476,341 @@ function EmisorModal({
         <Button type="button" onClick={submit} disabled={saving}>
           {saving ? 'Guardando…' : edita ? 'Guardar cambios' : 'Crear cuenta'}
         </Button>
+      </div>
+    </Modal>
+  )
+}
+
+// ===== Límite de facturación mensual =====
+
+/** Barra de uso del límite del mes en curso (en la tarjeta de la cuenta). */
+function LimiteUsoBar({
+  mesNombre,
+  limite,
+  facturado,
+}: {
+  mesNombre: string
+  limite: number
+  facturado: number
+}) {
+  const pct = limite > 0 ? (facturado / limite) * 100 : 100
+  const excedido = facturado > limite
+  const cerca = !excedido && pct >= 80
+  return (
+    <div className="space-y-1.5 border-t border-line pt-3">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs">
+        <span className="flex items-center gap-1.5 font-medium text-ink-600">
+          <Gauge className="h-3.5 w-3.5" />
+          Límite de <span className="capitalize">{mesNombre}</span>
+          {excedido && (
+            <span className="inline-flex items-center gap-1 rounded-md bg-ink-950 px-1.5 py-0.5 text-[10px] font-semibold text-on-ink">
+              <AlertTriangle className="h-3 w-3" /> Superado
+            </span>
+          )}
+          {cerca && (
+            <span className="rounded-md border border-ink-950 px-1.5 py-0.5 text-[10px] font-semibold text-ink-900">
+              Cerca del tope
+            </span>
+          )}
+        </span>
+        <span className="tnum text-ink-500">
+          {money(facturado)} de {money(limite)} · {Math.round(pct)}%
+        </span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-ink-100">
+        <div
+          className={cn('h-full rounded-full transition-all duration-300', excedido ? 'bg-ink-950' : 'bg-ink-600')}
+          style={{ width: `${Math.min(100, pct)}%` }}
+        />
+      </div>
+      {excedido && (
+        <p className="text-xs text-ink-500">
+          Superado por {money(facturado - limite)}. Al emitir otra factura este mes se va a pedir confirmación.
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** Configura los topes mensuales de la cuenta: mes a mes o varios de una vez. */
+function LimitesModal({
+  open,
+  emisor,
+  onClose,
+}: {
+  open: boolean
+  emisor: Emisor
+  onClose: () => void
+}) {
+  const toast = useToast()
+  const queryClient = useQueryClient()
+  const hoy = hoyInput()
+  const anioActual = Number(hoy.slice(0, 4))
+  const mesActual = Number(hoy.slice(5, 7))
+
+  const [anio, setAnio] = useState(anioActual)
+  // Borradores por año: mes -> texto del input ('' = sin límite). Se guarda TODO
+  // lo editado, aunque se haya cambiado de año en el medio.
+  const [drafts, setDrafts] = useState<Record<number, Record<number, string>>>({})
+  const [montoLote, setMontoLote] = useState('')
+  const [desde, setDesde] = useState(mesActual)
+  const [hasta, setHasta] = useState(12)
+  const [guardando, setGuardando] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    setAnio(anioActual)
+    setDrafts({})
+    setMontoLote('')
+    setDesde(mesActual)
+    setHasta(12)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, emisor.id])
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['fact-limites', emisor.id, anio],
+    queryFn: () => obtenerLimites(emisor.id, anio),
+    enabled: open,
+  })
+
+  // Valores del año según el servidor, listos para editar. Se derivan directo
+  // de la query (nada de esperar un efecto: si los datos ya estaban cacheados
+  // por la página, igual quedan disponibles al abrir). Los inputs manejan pesos
+  // enteros con separador de miles, así que un monto con centavos se redondea.
+  const valoresBase = useMemo(() => {
+    if (!data || data.anio !== anio) return undefined
+    const delAnio: Record<number, string> = {}
+    for (const l of data.limites) delAnio[l.mes] = l.monto != null ? String(Math.round(l.monto)) : ''
+    return delAnio
+  }, [data, anio])
+
+  // Lo editado pisa a lo del servidor; sin ediciones se muestra la base.
+  const draftAnio = drafts[anio] ?? valoresBase
+  const facturadoPorMes = useMemo(
+    () => new Map((data?.limites ?? []).map((l) => [l.mes, l.facturado])),
+    [data],
+  )
+
+  function setMes(mes: number, valor: string) {
+    setDrafts((d) => ({
+      ...d,
+      [anio]: { ...(d[anio] ?? valoresBase ?? {}), [mes]: valor },
+    }))
+  }
+
+  function aplicarRango(a: number, b: number) {
+    if (!draftAnio) return
+    const [ini, fin] = a <= b ? [a, b] : [b, a]
+    setDrafts((d) => {
+      const delAnio = { ...(d[anio] ?? valoresBase ?? {}) }
+      for (let m = ini; m <= fin; m++) delAnio[m] = montoLote.trim()
+      return { ...d, [anio]: delAnio }
+    })
+  }
+
+  const mesOptions = MESES.map((nombre, i) => ({
+    value: String(i + 1),
+    label: nombre.charAt(0).toUpperCase() + nombre.slice(1),
+  }))
+
+  async function guardar() {
+    // Valida todos los borradores antes de mandar nada.
+    for (const meses of Object.values(drafts)) {
+      for (const valor of Object.values(meses)) {
+        if (valor.trim() === '') continue
+        const n = Number(valor)
+        if (!Number.isFinite(n) || n < 0) {
+          toast.error('Monto inválido', 'Revisá los montos: deben ser números positivos (o vacío para sin límite).')
+          return
+        }
+      }
+    }
+    setGuardando(true)
+    try {
+      for (const [anioStr, meses] of Object.entries(drafts)) {
+        const limites = Object.entries(meses).map(([mes, valor]) => ({
+          mes: Number(mes),
+          monto: valor.trim() === '' ? null : Number(valor),
+        }))
+        await guardarLimites(emisor.id, Number(anioStr), limites)
+      }
+      queryClient.invalidateQueries({ queryKey: ['fact-limites'] })
+      toast.success('Límites guardados', emisor.nombre)
+      onClose()
+    } catch (e) {
+      toast.error('No se pudieron guardar los límites', (e as Error).message)
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} size="lg">
+      <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-4">
+        <div>
+          <h2 className="text-lg font-semibold text-ink-950">Límites de facturación</h2>
+          <p className="text-xs text-ink-400">
+            {emisor.nombre} · tope mensual (del 1 al último día de cada mes). Es un control interno:
+            no afecta la emisión en ARCA.
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setAnio((a) => a - 1)}
+            aria-label="Año anterior"
+            className="grid h-8 w-8 place-items-center rounded-full text-ink-400 transition-colors hover:bg-ink-100 hover:text-ink-900"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <span className="tnum w-12 text-center text-sm font-semibold text-ink-950">{anio}</span>
+          <button
+            type="button"
+            onClick={() => setAnio((a) => a + 1)}
+            aria-label="Año siguiente"
+            className="grid h-8 w-8 place-items-center rounded-full text-ink-400 transition-colors hover:bg-ink-100 hover:text-ink-900"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-4 overflow-y-auto px-5 py-5">
+        {/* Carga en lote: un monto para varios meses de una vez */}
+        <section className="space-y-2.5 rounded-xl border border-line bg-ink-50/60 p-3.5">
+          <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-400">
+            Aplicar a varios meses de una vez
+          </h3>
+          <div className="grid gap-2.5 sm:grid-cols-[1fr_auto_auto_auto] sm:items-end">
+            <Campo label="Monto mensual">
+              <Input
+                value={formatMiles(montoLote)}
+                onChange={(e) => setMontoLote(e.target.value.replace(/\D/g, ''))}
+                placeholder="1.000.000"
+                inputMode="numeric"
+                className="tnum"
+              />
+            </Campo>
+            <Campo label="Desde">
+              <Select options={mesOptions} value={String(desde)} onChange={(v) => setDesde(Number(v))} />
+            </Campo>
+            <Campo label="Hasta">
+              <Select options={mesOptions} value={String(hasta)} onChange={(v) => setHasta(Number(v))} />
+            </Campo>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => aplicarRango(desde, hasta)}
+              disabled={!draftAnio}
+              className="sm:mb-0"
+            >
+              Aplicar
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => aplicarRango(1, 12)}
+              disabled={!draftAnio}
+              className="rounded-lg border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-600 transition-colors hover:border-ink-950 hover:text-ink-950 disabled:opacity-40"
+            >
+              Todo el año
+            </button>
+            {anio === anioActual && (
+              <button
+                type="button"
+                onClick={() => aplicarRango(mesActual, 12)}
+                disabled={!draftAnio}
+                className="rounded-lg border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-600 transition-colors hover:border-ink-950 hover:text-ink-950 disabled:opacity-40"
+              >
+                De este mes a diciembre
+              </button>
+            )}
+            <p className="text-xs text-ink-400">
+              Con el monto vacío, aplicar <em>quita</em> el límite de esos meses.
+            </p>
+          </div>
+        </section>
+
+        {/* Mes a mes: cada mes con su tope y lo ya facturado */}
+        {isLoading && !draftAnio ? (
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <Skeleton key={i} className="h-24 w-full rounded-xl" />
+            ))}
+          </div>
+        ) : (
+          <section className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+            {MESES.map((nombre, i) => {
+              const mes = i + 1
+              const esActual = anio === anioActual && mes === mesActual
+              const valor = draftAnio?.[mes] ?? ''
+              const monto = Number(valor)
+              const tieneLimite = valor.trim() !== '' && Number.isFinite(monto) && monto > 0
+              const facturado = facturadoPorMes.get(mes) ?? 0
+              const pct = tieneLimite ? (facturado / monto) * 100 : 0
+              const excedido = tieneLimite && facturado > monto
+              return (
+                <div
+                  key={mes}
+                  className={cn(
+                    'space-y-1.5 rounded-xl border p-2.5 transition-colors',
+                    esActual ? 'border-ink-950 bg-ink-50/60' : 'border-line',
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-xs font-semibold capitalize text-ink-900">{nombre}</span>
+                    {esActual && (
+                      <span className="rounded-md bg-ink-950 px-1.5 py-0.5 text-[10px] font-semibold text-on-ink">
+                        Este mes
+                      </span>
+                    )}
+                  </div>
+                  <Input
+                    value={formatMiles(valor)}
+                    onChange={(e) => setMes(mes, e.target.value.replace(/\D/g, ''))}
+                    placeholder="Sin límite"
+                    inputMode="numeric"
+                    className="tnum h-9 px-2.5 text-sm"
+                  />
+                  {(facturado > 0 || tieneLimite) && (
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-[10px] text-ink-400">
+                        <span>Facturado</span>
+                        <span className="tnum">
+                          {money0(facturado)}
+                          {tieneLimite && ` · ${Math.round(pct)}%`}
+                        </span>
+                      </div>
+                      {tieneLimite && (
+                        <div className="h-1.5 overflow-hidden rounded-full bg-ink-100">
+                          <div
+                            className={cn('h-full rounded-full', excedido ? 'bg-ink-950' : 'bg-ink-500')}
+                            style={{ width: `${Math.min(100, pct)}%` }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </section>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-3 border-t border-line px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs text-ink-400">
+          Se guardan los cambios de todos los años que hayas editado.
+        </p>
+        <div className="flex flex-col-reverse gap-2.5 sm:flex-row sm:justify-end">
+          <Button type="button" variant="outline" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button type="button" onClick={guardar} disabled={guardando || !draftAnio}>
+            {guardando ? 'Guardando…' : 'Guardar límites'}
+          </Button>
+        </div>
       </div>
     </Modal>
   )

@@ -71,6 +71,29 @@ class EmisorSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 
+class LimiteMesSerializer(serializers.Serializer):
+    """Un mes del año con su tope. ``monto`` en None quita el limite."""
+
+    mes = serializers.IntegerField(min_value=1, max_value=12)
+    monto = serializers.DecimalField(
+        max_digits=14, decimal_places=2, min_value=Decimal('0'),
+        allow_null=True, coerce_to_string=False,
+    )
+
+
+class GuardarLimitesSerializer(serializers.Serializer):
+    """Entrada del PUT de limites: los meses de UN año a aplicar de una vez."""
+
+    anio = serializers.IntegerField(min_value=2000, max_value=2100)
+    limites = LimiteMesSerializer(many=True)
+
+    def validate_limites(self, value):
+        meses = [entrada['mes'] for entrada in value]
+        if len(meses) != len(set(meses)):
+            raise serializers.ValidationError('Hay meses repetidos en la lista.')
+        return value
+
+
 # ===== Items y comprobantes =====
 
 class ItemComprobanteSerializer(serializers.ModelSerializer):
@@ -130,6 +153,9 @@ class CrearComprobanteSerializer(serializers.Serializer):
     sucursal_stock = serializers.PrimaryKeyRelatedField(
         queryset=Sucursal.objects.filter(activa=True), required=False, allow_null=True,
     )
+    # True = el usuario ya vio el aviso de limite mensual superado y confirmo que
+    # quiere emitir igual (la vista saltea el chequeo). No viaja a ARCA.
+    confirmar_limite = serializers.BooleanField(default=False)
 
     def validate_cliente_nombre(self, value):
         value = value.strip()

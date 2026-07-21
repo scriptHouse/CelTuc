@@ -20,8 +20,9 @@ from usuarios.models import Permiso, Rol, Usuario
 
 from .arca import qr
 from .arca.servicio import _construir_detalle, _iva_id
+from .limites import facturado_del_mes
 from .logica import calcular_totales, tipo_comprobante
-from .models import Comprobante, Emisor
+from .models import Comprobante, Emisor, LimiteMensual
 from .serializers import EmisorSerializer
 
 
@@ -339,6 +340,138 @@ class EmisorVisibilidadTests(TestCase):
         nombres = [e['nombre'] for e in r.data]
         self.assertIn('Activo', nombres)
         self.assertIn('Inactivo', nombres)
+
+
+class LimiteMensualTests(TestCase):
+    """Tope de facturacion mensual: aviso 409 antes de emitir, confirmable.
+
+    La emision en ARCA se mockea; lo que se prueba es el control PREVIO: con
+    tope superado responde 409 SIN llamar a ARCA, con `confirmar_limite` emite
+    igual, y los comprobantes ocultados (borrado logico) siguen contando.
+    """
+
+    def setUp(self):
+        rol = Rol.objects.create(nombre='CajeroLimite')
+        rol.permisos.set(Permiso.objects.filter(codigo='ver_facturacion'))
+        self.fact = Usuario.objects.create_user(
+            email='fl@celtuc.ar', username='faclim', password='x', rol=rol,
+        )
+        self.super = Usuario.objects.create_superuser(
+            email='sl@celtuc.ar', username='suplim', password='x',
+        )
+        self.emisor = Emisor.objects.create(
+            nombre='Emisor Limite', condicion='monotributista', cuit='20111111112', punto_venta=1,
+        )
+        LimiteMensual.objects.create(
+            emisor=self.emisor, anio=2026, mes=7, monto=Decimal('1000000'),
+        )
+        # Dos compras de 400.000 ya emitidas en julio 2026.
+        for numero in (1, 2):
+            Comprobante.objects.create(
+                emisor=self.emisor, tipo='C', punto_venta=1, numero=numero,
+                cliente_nombre='Cliente', cliente_condicion='consumidor_final',
+                fecha=datetime.date(2026, 7, numero), neto=400000, iva=0,
+                total=Decimal('400000'), cae='999',
+            )
+        self.cliente = APIClient()
+        self.cliente.force_authenticate(self.fact)
+
+    def _emitir_mock(self, emisor, datos, usuario=None):
+        return Comprobante.objects.create(
+            emisor=emisor, tipo='C', punto_venta=1,
+            numero=(Comprobante.todos.count() + 1),
+            cliente_nombre=datos['cliente_nombre'],
+            cliente_condicion=datos['cliente_condicion'],
+            fecha=datos.get('fecha') or datetime.date(2026, 7, 15),
+            total=Decimal('400000'), cae='999',
+        )
+
+    def _payload(self, precio, fecha='2026-07-15', confirmar=False):
+        payload = {
+            'emisor': self.emisor.id,
+            'cliente_nombre': 'Cliente',
+            'cliente_condicion': 'consumidor_final',
+            'fecha': fecha,
+            'items': [{'descripcion': 'Equipo', 'cantidad': 1, 'precio_unitario': precio}],
+        }
+        if confirmar:
+            payload['confirmar_limite'] = True
+        return payload
+
+    @patch('facturacion.views.servicio.emitir')
+    def test_bajo_el_limite_emite_normal(self, mock_emitir):
+        mock_emitir.side_effect = self._emitir_mock
+        r = self.cliente.post(reverse('facturacion:comprobante-list'),
+                              self._payload(150000), format='json')
+        self.assertEqual(r.status_code, 201)
+        mock_emitir.assert_called_once()
+
+    @patch('facturacion.views.servicio.emitir')
+    def test_superar_el_limite_devuelve_409_sin_llamar_a_arca(self, mock_emitir):
+        r = self.cliente.post(reverse('facturacion:comprobante-list'),
+                              self._payload(400000), format='json')
+        self.assertEqual(r.status_code, 409)
+        mock_emitir.assert_not_called()
+        self.assertEqual(r.data['codigo'], 'limite_mensual_excedido')
+        self.assertEqual(r.data['limite'], 1000000.0)
+        self.assertEqual(r.data['facturado'], 800000.0)
+        self.assertEqual(r.data['total_factura'], 400000.0)
+        self.assertEqual(r.data['excedente'], 200000.0)
+        self.assertEqual(r.data['mes'], 7)
+
+    @patch('facturacion.views.servicio.emitir')
+    def test_confirmando_emite_igual_y_no_viaja_a_arca_el_flag(self, mock_emitir):
+        mock_emitir.side_effect = self._emitir_mock
+        r = self.cliente.post(reverse('facturacion:comprobante-list'),
+                              self._payload(400000, confirmar=True), format='json')
+        self.assertEqual(r.status_code, 201)
+        datos_emitidos = mock_emitir.call_args.args[1]
+        self.assertNotIn('confirmar_limite', datos_emitidos)
+
+    @patch('facturacion.views.servicio.emitir')
+    def test_otro_mes_sin_limite_no_avisa(self, mock_emitir):
+        mock_emitir.side_effect = self._emitir_mock
+        r = self.cliente.post(reverse('facturacion:comprobante-list'),
+                              self._payload(400000, fecha='2026-08-15'), format='json')
+        self.assertEqual(r.status_code, 201)
+
+    def test_comprobante_oculto_sigue_contando(self):
+        Comprobante.objects.get(numero=2).delete()  # borrado logico (oculta)
+        self.assertEqual(facturado_del_mes(self.emisor, 2026, 7), Decimal('800000'))
+
+    def test_facturador_ve_limites_pero_no_los_edita(self):
+        url = reverse('facturacion:emisor-limites', args=[self.emisor.id])
+        r = self.cliente.get(url, {'anio': 2026})
+        self.assertEqual(r.status_code, 200)
+        julio = next(fila for fila in r.data['limites'] if fila['mes'] == 7)
+        self.assertEqual(julio['monto'], 1000000.0)
+        self.assertEqual(julio['facturado'], 800000.0)
+        r = self.cliente.put(url, {'anio': 2026, 'limites': []}, format='json')
+        self.assertEqual(r.status_code, 403)
+
+    def test_superadmin_aplica_varios_meses_y_quita_con_null(self):
+        c = APIClient()
+        c.force_authenticate(self.super)
+        url = reverse('facturacion:emisor-limites', args=[self.emisor.id])
+        r = c.put(url, {
+            'anio': 2026,
+            'limites': [
+                {'mes': 8, 'monto': '2000000'},
+                {'mes': 9, 'monto': '2000000'},
+                {'mes': 7, 'monto': None},  # quita el de julio
+            ],
+        }, format='json')
+        self.assertEqual(r.status_code, 200)
+        montos = {fila['mes']: fila['monto'] for fila in r.data['limites']}
+        self.assertIsNone(montos[7])
+        self.assertEqual(montos[8], 2000000.0)
+        self.assertEqual(montos[9], 2000000.0)
+        # Volver a ponerlo en julio no choca con el borrado logico anterior.
+        r = c.put(url, {'anio': 2026, 'limites': [{'mes': 7, 'monto': '500000'}]}, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(
+            next(fila for fila in r.data['limites'] if fila['mes'] == 7)['monto'], 500000.0,
+        )
 
 
 class EmisorSerializerTests(TestCase):

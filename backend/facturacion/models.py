@@ -1,10 +1,13 @@
 """Modelos de facturacion electronica (ARCA / ex AFIP).
 
-Cuatro tablas, todas en español:
+Cinco tablas, todas en español:
 
 - ``facturacion_emisores``  -> :class:`Emisor`: cada cuenta que factura, con su
   CUIT, punto de venta y credenciales (certificado + clave privada) para hablar
   con ARCA. Puede haber N responsables inscriptos y N monotributistas.
+- ``facturacion_limites_mensuales`` -> :class:`LimiteMensual`: tope de
+  facturacion por emisor y mes calendario. Control INTERNO de la app (no viaja a
+  ARCA): al emitir se avisa si se supera y el usuario decide.
 - ``facturacion_comprobantes`` -> :class:`Comprobante`: cada factura emitida, con
   su CAE (autorizacion fiscal) y los datos del cliente.
 - ``facturacion_items`` -> :class:`ItemComprobante`: los renglones de cada
@@ -15,7 +18,7 @@ Cuatro tablas, todas en español:
 """
 from decimal import Decimal
 
-from django.core.validators import MinValueValidator, RegexValidator
+from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import models
 from django.utils import timezone
 
@@ -93,6 +96,52 @@ class Emisor(ModeloBase):
     def tiene_credenciales(self) -> bool:
         """True si tiene cargados certificado y clave (puede autenticar)."""
         return bool(self.certificado.strip() and self.clave_privada.strip())
+
+
+class LimiteMensual(ModeloBase):
+    """Tope de facturacion de un emisor para un mes calendario (1 al ultimo dia).
+
+    Es un control INTERNO de la app, sin efecto fiscal: no viaja a ARCA ni toca
+    la emision. Antes de pedir el CAE se compara el acumulado del mes (todos los
+    comprobantes emitidos, incluso los ocultados de la lista: el CAE existe
+    igual) mas la factura nueva contra ``monto``; si se supera, la API responde
+    409 y el front pide confirmacion. El usuario siempre puede emitir igual.
+    """
+
+    emisor = models.ForeignKey(
+        Emisor,
+        on_delete=models.CASCADE,
+        related_name='limites_mensuales',
+        verbose_name='emisor',
+    )
+    anio = models.PositiveIntegerField('año')
+    mes = models.PositiveSmallIntegerField(
+        'mes',
+        validators=[MinValueValidator(1), MaxValueValidator(12)],
+        help_text='1 = enero … 12 = diciembre.',
+    )
+    monto = models.DecimalField(
+        'monto tope', max_digits=14, decimal_places=2,
+        validators=[MinValueValidator(0)],
+    )
+
+    class Meta:
+        db_table = 'facturacion_limites_mensuales'
+        verbose_name = 'limite mensual'
+        verbose_name_plural = 'limites mensuales'
+        ordering = ('emisor', 'anio', 'mes')
+        constraints = [
+            # Un solo limite vivo por emisor y mes (el borrado logico libera el
+            # lugar para volver a configurarlo).
+            models.UniqueConstraint(
+                fields=('emisor', 'anio', 'mes'),
+                condition=models.Q(borrado=False),
+                name='uniq_limite_emisor_mes_vivo',
+            ),
+        ]
+
+    def __str__(self):
+        return f'Limite {self.mes:02d}/{self.anio} de {self.emisor_id}: {self.monto}'
 
 
 class TicketAcceso(models.Model):

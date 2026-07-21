@@ -11,6 +11,7 @@ import logging
 
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -22,6 +23,7 @@ from .arca import servicio
 from .arca.errores import ErrorARCA
 from .clientes import registrar_cliente_desde_comprobante
 from .email import EmailNoConfigurado, enviar_comprobante
+from .limites import estado_limites_del_anio, guardar_limites, verificar_limite_mensual
 from .models import Cliente, Comprobante, Emisor
 from .permissions import PuedeFacturar
 from .serializers import (
@@ -34,6 +36,7 @@ from .serializers import (
     CrearComprobanteSerializer,
     EmisorSerializer,
     EnviarEmailSerializer,
+    GuardarLimitesSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -117,6 +120,43 @@ class EmisorProbarConexionView(APIView):
         return Response(servicio.probar_conexion(emisor))
 
 
+class EmisorLimitesView(APIView):
+    """Limites de facturacion mensual del emisor (control interno, sin ARCA).
+
+    - GET ``?anio=2026``: los 12 meses del año con su tope (o null) y lo ya
+      facturado en cada uno. Lo puede ver quien factura (para la barra de uso).
+    - PUT ``{anio, limites: [{mes, monto|null}]}``: aplica los topes de los meses
+      recibidos de una vez (uno solo o varios); monto null quita el limite. Igual
+      que editar el emisor, es solo del superadministrador.
+    """
+
+    permission_classes = [LecturaConPermisoEscrituraSuperadmin]
+    permiso_requerido = 'ver_facturacion'
+
+    def _anio(self, crudo):
+        try:
+            anio = int(crudo)
+        except (TypeError, ValueError):
+            return None
+        return anio if 2000 <= anio <= 2100 else None
+
+    def get(self, request, pk):
+        emisor = get_object_or_404(Emisor, pk=pk)
+        anio = self._anio(request.query_params.get('anio'))
+        if anio is None:
+            anio = timezone.localdate().year
+        return Response({'anio': anio, 'limites': estado_limites_del_anio(emisor, anio)})
+
+    def put(self, request, pk):
+        emisor = get_object_or_404(Emisor, pk=pk)
+        entrada = GuardarLimitesSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        anio = entrada.validated_data['anio']
+        usuario = request.user if request.user.is_authenticated else None
+        guardar_limites(emisor, anio, entrada.validated_data['limites'], usuario=usuario)
+        return Response({'anio': anio, 'limites': estado_limites_del_anio(emisor, anio)})
+
+
 # ===== Comprobantes =====
 
 class ComprobanteListCreateView(generics.ListCreateAPIView):
@@ -144,6 +184,7 @@ class ComprobanteListCreateView(generics.ListCreateAPIView):
         emisor = datos.pop('emisor')
         # Datos de stock: se separan ANTES de emitir (ARCA no los conoce).
         sucursal_stock = datos.pop('sucursal_stock', None)
+        confirmar_limite = datos.pop('confirmar_limite', False)
         items_limpios, productos_stock = [], []
         for item in datos['items']:
             item = dict(item)
@@ -151,6 +192,13 @@ class ComprobanteListCreateView(generics.ListCreateAPIView):
             items_limpios.append(item)
         datos['items'] = items_limpios
         usuario = request.user if request.user.is_authenticated else None
+        # Control interno de limite mensual, ANTES de pedir el CAE (no toca la
+        # logica de ARCA): si el mes queda pasado del tope se devuelve 409 y el
+        # front pide confirmacion; con `confirmar_limite` se emite igual.
+        if not confirmar_limite:
+            aviso_limite = verificar_limite_mensual(emisor, datos)
+            if aviso_limite:
+                return Response(aviso_limite, status=status.HTTP_409_CONFLICT)
         try:
             comprobante = servicio.emitir(emisor, datos, usuario=usuario)
         except ErrorARCA as exc:

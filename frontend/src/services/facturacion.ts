@@ -57,6 +57,50 @@ export function probarConexion(id: number): Promise<ResultadoConexion> {
   return api.post<ResultadoConexion>(`/facturacion/emisores/${id}/probar/`, undefined, token())
 }
 
+// ===== Límite de facturación mensual (control interno; no toca ARCA) =====
+
+/** Un mes del año: su tope (null = sin límite) y lo ya facturado. */
+export interface LimiteMes {
+  mes: number
+  monto: number | null
+  facturado: number
+}
+
+export interface LimitesAnio {
+  anio: number
+  limites: LimiteMes[]
+}
+
+/** Cuerpo del 409 cuando la factura haría superar el tope del mes. */
+export interface LimiteExcedido {
+  codigo: 'limite_mensual_excedido'
+  detail: string
+  anio: number
+  mes: number
+  mes_nombre: string
+  limite: number
+  facturado: number
+  total_factura: number
+  excedente: number
+}
+
+/** Los 12 meses del año con su tope y lo facturado (para la barra de uso). */
+export function obtenerLimites(emisorId: number, anio: number): Promise<LimitesAnio> {
+  return api.get<LimitesAnio>(`/facturacion/emisores/${emisorId}/limites/?anio=${anio}`, token())
+}
+
+/**
+ * Aplica los topes de los meses enviados de una vez (uno o varios); `monto`
+ * en null quita el límite. Los meses que no se envían quedan como estaban.
+ */
+export function guardarLimites(
+  emisorId: number,
+  anio: number,
+  limites: Array<{ mes: number; monto: number | null }>,
+): Promise<LimitesAnio> {
+  return api.put<LimitesAnio>(`/facturacion/emisores/${emisorId}/limites/`, { anio, limites }, token())
+}
+
 // ===== Comprobantes =====
 
 export function listarComprobantes(emisorId?: number): Promise<Comprobante[]> {
@@ -90,6 +134,8 @@ export interface NuevoComprobante {
   >
   /** Sucursal de la que descontar el stock de los ítems con `producto`. */
   sucursal_stock?: number
+  /** True = el usuario ya confirmó emitir aunque se pase el límite mensual. */
+  confirmar_limite?: boolean
 }
 
 /** Emite el comprobante: el backend pide el CAE a ARCA y lo guarda. */
