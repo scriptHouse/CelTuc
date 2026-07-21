@@ -59,15 +59,19 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
 async function request<T>(path: string, opts: RequestOptions = {}, reintento = false): Promise<T> {
   const { method = 'GET', body, token, signal } = opts
 
+  // Con FormData (subida de archivos) el navegador arma solo el multipart y su
+  // boundary: no hay que fijar Content-Type ni serializar a JSON.
+  const esFormData = typeof FormData !== 'undefined' && body instanceof FormData
+
   let res: Response
   try {
     res = await fetch(`${BASE_URL}${path}`, {
       method,
       headers: {
-        'Content-Type': 'application/json',
+        ...(esFormData ? {} : { 'Content-Type': 'application/json' }),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : esFormData ? (body as FormData) : JSON.stringify(body),
       signal,
     })
   } catch {
@@ -93,9 +97,32 @@ async function request<T>(path: string, opts: RequestOptions = {}, reintento = f
   return data as T
 }
 
+/** Descarga un recurso binario autenticado (p. ej. adjuntos) como Blob. */
+async function requestBlob(path: string, token?: string | null, reintento = false): Promise<Blob> {
+  let res: Response
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    })
+  } catch {
+    throw new ApiError(0, 'No se pudo conectar con el servidor. Revisá tu conexión.', null)
+  }
+  if (res.status === 401 && token && !reintento && unauthorizedHandler) {
+    const nuevoToken = await unauthorizedHandler()
+    if (nuevoToken) return requestBlob(path, nuevoToken, true)
+  }
+  if (!res.ok) {
+    const isJson = res.headers.get('content-type')?.includes('application/json')
+    const data = isJson ? await res.json().catch(() => null) : null
+    throw new ApiError(res.status, messageFromData(data, `Error ${res.status}`), data)
+  }
+  return res.blob()
+}
+
 export const api = {
   get: <T>(path: string, token?: string | null, signal?: AbortSignal) =>
     request<T>(path, { method: 'GET', token, signal }),
+  getBlob: (path: string, token?: string | null) => requestBlob(path, token),
   post: <T>(path: string, body?: unknown, token?: string | null, signal?: AbortSignal) =>
     request<T>(path, { method: 'POST', body, token, signal }),
   put: <T>(path: string, body?: unknown, token?: string | null, signal?: AbortSignal) =>

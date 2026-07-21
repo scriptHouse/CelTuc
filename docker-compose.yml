@@ -9,6 +9,10 @@ services:
     # solo en el servidor (gitignored); en el repo está .env.example.
     env_file:
       - .env
+    # Los adjuntos de la cartelera (media) viven en un volumen: sobreviven a
+    # los rebuilds/redeploys del contenedor.
+    volumes:
+      - celtuc-media:/app/backend/media
     networks:
       - web
     labels:
@@ -63,6 +67,7 @@ services:
 
 volumes:
   runner-data:
+  celtuc-media:
 
 networks:
   web:

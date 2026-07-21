@@ -122,6 +122,7 @@ INSTALLED_APPS = [
     'inventario',
     'caja',
     'facturacion',
+    'comunicados',
 ]
 
 MIDDLEWARE = [
@@ -204,6 +205,13 @@ STORAGES = {
     'staticfiles': {'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage'},
 }
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Archivos subidos (adjuntos de la cartelera de comunicados). NO se sirven por
+# URL publica: se descargan por un endpoint autenticado de la API. En produccion
+# el directorio esta montado como volumen (ver docker-compose.yml) para que los
+# adjuntos sobrevivan a los redeploys.
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 
 
 # --- Django REST Framework ---------------------------------------------------

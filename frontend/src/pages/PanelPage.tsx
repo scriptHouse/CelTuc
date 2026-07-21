@@ -26,6 +26,7 @@ import { Card } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Button } from '@/components/ui/Button'
 import { FacturaEstadoBadge } from '@/components/ui/StatusBadge'
+import { Cartelera } from '@/components/Cartelera'
 import { GestorDolar } from '@/components/GestorDolar'
 import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
@@ -72,6 +73,9 @@ export function PanelPage() {
       <div className="ct-rise mb-5">
         <GestorDolar soloLectura={!admin} />
       </div>
+
+      {/* Cartelera de comunicación interna: publica el admin, el equipo marca visto. */}
+      <Cartelera />
 
       {isLoading || !data ? (
         <PanelSkeleton />
