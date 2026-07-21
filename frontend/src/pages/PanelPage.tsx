@@ -37,7 +37,13 @@ export function PanelPage() {
   const confirm = useConfirm()
   const usuario = useAuth((s) => s.usuario)
   const admin = esAdmin(usuario)
-  const { data, isLoading } = useQuery({ queryKey: ['dashboard'], queryFn: obtenerResumen })
+  // Los números del negocio son SOLO para administradores: a los empleados ni
+  // siquiera se les consulta el resumen (ven cartelera + dólar vigente).
+  const { data, isLoading } = useQuery({
+    queryKey: ['dashboard'],
+    queryFn: obtenerResumen,
+    enabled: admin,
+  })
 
   async function handleReset() {
     const ok = await confirm({
@@ -58,26 +64,33 @@ export function PanelPage() {
         icon={LayoutDashboard}
         eyebrow="Resumen"
         title="Panel"
-        subtitle="Una mirada rápida del negocio: ventas, stock y equipo."
+        subtitle={
+          admin
+            ? 'Una mirada rápida del negocio: ventas, stock y equipo.'
+            : 'Novedades del equipo y el dólar vigente.'
+        }
         className="ct-rise"
         actions={
-          <Button variant="outline" size="sm" onClick={handleReset}>
-            <RefreshCw className="h-4 w-4" />
-            Restaurar demo
-          </Button>
+          admin ? (
+            <Button variant="outline" size="sm" onClick={handleReset}>
+              <RefreshCw className="h-4 w-4" />
+              Restaurar demo
+            </Button>
+          ) : undefined
         }
       />
 
-      {/* Gestor de dólar: el del negocio + el blue de DolarAPI, a mano desde
-          el inicio. Los que no son admin lo ven en modo solo lectura. */}
+      {/* Gestor de dólar: el admin ve el del negocio + el blue de DolarAPI; los
+          empleados ven SOLO el dólar vigente del negocio, en modo lectura. */}
       <div className="ct-rise mb-5">
-        <GestorDolar soloLectura={!admin} />
+        <GestorDolar soloLectura={!admin} soloDolarNegocio={!admin} />
       </div>
 
       {/* Cartelera de comunicación interna: publica el admin, el equipo marca visto. */}
       <Cartelera />
 
-      {isLoading || !data ? (
+      {/* Todo lo que sigue son números del negocio: SOLO administradores. */}
+      {!admin ? null : isLoading || !data ? (
         <PanelSkeleton />
       ) : (
         <div className="space-y-5">

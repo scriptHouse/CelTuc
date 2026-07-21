@@ -22,8 +22,18 @@ import { useToast } from '@/components/ToastProvider'
  * El del negocio se edita acá mismo (y recalcula Service + Productos al
  * guardar). El blue es SOLO LECTURA: nunca pisa el configurado — el margen
  * cambiario es una decisión comercial.
+ *
+ * Con `soloDolarNegocio` se muestra ÚNICAMENTE el dólar vigente del negocio
+ * (sin el blue de DolarAPI ni la comparación): es lo que ven los empleados en
+ * el Panel — el valor que se usa, sin datos de mercado.
  */
-export function GestorDolar({ soloLectura = false }: { soloLectura?: boolean }) {
+export function GestorDolar({
+  soloLectura = false,
+  soloDolarNegocio = false,
+}: {
+  soloLectura?: boolean
+  soloDolarNegocio?: boolean
+}) {
   const queryClient = useQueryClient()
   const toast = useToast()
 
@@ -43,6 +53,7 @@ export function GestorDolar({ soloLectura = false }: { soloLectura?: boolean }) 
     queryFn: obtenerDolarBlue,
     staleTime: 120_000, // el backend ya cachea 2 min
     retry: 1,
+    enabled: !soloDolarNegocio, // el modo restringido ni consulta DolarAPI
   })
 
   const [valor, setValor] = useState('')
@@ -85,7 +96,7 @@ export function GestorDolar({ soloLectura = false }: { soloLectura?: boolean }) 
         Gestor de dólar
       </p>
 
-      <div className="grid sm:grid-cols-2">
+      <div className={cn('grid', !soloDolarNegocio && 'sm:grid-cols-2')}>
         {/* ===== Dólar del negocio (editable) ===== */}
         <div className="p-4">
           <p className="mb-1 flex items-center gap-1.5 text-[0.68rem] font-semibold uppercase tracking-[0.1em] text-ink-400">
@@ -129,7 +140,8 @@ export function GestorDolar({ soloLectura = false }: { soloLectura?: boolean }) 
           )}
         </div>
 
-        {/* ===== Dólar blue (solo lectura) ===== */}
+        {/* ===== Dólar blue (solo lectura; oculto en el modo restringido) ===== */}
+        {!soloDolarNegocio && (
         <div className="border-t border-line bg-canvas/40 p-4 sm:border-l sm:border-t-0">
           <p className="mb-1 flex items-center gap-1.5 text-[0.68rem] font-semibold uppercase tracking-[0.1em] text-ink-400">
             <TrendingUp className="h-3.5 w-3.5" aria-hidden />
@@ -175,10 +187,11 @@ export function GestorDolar({ soloLectura = false }: { soloLectura?: boolean }) 
             </>
           )}
         </div>
+        )}
       </div>
 
-      {/* ===== Comparación ===== */}
-      {diferencia !== null && (
+      {/* ===== Comparación (oculta en el modo restringido) ===== */}
+      {!soloDolarNegocio && diferencia !== null && (
         <p className="tnum border-t border-line px-4 py-2 text-xs text-ink-500">
           Tu dólar está{' '}
           <b className="text-ink-900">
