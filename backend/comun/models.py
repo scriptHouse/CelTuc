@@ -123,3 +123,27 @@ class ModeloBase(models.Model):
         self.fecha_borrado = None
         self.borrado_por = None
         self.save(update_fields=['borrado', 'fecha_borrado', 'borrado_por'])
+
+
+class Preferencia(ModeloBase):
+    """Preferencia global de la aplicacion: una clave -> un valor de texto.
+
+    Un unico valor COMPARTIDO por todos los usuarios y dispositivos (ej: la
+    plantilla del mensaje de WhatsApp de facturacion, que antes vivia en el
+    `localStorage` de cada navegador). Las claves validas y su permiso de
+    modulo los declara la API (ver ``comun.views.CLAVES_PREFERENCIAS``); un
+    valor vacio significa "sin personalizar" y el front usa su texto por
+    defecto.
+    """
+
+    clave = models.CharField('clave', max_length=100, unique=True)
+    valor = models.TextField('valor', blank=True)
+
+    class Meta:
+        db_table = 'preferencias'
+        verbose_name = 'preferencia'
+        verbose_name_plural = 'preferencias'
+        ordering = ('clave',)
+
+    def __str__(self):
+        return self.clave

@@ -79,14 +79,15 @@ import {
 import { fecha, money, money0, num, pad } from '@/lib/format'
 import { waLink, waNumeroArgentino } from '@/lib/whatsapp'
 import {
+  CLAVE_MENSAJE_FACTURA,
   construirMensajeFactura,
   EJEMPLO_FACTURA,
-  guardarPlantillaFactura,
-  leerPlantillaFactura,
   PLANTILLA_FACTURA_DEFAULT,
+  plantillaEfectiva,
   valoresDeComprobante,
   VARIABLES_FACTURA,
 } from '@/lib/mensajeFactura'
+import { guardarPreferencia, obtenerPreferencia } from '@/services/preferencias'
 import { MensajeWhatsappModal } from '@/components/MensajeWhatsappModal'
 import { ApiError } from '@/lib/api'
 import { cn, ctStagger } from '@/lib/utils'
@@ -823,13 +824,36 @@ function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void 
   const [email, setEmail] = useState('')
   const [enviando, setEnviando] = useState(false)
   const [telefono, setTelefono] = useState('')
-  // Plantilla del mensaje de WhatsApp (editable con el lápiz, igual que en Cotizaciones).
-  const [plantilla, setPlantilla] = useState(leerPlantillaFactura)
   const [msgOpen, setMsgOpen] = useState(false)
+  const queryClient = useQueryClient()
   const { data: c, isLoading } = useQuery({
     queryKey: ['comprobante', id],
     queryFn: () => obtenerComprobante(id as number),
     enabled: id != null,
+  })
+
+  // Plantilla del mensaje de WhatsApp: preferencia GLOBAL guardada en el
+  // backend (vale para todos los usuarios y dispositivos). Sin personalizar,
+  // aún cargando o con error, se usa el texto por defecto.
+  const { data: prefMensaje } = useQuery({
+    queryKey: ['preferencia', CLAVE_MENSAJE_FACTURA],
+    queryFn: () => obtenerPreferencia(CLAVE_MENSAJE_FACTURA),
+    enabled: id != null,
+    staleTime: 5 * 60 * 1000,
+  })
+  const plantilla = plantillaEfectiva(prefMensaje?.valor)
+
+  const guardarMensaje = useMutation({
+    // Guardar el texto default equivale a "sin personalizar": se manda vacío,
+    // así futuras mejoras del default llegan solas a quien nunca lo tocó.
+    mutationFn: (nueva: string) =>
+      guardarPreferencia(CLAVE_MENSAJE_FACTURA, nueva.trim() === PLANTILLA_FACTURA_DEFAULT ? '' : nueva),
+    onSuccess: (pref) => {
+      queryClient.setQueryData(['preferencia', CLAVE_MENSAJE_FACTURA], pref)
+      setMsgOpen(false)
+      toast.success('Mensaje guardado', 'Vale para todos los usuarios y dispositivos.')
+    },
+    onError: (e) => toast.error('No se pudo guardar', (e as Error).message),
   })
 
   // El modal queda montado entre aperturas: al cambiar de comprobante se
@@ -898,12 +922,6 @@ function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void 
     window.open(waLink(mensaje, numero), '_blank', 'noopener,noreferrer')
   }
 
-  function guardarPlantilla(nueva: string) {
-    guardarPlantillaFactura(nueva)
-    setPlantilla(leerPlantillaFactura())
-    setMsgOpen(false)
-    toast.success('Mensaje guardado', 'Se usará al enviar facturas por WhatsApp.')
-  }
 
   return (
     <Modal open={id != null} onClose={onClose} size="lg">
@@ -1080,7 +1098,7 @@ function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void 
         open={msgOpen}
         onClose={() => setMsgOpen(false)}
         valorActual={plantilla}
-        onGuardar={guardarPlantilla}
+        onGuardar={(nueva) => guardarMensaje.mutate(nueva)}
         subtitulo="El texto que abre el botón «WhatsApp» del detalle de una factura."
         variables={VARIABLES_FACTURA}
         plantillaDefault={PLANTILLA_FACTURA_DEFAULT}

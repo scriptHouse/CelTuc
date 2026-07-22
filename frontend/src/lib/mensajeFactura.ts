@@ -1,16 +1,19 @@
 /**
- * Mensaje de WhatsApp de las facturas: plantilla configurable + guardado.
+ * Mensaje de WhatsApp de las facturas: plantilla configurable.
  *
- * Igual que el de cotizaciones (`lib/mensajeCotizacion`): el texto que abre el
+ * Como el de cotizaciones (`lib/mensajeCotizacion`): el texto que abre el
  * botón «WhatsApp» del detalle no está fijo en el código, es una plantilla con
  * variables ({cliente}, {total}…) que se rellenan con los datos reales del
- * comprobante. Se guarda en `localStorage` (por dispositivo).
+ * comprobante. A diferencia de cotizaciones, se guarda en el BACKEND como
+ * preferencia global (`services/preferencias`): configurarla una vez vale para
+ * todos los usuarios y dispositivos.
  */
 import type { VariableMensaje } from '@/components/MensajeWhatsappModal'
 import type { Comprobante } from '@/types'
 import { fecha, money } from '@/lib/format'
 
-const KEY = 'celtuc:facturacion:mensajeWhatsapp'
+/** Clave de la preferencia global (debe existir en el backend). */
+export const CLAVE_MENSAJE_FACTURA = 'facturacion.mensaje_whatsapp'
 
 /** Texto por defecto (misma información que el email de comprobantes). */
 export const PLANTILLA_FACTURA_DEFAULT =
@@ -76,29 +79,12 @@ export function valoresDeComprobante(c: Comprobante): ValoresMensajeFactura {
   }
 }
 
-/** Plantilla guardada, o la de por defecto si no hay ninguna. */
-export function leerPlantillaFactura(): string {
-  try {
-    const guardada = localStorage.getItem(KEY)
-    if (guardada && guardada.trim()) return guardada
-  } catch {
-    /* localStorage no disponible */
-  }
-  return PLANTILLA_FACTURA_DEFAULT
-}
-
 /**
- * Guarda la plantilla. Si queda vacía o es igual a la de por defecto, borra la
- * personalización (así "restaurar" no deja basura en localStorage).
+ * Plantilla efectiva a partir del valor guardado en el backend: vacío (o aún
+ * sin cargar) significa «sin personalizar» y se usa la de por defecto.
  */
-export function guardarPlantillaFactura(plantilla: string): void {
-  const limpia = plantilla.trim()
-  try {
-    if (!limpia || limpia === PLANTILLA_FACTURA_DEFAULT) localStorage.removeItem(KEY)
-    else localStorage.setItem(KEY, limpia)
-  } catch {
-    /* localStorage no disponible */
-  }
+export function plantillaEfectiva(valorGuardado?: string): string {
+  return valorGuardado?.trim() ? valorGuardado : PLANTILLA_FACTURA_DEFAULT
 }
 
 /** Reemplaza las variables de la plantilla por los valores reales del comprobante. */
