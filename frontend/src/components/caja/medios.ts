@@ -10,6 +10,7 @@ import {
   Landmark,
   Receipt,
   ReceiptText,
+  Wallet,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type {
@@ -80,6 +81,20 @@ export const CANAL_LABEL: Record<Exclude<CanalCaja, ''>, string> = {
 export const CANAL_DESCRIPCION: Record<Exclude<CanalCaja, ''>, string> = {
   factura_ri: 'Acá entra sola la plata facturada con Responsable Inscripto (Factura A/B).',
   general: 'Acá entra sola la plata de Factura C (monotributo) y la que va sin factura.',
+}
+
+/** Ícono de cada canal (tarjetas del selector de cajas). */
+export const CANAL_ICONO: Record<CanalCaja, LucideIcon> = {
+  factura_ri: FileCheck2,
+  general: ReceiptText,
+  '': Wallet,
+}
+
+/** Resumen corto de qué recibe cada caja (cabe en una línea de la tarjeta). */
+export const CANAL_RESUMEN: Record<CanalCaja, string> = {
+  factura_ri: 'Facturado con RI (Factura A/B)',
+  general: 'Factura C y ventas sin factura',
+  '': 'Caja común (se elige a mano)',
 }
 
 /** Las tres formas de facturar una venta de mostrador, en orden de uso. */

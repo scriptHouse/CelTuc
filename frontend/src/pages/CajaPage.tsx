@@ -47,7 +47,7 @@ import { AperturaModal, type AperturaValues } from '@/components/caja/AperturaMo
 import { MovimientoModal, type MovimientoValues } from '@/components/caja/MovimientoModal'
 import { CierreDetalleModal } from '@/components/caja/CierreDetalleModal'
 import { DiffChip } from '@/components/caja/DiffChip'
-import { CANAL_DESCRIPCION, FACTURACION_LABEL, MEDIO_ICONO, MEDIO_LABEL, TIPO_MOV_ICONO, operacionesLabel, signoMovimiento } from '@/components/caja/medios'
+import { CANAL_ICONO, CANAL_RESUMEN, FACTURACION_LABEL, MEDIO_ICONO, MEDIO_LABEL, TIPO_MOV_ICONO, operacionesLabel, signoMovimiento } from '@/components/caja/medios'
 import { MEDIOS_PAGO_CAJA } from '@/types'
 
 /**
@@ -367,46 +367,86 @@ export function CajaPage() {
         <VentaRapida cajaId={cajaId || undefined} cajas={cajasVisibles} cajasAbiertas={abiertas} />
       )}
 
-      {/* Selector multi-caja */}
+      {/* Selector de cajas: una tarjeta grande por caja, con su canal fiscal
+         y su estado a la vista. En el celular se apilan a lo ancho. */}
       {config?.multiCaja && cajasVisibles.length > 1 && (
-        <div className="ct-rise mb-5">
-        <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Cajas">
-          {cajasVisibles.map((c) => {
-            const activa = c.id === cajaId
-            const abierta = abiertas.includes(c.id)
-            return (
-              <button
-                key={c.id}
-                type="button"
-                role="tab"
-                aria-selected={activa}
-                onClick={() => setCajaId(c.id)}
-                className={cn(
-                  'inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-medium transition-all duration-150',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900',
-                  activa
-                    ? 'border-ink-950 bg-ink-950 text-on-ink shadow-[0_8px_18px_rgba(10,10,11,0.18)]'
-                    : 'border-line bg-surface text-ink-600 hover:border-line-strong hover:text-ink-900',
-                )}
-              >
-                {abierta && (
+        <div className="ct-rise mb-6">
+          <p className="mb-2.5 text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-ink-400">
+            ¿En qué caja estás trabajando?
+          </p>
+          <div role="tablist" aria-label="Cajas" className="grid gap-2.5 sm:grid-cols-2">
+            {cajasVisibles.map((c, i) => {
+              const activa = c.id === cajaId
+              const abierta = abiertas.includes(c.id)
+              const Icono = CANAL_ICONO[c.canal]
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={activa}
+                  onClick={() => setCajaId(c.id)}
+                  className={cn(
+                    'ct-stagger-item flex min-w-0 items-center gap-3.5 rounded-2xl border px-4 py-3.5 text-left transition-all duration-150',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 focus-visible:ring-offset-2',
+                    activa
+                      ? 'border-ink-950 bg-ink-950 shadow-[0_12px_28px_rgba(10,10,11,0.22)]'
+                      : 'border-line bg-surface hover:border-line-strong hover:shadow-[0_6px_16px_rgba(10,10,11,0.07)]',
+                  )}
+                  style={ctStagger(i)}
+                >
                   <span
-                    aria-hidden
-                    className={cn('relative inline-flex h-2 w-2', activa ? 'text-on-ink' : 'text-ink-950')}
+                    className={cn(
+                      'grid h-11 w-11 shrink-0 place-items-center rounded-xl transition-colors',
+                      activa
+                        ? 'bg-on-ink/10 text-on-ink ring-1 ring-on-ink/15'
+                        : 'bg-ink-50 text-ink-500 ring-1 ring-line',
+                    )}
                   >
-                    <span className="ct-modal-halo absolute -inset-1 rounded-full border border-current opacity-60" />
-                    <span className="h-2 w-2 rounded-full bg-current" />
+                    <Icono className="h-5 w-5" strokeWidth={1.75} aria-hidden />
                   </span>
-                )}
-                {c.nombre}
-                {abierta && <span className={cn('text-[0.66rem] uppercase tracking-wide', activa ? 'text-on-ink/70' : 'text-ink-400')}>abierta</span>}
-              </button>
-            )
-          })}
-        </div>
-        {cajaActual?.canal && (
-          <p className="mt-2 text-xs text-ink-400">{CANAL_DESCRIPCION[cajaActual.canal]}</p>
-        )}
+                  <span className="min-w-0 flex-1">
+                    <span
+                      className={cn(
+                        'block truncate text-sm font-semibold',
+                        activa ? 'text-on-ink' : 'text-ink-900',
+                      )}
+                    >
+                      {c.nombre}
+                    </span>
+                    <span
+                      className={cn(
+                        'block truncate text-xs',
+                        activa ? 'text-on-ink/60' : 'text-ink-400',
+                      )}
+                    >
+                      {CANAL_RESUMEN[c.canal]}
+                    </span>
+                  </span>
+                  <span
+                    className={cn(
+                      'inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.64rem] font-semibold uppercase tracking-wide',
+                      abierta
+                        ? activa
+                          ? 'bg-on-ink/10 text-on-ink'
+                          : 'bg-emerald-600/10 text-emerald-700 ring-1 ring-emerald-600/25 dark:text-emerald-400'
+                        : activa
+                          ? 'bg-on-ink/10 text-on-ink/55'
+                          : 'bg-ink-100 text-ink-400',
+                    )}
+                  >
+                    {abierta && (
+                      <span aria-hidden className="relative inline-flex h-1.5 w-1.5">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-current opacity-60" />
+                        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-current" />
+                      </span>
+                    )}
+                    {abierta ? 'Abierta' : 'Cerrada'}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
         </div>
       )}
 
