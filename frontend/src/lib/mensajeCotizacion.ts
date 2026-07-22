@@ -7,6 +7,8 @@
  * `localStorage` (por dispositivo), igual que la dirección de los documentos.
  */
 
+import type { VariableMensaje } from '@/components/MensajeWhatsappModal'
+
 const KEY = 'celtuc:cotizaciones:mensajeWhatsapp'
 
 /** Texto por defecto (la misma redacción que traía la planilla). */
@@ -16,14 +18,6 @@ export const PLANTILLA_WHATSAPP_DEFAULT =
   'La valuación final se pasa en el local a la hora de cotizar el equipo.'
 
 /** Variables disponibles para insertar en la plantilla. */
-export interface VariableMensaje {
-  token: string
-  etiqueta: string
-  descripcion: string
-  /** Valor de ejemplo, usado en la vista previa del editor. */
-  ejemplo: string
-}
-
 export const VARIABLES_MENSAJE: VariableMensaje[] = [
   { token: '{modelo}', etiqueta: 'Modelo', descripcion: 'Nombre completo del equipo', ejemplo: 'iPhone 13 Pro Max' },
   { token: '{precio}', etiqueta: 'Precio', descripcion: 'Valor sugerido (punto medio del rango)', ejemplo: '480' },

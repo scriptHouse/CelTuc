@@ -3,29 +3,50 @@ import { MessageCircle, Plus, RotateCcw, X } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Textarea } from '@/components/ui/Textarea'
-import {
-  EJEMPLO_MENSAJE,
-  PLANTILLA_WHATSAPP_DEFAULT,
-  VARIABLES_MENSAJE,
-  construirMensajeCotizacion,
-} from '@/lib/mensajeCotizacion'
 
 /**
- * Editor de la plantilla del mensaje de WhatsApp de cotizaciones.
- *  - Variables insertables con un toque (se rellenan al copiar).
- *  - Vista previa en vivo con un equipo de ejemplo.
- *  - Restaurar al texto por defecto y guardar (persiste en localStorage).
+ * Editor genérico de plantillas de mensajes de WhatsApp (cotizaciones,
+ * facturas…). Cada pantalla le pasa sus variables, su plantilla por defecto y
+ * cómo armar la vista previa; la persistencia la maneja quien lo usa.
+ *  - Variables insertables con un toque (se rellenan al usar el mensaje).
+ *  - Vista previa en vivo con datos de ejemplo.
+ *  - Restaurar al texto por defecto y guardar.
  */
+
+/** Variable insertable en una plantilla de mensaje. */
+export interface VariableMensaje {
+  token: string
+  etiqueta: string
+  descripcion: string
+  /** Valor de ejemplo, usado en la vista previa del editor. */
+  ejemplo: string
+}
+
 export function MensajeWhatsappModal({
   open,
   onClose,
   valorActual,
   onGuardar,
+  subtitulo,
+  variables,
+  plantillaDefault,
+  construirPreview,
+  notaPreview,
+  rows = 5,
 }: {
   open: boolean
   onClose: () => void
   valorActual: string
   onGuardar: (plantilla: string) => void
+  /** Qué mensaje se está editando (va bajo el título). */
+  subtitulo: string
+  variables: VariableMensaje[]
+  plantillaDefault: string
+  /** Arma la vista previa reemplazando las variables por datos de ejemplo. */
+  construirPreview: (plantilla: string) => string
+  /** Aclaración bajo la vista previa (con qué ejemplo se armó). */
+  notaPreview: string
+  rows?: number
 }) {
   const [valor, setValor] = useState(valorActual)
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -53,8 +74,8 @@ export function MensajeWhatsappModal({
   }
 
   const limpio = valor.trim()
-  const esDefault = limpio === PLANTILLA_WHATSAPP_DEFAULT
-  const preview = limpio ? construirMensajeCotizacion(valor, EJEMPLO_MENSAJE) : ''
+  const esDefault = limpio === plantillaDefault
+  const preview = limpio ? construirPreview(valor) : ''
 
   function guardar() {
     if (!limpio) return
@@ -73,7 +94,7 @@ export function MensajeWhatsappModal({
             <h2 id="titulo-msg-wa" className="text-lg font-semibold leading-tight text-ink-950">
               Mensaje de WhatsApp
             </h2>
-            <p className="text-xs text-ink-400">El texto que se copia al tocar «WhatsApp» en un modelo.</p>
+            <p className="text-xs text-ink-400">{subtitulo}</p>
           </div>
         </div>
         <button
@@ -93,7 +114,7 @@ export function MensajeWhatsappModal({
             Variables · tocá para insertar
           </p>
           <div className="flex flex-wrap gap-1.5">
-            {VARIABLES_MENSAJE.map((v) => (
+            {variables.map((v) => (
               <button
                 key={v.token}
                 type="button"
@@ -121,7 +142,7 @@ export function MensajeWhatsappModal({
             ref={ref}
             value={valor}
             onChange={(e) => setValor(e.target.value)}
-            rows={5}
+            rows={rows}
             className="min-h-[120px] leading-relaxed"
             data-autofocus
           />
@@ -130,18 +151,16 @@ export function MensajeWhatsappModal({
 
         <div>
           <p className="mb-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-ink-400">Vista previa</p>
-          <div className="rounded-xl border border-line bg-canvas/50 p-3.5 text-sm leading-relaxed text-ink-700">
+          <div className="whitespace-pre-wrap rounded-xl border border-line bg-canvas/50 p-3.5 text-sm leading-relaxed text-ink-700">
             {preview || <span className="text-ink-400">Escribí un mensaje para ver la vista previa.</span>}
           </div>
-          <p className="mt-1.5 text-xs text-ink-400">
-            Ejemplo con {EJEMPLO_MENSAJE.modelo}. Al copiar, cada variable se reemplaza por los datos reales del equipo.
-          </p>
+          <p className="mt-1.5 text-xs text-ink-400">{notaPreview}</p>
         </div>
       </div>
 
       {/* Pie */}
       <div className="flex items-center justify-between gap-2 border-t border-line px-5 py-3.5">
-        <Button variant="ghost" size="sm" onClick={() => setValor(PLANTILLA_WHATSAPP_DEFAULT)} disabled={esDefault}>
+        <Button variant="ghost" size="sm" onClick={() => setValor(plantillaDefault)} disabled={esDefault}>
           <RotateCcw className="h-4 w-4" /> Restaurar
         </Button>
         <div className="flex items-center gap-2">

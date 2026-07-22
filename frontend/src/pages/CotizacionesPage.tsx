@@ -17,7 +17,14 @@ import { AyudaCotizacionesPagina } from '@/components/AyudaContenidos'
 import { useToast } from '@/components/ToastProvider'
 import { CotizacionesManager } from '@/components/CotizacionesManager'
 import { MensajeWhatsappModal } from '@/components/MensajeWhatsappModal'
-import { construirMensajeCotizacion, guardarPlantillaWhatsapp, leerPlantillaWhatsapp } from '@/lib/mensajeCotizacion'
+import {
+  construirMensajeCotizacion,
+  EJEMPLO_MENSAJE,
+  guardarPlantillaWhatsapp,
+  leerPlantillaWhatsapp,
+  PLANTILLA_WHATSAPP_DEFAULT,
+  VARIABLES_MENSAJE,
+} from '@/lib/mensajeCotizacion'
 
 /**
  * Cotizaciones de equipos usados. Replica la hoja "Cotizaciones" del Excel:
@@ -255,6 +262,11 @@ export function CotizacionesPage() {
         onClose={() => setMsgOpen(false)}
         valorActual={plantilla}
         onGuardar={guardarPlantilla}
+        subtitulo="El texto que se copia al tocar «WhatsApp» en un modelo."
+        variables={VARIABLES_MENSAJE}
+        plantillaDefault={PLANTILLA_WHATSAPP_DEFAULT}
+        construirPreview={(p) => construirMensajeCotizacion(p, EJEMPLO_MENSAJE)}
+        notaPreview={`Ejemplo con ${EJEMPLO_MENSAJE.modelo}. Al copiar, cada variable se reemplaza por los datos reales del equipo.`}
       />
     </div>
   )

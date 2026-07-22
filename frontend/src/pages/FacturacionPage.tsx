@@ -78,6 +78,16 @@ import {
 } from '@/lib/afip'
 import { fecha, money, money0, num, pad } from '@/lib/format'
 import { waLink, waNumeroArgentino } from '@/lib/whatsapp'
+import {
+  construirMensajeFactura,
+  EJEMPLO_FACTURA,
+  guardarPlantillaFactura,
+  leerPlantillaFactura,
+  PLANTILLA_FACTURA_DEFAULT,
+  valoresDeComprobante,
+  VARIABLES_FACTURA,
+} from '@/lib/mensajeFactura'
+import { MensajeWhatsappModal } from '@/components/MensajeWhatsappModal'
 import { ApiError } from '@/lib/api'
 import { cn, ctStagger } from '@/lib/utils'
 import { useAuth } from '@/store/auth'
@@ -179,24 +189,6 @@ function blobABase64(blob: Blob): Promise<string> {
   })
 }
 
-/** Mensaje de WhatsApp con el resumen del comprobante (mismos datos que el email). */
-function mensajeWhatsappFactura(c: Comprobante): string {
-  const nombre = (c.cliente_nombre || '').trim()
-  const saludo = nombre && nombre.toLowerCase() !== 'consumidor final' ? `Hola ${nombre},` : 'Hola,'
-  const lineas = [
-    saludo,
-    'Te compartimos el comprobante de tu compra:',
-    '',
-    `*Factura ${c.tipo} N° ${c.numero_formateado}*${c.emisor_nombre ? ` — ${c.emisor_nombre}` : ''}`,
-    `Fecha: ${fecha(c.fecha)}`,
-    `Total: ${money(c.total)}`,
-  ]
-  if (c.cae) {
-    lineas.push(`CAE: ${c.cae}${c.cae_vencimiento ? ` (vence ${fecha(c.cae_vencimiento)})` : ''}`)
-  }
-  lineas.push('', 'Ahora te adjuntamos el PDF de la factura. ¡Gracias por tu compra!')
-  return lineas.join('\n')
-}
 
 export function FacturacionPage() {
   const queryClient = useQueryClient()
@@ -831,6 +823,9 @@ function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void 
   const [email, setEmail] = useState('')
   const [enviando, setEnviando] = useState(false)
   const [telefono, setTelefono] = useState('')
+  // Plantilla del mensaje de WhatsApp (editable con el lápiz, igual que en Cotizaciones).
+  const [plantilla, setPlantilla] = useState(leerPlantillaFactura)
+  const [msgOpen, setMsgOpen] = useState(false)
   const { data: c, isLoading } = useQuery({
     queryKey: ['comprobante', id],
     queryFn: () => obtenerComprobante(id as number),
@@ -899,7 +894,15 @@ function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void 
       )
       return
     }
-    window.open(waLink(mensajeWhatsappFactura(c), numero), '_blank', 'noopener,noreferrer')
+    const mensaje = construirMensajeFactura(plantilla, valoresDeComprobante(c))
+    window.open(waLink(mensaje, numero), '_blank', 'noopener,noreferrer')
+  }
+
+  function guardarPlantilla(nueva: string) {
+    guardarPlantillaFactura(nueva)
+    setPlantilla(leerPlantillaFactura())
+    setMsgOpen(false)
+    toast.success('Mensaje guardado', 'Se usará al enviar facturas por WhatsApp.')
   }
 
   return (
@@ -1045,10 +1048,20 @@ function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void 
                   <MessageCircle className="h-4 w-4" />
                   WhatsApp
                 </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setMsgOpen(true)}
+                  title="Editar el mensaje de WhatsApp"
+                  aria-label="Editar el mensaje de WhatsApp"
+                >
+                  <Pencil className="h-4 w-4" />
+                </Button>
               </div>
               <p className="text-xs text-ink-400">
                 Se abre tu WhatsApp con el resumen listo para enviar; el PDF adjuntalo en el chat
-                (botón «Descargar PDF»). Sin teléfono, elegís el chat en WhatsApp.
+                (botón «Descargar PDF»). Sin teléfono, elegís el chat en WhatsApp. Con el lápiz
+                editás el texto del mensaje.
               </p>
             </div>
             <div className="flex justify-end gap-2.5">
@@ -1063,6 +1076,18 @@ function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void 
           </div>
         </>
       )}
+      <MensajeWhatsappModal
+        open={msgOpen}
+        onClose={() => setMsgOpen(false)}
+        valorActual={plantilla}
+        onGuardar={guardarPlantilla}
+        subtitulo="El texto que abre el botón «WhatsApp» del detalle de una factura."
+        variables={VARIABLES_FACTURA}
+        plantillaDefault={PLANTILLA_FACTURA_DEFAULT}
+        construirPreview={(p) => construirMensajeFactura(p, EJEMPLO_FACTURA)}
+        notaPreview="Ejemplo con una factura de muestra. Al enviar, cada variable se reemplaza por los datos reales del comprobante."
+        rows={9}
+      />
     </Modal>
   )
 }
