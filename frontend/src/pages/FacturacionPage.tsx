@@ -12,6 +12,7 @@ import {
   FileText,
   Gauge,
   Mail,
+  MessageCircle,
   Pencil,
   Phone,
   Plus,
@@ -76,6 +77,7 @@ import {
   tipoComprobante,
 } from '@/lib/afip'
 import { fecha, money, money0, num, pad } from '@/lib/format'
+import { waLink, waNumeroArgentino } from '@/lib/whatsapp'
 import { ApiError } from '@/lib/api'
 import { cn, ctStagger } from '@/lib/utils'
 import { useAuth } from '@/store/auth'
@@ -175,6 +177,25 @@ function blobABase64(blob: Blob): Promise<string> {
     reader.onerror = () => reject(new Error('No se pudo leer el PDF.'))
     reader.readAsDataURL(blob)
   })
+}
+
+/** Mensaje de WhatsApp con el resumen del comprobante (mismos datos que el email). */
+function mensajeWhatsappFactura(c: Comprobante): string {
+  const nombre = (c.cliente_nombre || '').trim()
+  const saludo = nombre && nombre.toLowerCase() !== 'consumidor final' ? `Hola ${nombre},` : 'Hola,'
+  const lineas = [
+    saludo,
+    'Te compartimos el comprobante de tu compra:',
+    '',
+    `*Factura ${c.tipo} N° ${c.numero_formateado}*${c.emisor_nombre ? ` — ${c.emisor_nombre}` : ''}`,
+    `Fecha: ${fecha(c.fecha)}`,
+    `Total: ${money(c.total)}`,
+  ]
+  if (c.cae) {
+    lineas.push(`CAE: ${c.cae}${c.cae_vencimiento ? ` (vence ${fecha(c.cae_vencimiento)})` : ''}`)
+  }
+  lineas.push('', 'Ahora te adjuntamos el PDF de la factura. ¡Gracias por tu compra!')
+  return lineas.join('\n')
 }
 
 export function FacturacionPage() {
@@ -809,11 +830,34 @@ function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void 
   const [descargando, setDescargando] = useState(false)
   const [email, setEmail] = useState('')
   const [enviando, setEnviando] = useState(false)
+  const [telefono, setTelefono] = useState('')
   const { data: c, isLoading } = useQuery({
     queryKey: ['comprobante', id],
     queryFn: () => obtenerComprobante(id as number),
     enabled: id != null,
   })
+
+  // El modal queda montado entre aperturas: al cambiar de comprobante se
+  // precarga el WhatsApp con el teléfono guardado en ESA factura.
+  const clienteTelefono = c?.cliente_telefono
+  useEffect(() => {
+    setTelefono(clienteTelefono ?? '')
+  }, [id, clienteTelefono])
+
+  // Facturas emitidas sin teléfono: si el cliente igual está en la base (por
+  // su documento), se toma el de ahí. Solo rellena si el campo sigue vacío,
+  // para no pisar lo que se esté tipeando.
+  const docCliente = c?.cliente_doc_numero
+  const { data: clientesBase = [] } = useQuery({
+    queryKey: ['fact-cliente-telefono', docCliente],
+    queryFn: () => buscarClientes(docCliente as string),
+    enabled: id != null && !clienteTelefono && !!docCliente,
+  })
+  useEffect(() => {
+    if (clienteTelefono) return
+    const enBase = clientesBase.find((cl) => cl.doc_numero === docCliente && cl.telefono)
+    if (enBase) setTelefono((actual) => actual || enBase.telefono)
+  }, [clienteTelefono, clientesBase, docCliente])
 
   async function descargar() {
     if (!c) return
@@ -841,6 +885,21 @@ function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void 
     } finally {
       setEnviando(false)
     }
+  }
+
+  /** Abre WhatsApp con el resumen precargado (el PDF se adjunta a mano en el chat). */
+  function enviarWhatsapp() {
+    if (!c) return
+    const crudo = telefono.trim()
+    const numero = crudo ? waNumeroArgentino(crudo) : null
+    if (crudo && !numero) {
+      toast.error(
+        'Teléfono inválido',
+        'No parece un celular argentino. Probá con área y número, ej.: 381 555-4433.',
+      )
+      return
+    }
+    window.open(waLink(mensajeWhatsappFactura(c), numero), '_blank', 'noopener,noreferrer')
   }
 
   return (
@@ -972,6 +1031,25 @@ function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void 
                 <Mail className="h-4 w-4" />
                 {enviando ? 'Enviando…' : 'Enviar'}
               </Button>
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  type="tel"
+                  value={telefono}
+                  onChange={(e) => setTelefono(e.target.value)}
+                  placeholder="Enviar por WhatsApp a… (381 555-4433)"
+                  className="flex-1"
+                />
+                <Button variant="outline" onClick={enviarWhatsapp}>
+                  <MessageCircle className="h-4 w-4" />
+                  WhatsApp
+                </Button>
+              </div>
+              <p className="text-xs text-ink-400">
+                Se abre tu WhatsApp con el resumen listo para enviar; el PDF adjuntalo en el chat
+                (botón «Descargar PDF»). Sin teléfono, elegís el chat en WhatsApp.
+              </p>
             </div>
             <div className="flex justify-end gap-2.5">
               <Button variant="outline" onClick={onClose}>
