@@ -36,23 +36,28 @@ con «Descargar PDF» y se adjunta a mano en el chat (la UI lo recuerda).
 
 ## 3. La plantilla es una preferencia GLOBAL (backend)
 
-A diferencia de la de Cotizaciones (localStorage, por dispositivo), esta se
-guarda en el backend y vale para todos los usuarios y dispositivos:
+Se guarda en el backend y vale para todos los usuarios y dispositivos (la de
+Cotizaciones también usa este sistema):
 
 - **`comun.models.Preferencia`**: clave única → valor de texto (hereda
   `ModeloBase`). Tabla `preferencias` (migración `comun/0001`).
 - **`comun.views.PreferenciaView`**: `GET/PUT /api/preferencias/<clave>/`.
   Solo claves declaradas en `CLAVES_PREFERENCIAS` (hoy:
-  `facturacion.mensaje_whatsapp` → permiso `ver_facturacion`); clave
-  desconocida → 404. Valor vacío = «sin personalizar» (el front usa su
-  default, así las mejoras del default llegan a quien nunca lo tocó).
+  `facturacion.mensaje_whatsapp` → permiso `ver_facturacion`, y
+  `cotizaciones.mensaje_whatsapp` → `ver_cotizaciones`); clave desconocida →
+  404. Valor vacío = «sin personalizar» (el front usa su default, así las
+  mejoras del default llegan a quien nunca lo tocó).
 - Permiso: `LecturaYEscrituraConPermiso` — leer y guardar es operación de
   mostrador, igual que facturar. Editable también desde el admin.
-- Front: `services/preferencias.ts` + react-query en `DetalleModal` (si el GET
-  falla, cae al texto por defecto y el botón sigue funcionando).
+- Front: `services/preferencias.ts` + react-query (si el GET falla, cae al
+  texto por defecto y el botón sigue funcionando).
+- **Migración desde localStorage (Cotizaciones)**: la plantilla vivía en el
+  navegador; al abrir la página, si el backend aún no tiene valor y este
+  dispositivo tenía uno personalizado, se sube solo y se limpia la copia
+  local (`plantillaLocalPendiente()` en `lib/mensajeCotizacion.ts`).
 
-Para sumar otra preferencia global (ej. la plantilla de Cotizaciones): agregar
-la clave a `CLAVES_PREFERENCIAS` y consumirla igual desde el front.
+Para sumar otra preferencia global: agregar la clave a `CLAVES_PREFERENCIAS`
+y consumirla igual desde el front.
 
 ## 4. Tests
 

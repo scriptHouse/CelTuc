@@ -1,15 +1,22 @@
 /**
- * Mensaje de WhatsApp de las cotizaciones: plantilla configurable + guardado.
+ * Mensaje de WhatsApp de las cotizaciones: plantilla configurable.
  *
  * El texto que se copia al tocar "WhatsApp" en un modelo ya no está fijo en el
  * código: es una plantilla editable con variables (`{modelo}`, `{precio}`…) que
- * se rellenan con los datos reales del equipo al copiar. Se guarda en
- * `localStorage` (por dispositivo), igual que la dirección de los documentos.
+ * se rellenan con los datos reales del equipo al copiar. Se guarda en el
+ * BACKEND como preferencia global (`services/preferencias`), igual que la de
+ * facturación: configurarla una vez vale para todos los usuarios y
+ * dispositivos. (Antes vivía en `localStorage`; queda una migración one-time.)
  */
 
 import type { VariableMensaje } from '@/components/MensajeWhatsappModal'
 
-const KEY = 'celtuc:cotizaciones:mensajeWhatsapp'
+/** Clave de la preferencia global (debe existir en el backend). */
+export const CLAVE_MENSAJE_COTIZACION = 'cotizaciones.mensaje_whatsapp'
+
+// Donde vivía la plantilla antes (por dispositivo). Solo se usa para migrar
+// una vez ese valor al backend y limpiarlo.
+const KEY_LOCAL = 'celtuc:cotizaciones:mensajeWhatsapp'
 
 /** Texto por defecto (la misma redacción que traía la planilla). */
 export const PLANTILLA_WHATSAPP_DEFAULT =
@@ -33,26 +40,29 @@ export const EJEMPLO_MENSAJE = {
   max: '530',
 }
 
-/** Plantilla guardada, o la de por defecto si no hay ninguna. */
-export function leerPlantillaWhatsapp(): string {
+/**
+ * Plantilla efectiva a partir del valor guardado en el backend: vacío (o aún
+ * sin cargar) significa «sin personalizar» y se usa la de por defecto.
+ */
+export function plantillaEfectiva(valorGuardado?: string): string {
+  return valorGuardado?.trim() ? valorGuardado : PLANTILLA_WHATSAPP_DEFAULT
+}
+
+/** Plantilla personalizada que quedó en ESTE dispositivo, o null si no hay. */
+export function plantillaLocalPendiente(): string | null {
   try {
-    const guardada = localStorage.getItem(KEY)
-    if (guardada && guardada.trim()) return guardada
+    const guardada = localStorage.getItem(KEY_LOCAL)
+    if (guardada && guardada.trim() && guardada !== PLANTILLA_WHATSAPP_DEFAULT) return guardada
   } catch {
     /* localStorage no disponible */
   }
-  return PLANTILLA_WHATSAPP_DEFAULT
+  return null
 }
 
-/**
- * Guarda la plantilla. Si queda vacía o es igual a la de por defecto, borra la
- * personalización (así "restaurar" no deja basura en localStorage).
- */
-export function guardarPlantillaWhatsapp(plantilla: string): void {
-  const limpia = plantilla.trim()
+/** Limpia la copia local una vez migrada al backend. */
+export function borrarPlantillaLocal(): void {
   try {
-    if (!limpia || limpia === PLANTILLA_WHATSAPP_DEFAULT) localStorage.removeItem(KEY)
-    else localStorage.setItem(KEY, limpia)
+    localStorage.removeItem(KEY_LOCAL)
   } catch {
     /* localStorage no disponible */
   }

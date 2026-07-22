@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useMemo, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Eraser, Lightbulb, MessageCircle, Search, SearchX, SlidersHorizontal, Smartphone } from 'lucide-react'
 import type { ModeloEquipo } from '@/types'
 import { listarModelos } from '@/services/cotizaciones'
@@ -18,13 +18,16 @@ import { useToast } from '@/components/ToastProvider'
 import { CotizacionesManager } from '@/components/CotizacionesManager'
 import { MensajeWhatsappModal } from '@/components/MensajeWhatsappModal'
 import {
+  borrarPlantillaLocal,
+  CLAVE_MENSAJE_COTIZACION,
   construirMensajeCotizacion,
   EJEMPLO_MENSAJE,
-  guardarPlantillaWhatsapp,
-  leerPlantillaWhatsapp,
   PLANTILLA_WHATSAPP_DEFAULT,
+  plantillaEfectiva,
+  plantillaLocalPendiente,
   VARIABLES_MENSAJE,
 } from '@/lib/mensajeCotizacion'
+import { guardarPreferencia, obtenerPreferencia } from '@/services/preferencias'
 
 /**
  * Cotizaciones de equipos usados. Replica la hoja "Cotizaciones" del Excel:
@@ -67,11 +70,53 @@ export function CotizacionesPage() {
   const [busqueda, setBusqueda] = useState('')
   const [configOpen, setConfigOpen] = useState(false)
   const [msgOpen, setMsgOpen] = useState(false)
-  const [plantilla, setPlantilla] = useState(leerPlantillaWhatsapp)
+  const queryClient = useQueryClient()
 
   const { data: modelos = [], isLoading } = useQuery({
     queryKey: ['cotizaciones-modelos'],
     queryFn: listarModelos,
+  })
+
+  // Plantilla del mensaje: preferencia GLOBAL del backend (vale para todos los
+  // usuarios y dispositivos). Mientras carga o si falla, cae a lo que quedó en
+  // este dispositivo (localStorage de la versión anterior) o al default.
+  const { data: prefMensaje } = useQuery({
+    queryKey: ['preferencia', CLAVE_MENSAJE_COTIZACION],
+    queryFn: () => obtenerPreferencia(CLAVE_MENSAJE_COTIZACION),
+    staleTime: 5 * 60 * 1000,
+  })
+  const plantilla = prefMensaje
+    ? plantillaEfectiva(prefMensaje.valor)
+    : (plantillaLocalPendiente() ?? PLANTILLA_WHATSAPP_DEFAULT)
+
+  // Migración one-time: si este dispositivo tenía una plantilla personalizada
+  // y el backend todavía no tiene ninguna, se sube y se limpia la copia local.
+  useEffect(() => {
+    if (!prefMensaje || prefMensaje.valor.trim()) return
+    const local = plantillaLocalPendiente()
+    if (!local) return
+    guardarPreferencia(CLAVE_MENSAJE_COTIZACION, local)
+      .then((pref) => {
+        queryClient.setQueryData(['preferencia', CLAVE_MENSAJE_COTIZACION], pref)
+        borrarPlantillaLocal()
+      })
+      .catch(() => {
+        /* sin conexión o sin permiso: se reintenta en la próxima visita */
+      })
+  }, [prefMensaje, queryClient])
+
+  const guardarMensaje = useMutation({
+    // Guardar el texto default equivale a "sin personalizar": se manda vacío,
+    // así futuras mejoras del default llegan solas a quien nunca lo tocó.
+    mutationFn: (nueva: string) =>
+      guardarPreferencia(CLAVE_MENSAJE_COTIZACION, nueva.trim() === PLANTILLA_WHATSAPP_DEFAULT ? '' : nueva),
+    onSuccess: (pref) => {
+      queryClient.setQueryData(['preferencia', CLAVE_MENSAJE_COTIZACION], pref)
+      borrarPlantillaLocal()
+      setMsgOpen(false)
+      toast.success('Mensaje guardado', 'Vale para todos los usuarios y dispositivos.')
+    },
+    onError: (e) => toast.error('No se pudo guardar', (e as Error).message),
   })
 
   const activos = useMemo(
@@ -107,13 +152,6 @@ export function CotizacionesPage() {
     } catch {
       toast.error('No se pudo copiar', 'Copiá el rango a mano desde la tarjeta.')
     }
-  }
-
-  function guardarPlantilla(nueva: string) {
-    guardarPlantillaWhatsapp(nueva)
-    setPlantilla(leerPlantillaWhatsapp())
-    setMsgOpen(false)
-    toast.success('Mensaje guardado', 'Se usará al copiar la respuesta de WhatsApp.')
   }
 
   return (
@@ -261,7 +299,7 @@ export function CotizacionesPage() {
         open={msgOpen}
         onClose={() => setMsgOpen(false)}
         valorActual={plantilla}
-        onGuardar={guardarPlantilla}
+        onGuardar={(nueva) => guardarMensaje.mutate(nueva)}
         subtitulo="El texto que se copia al tocar «WhatsApp» en un modelo."
         variables={VARIABLES_MENSAJE}
         plantillaDefault={PLANTILLA_WHATSAPP_DEFAULT}

@@ -17,6 +17,7 @@ from .models import Preferencia
 # con estar autenticado). Agregar aca la clave al sumar una preferencia nueva.
 CLAVES_PREFERENCIAS = {
     'facturacion.mensaje_whatsapp': 'ver_facturacion',
+    'cotizaciones.mensaje_whatsapp': 'ver_cotizaciones',
 }
 
 # Tope holgado para plantillas de texto; corta un mal uso, no un uso real.

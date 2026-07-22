@@ -56,6 +56,21 @@ class PreferenciasTests(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.data['valor'], '')
 
+    def test_cada_clave_guarda_su_valor(self):
+        # Las claves son independientes entre sí (facturación vs cotizaciones).
+        cliente = self._client(self.admin)
+        cliente.put(self._url(), {'valor': 'Mensaje facturas'}, format='json')
+        r = cliente.put(
+            self._url('cotizaciones.mensaje_whatsapp'), {'valor': 'Mensaje cotizaciones'},
+            format='json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(cliente.get(self._url()).data['valor'], 'Mensaje facturas')
+        self.assertEqual(
+            cliente.get(self._url('cotizaciones.mensaje_whatsapp')).data['valor'],
+            'Mensaje cotizaciones',
+        )
+
     def test_clave_desconocida_es_404(self):
         cliente = self._client(self.admin)
         self.assertEqual(cliente.get(self._url('otra.clave')).status_code, 404)
