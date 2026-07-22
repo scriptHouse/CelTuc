@@ -55,7 +55,9 @@ class StockProducto(ModeloBase):
         related_name='stocks',
         verbose_name='sucursal',
     )
-    cantidad = models.PositiveIntegerField('cantidad', default=0)
+    # Puede quedar NEGATIVA: una venta confirmada con faltante no se pierde;
+    # el rojo es la senial de que el conteo esta atrasado y hay que corregirlo.
+    cantidad = models.IntegerField('cantidad', default=0)
     stock_minimo = models.PositiveIntegerField(
         'stock minimo',
         null=True,
@@ -115,7 +117,9 @@ class MovimientoStock(ModeloBase):
     )
     tipo = models.CharField('tipo', max_length=20, choices=Tipo.choices)
     delta = models.IntegerField('delta', help_text='Firmado: positivo entra, negativo sale.')
-    resultante = models.PositiveIntegerField('cantidad resultante')
+    # Puede ser negativa (venta confirmada con faltante): el kardex refleja
+    # el resultado real, aunque este en rojo.
+    resultante = models.IntegerField('cantidad resultante')
     nota = models.CharField('nota', max_length=200, blank=True)
 
     class Meta:
@@ -143,6 +147,15 @@ class Venta(ModeloBase):
         TARJETA = 'tarjeta', 'Tarjeta'
         OTRO = 'otro', 'Otro'
 
+    class Facturacion(models.TextChoices):
+        """Como se factura la venta. Es una ETIQUETA para separar la plata por
+        caja (RI vs monotributo/sin factura); la factura fiscal en si se emite
+        desde el modulo Facturacion, igual que siempre."""
+
+        FACTURA_RI = 'factura_ri', 'Factura A/B (Responsable Inscripto)'
+        FACTURA_C = 'factura_c', 'Factura C (Monotributo)'
+        SIN_FACTURA = 'sin_factura', 'Sin factura'
+
     sucursal = models.ForeignKey(
         Sucursal,
         on_delete=models.PROTECT,
@@ -151,6 +164,10 @@ class Venta(ModeloBase):
     )
     forma_pago = models.CharField(
         'forma de pago', max_length=20, choices=FormaPago.choices, default=FormaPago.EFECTIVO,
+    )
+    facturacion = models.CharField(
+        'facturacion', max_length=20, choices=Facturacion.choices,
+        default=Facturacion.SIN_FACTURA,
     )
     nota = models.CharField('nota', max_length=200, blank=True)
     total = models.DecimalField('total ($)', max_digits=14, decimal_places=2, default=0)
@@ -200,12 +217,15 @@ class ItemVenta(models.Model):
 # ===== Operaciones =====
 
 def aplicar_ajuste(producto, sucursal, *, delta=None, cantidad=None, tipo='',
-                   nota='', usuario=None):
+                   nota='', usuario=None, permitir_negativo=False):
     """Cambia el stock de un producto en una sucursal y registra el movimiento.
 
-    Se pasa `delta` (suma/resta) O `cantidad` (fija el valor final). Nunca deja
-    la cantidad por debajo de 0 (ValidationError legible). Si el cambio neto es
-    0 no se registra movimiento. Devuelve (fila_stock, movimiento | None).
+    Se pasa `delta` (suma/resta) O `cantidad` (fija el valor final). Por defecto
+    nunca deja la cantidad por debajo de 0 (ValidationError legible); con
+    `permitir_negativo` (venta confirmada con faltante) el stock puede quedar
+    negativo — la senial de que el conteo del sistema esta atrasado y hay que
+    corregirlo. Si el cambio neto es 0 no se registra movimiento. Devuelve
+    (fila_stock, movimiento | None).
     """
     with transaction.atomic():
         fila, _ = StockProducto.objects.select_for_update().get_or_create(
@@ -216,7 +236,7 @@ def aplicar_ajuste(producto, sucursal, *, delta=None, cantidad=None, tipo='',
             delta = int(cantidad) - fila.cantidad
         delta = int(delta or 0)
         nueva = fila.cantidad + delta
-        if nueva < 0:
+        if nueva < 0 and not permitir_negativo:
             raise ValidationError(
                 f'No hay stock suficiente de "{producto.nombre}" en {sucursal.nombre}: '
                 f'hay {fila.cantidad} y el ajuste resta {-delta}.'
@@ -250,12 +270,16 @@ def aplicar_ajuste(producto, sucursal, *, delta=None, cantidad=None, tipo='',
         return fila, movimiento
 
 
-def registrar_venta(sucursal, items, *, forma_pago='', nota='', usuario=None):
+def registrar_venta(sucursal, items, *, forma_pago='', facturacion='', nota='',
+                    usuario=None, permitir_faltante=False):
     """Crea la venta y descuenta el stock, todo o nada.
 
     `items` es una lista de (producto, cantidad, precio_unitario). Si algun
     producto no tiene stock suficiente en la sucursal, NO se registra nada
-    (ValidationError legible con el nombre del producto).
+    (ValidationError legible con el nombre del producto) — salvo que venga
+    `permitir_faltante` (el vendedor ya confirmo la advertencia): la venta
+    NUNCA se pierde por un conteo atrasado y el stock queda en negativo para
+    corregirlo despues en Inventario.
     """
     if not items:
         raise ValidationError('La venta no tiene items.')
@@ -263,6 +287,7 @@ def registrar_venta(sucursal, items, *, forma_pago='', nota='', usuario=None):
         venta = Venta.objects.create(
             sucursal=sucursal,
             forma_pago=forma_pago or Venta.FormaPago.EFECTIVO,
+            facturacion=facturacion or Venta.Facturacion.SIN_FACTURA,
             nota=nota,
             creado_por=usuario,
             actualizado_por=usuario,
@@ -283,6 +308,7 @@ def registrar_venta(sucursal, items, *, forma_pago='', nota='', usuario=None):
                 tipo=MovimientoStock.Tipo.VENTA,
                 nota=f'Venta #{venta.pk}',
                 usuario=usuario,
+                permitir_negativo=permitir_faltante,
             )
         venta.total = total
         venta.save(update_fields=['total'])

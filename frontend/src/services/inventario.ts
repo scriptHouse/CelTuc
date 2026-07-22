@@ -1,3 +1,4 @@
+import type { FacturacionVenta } from '@/types'
 import { api } from '@/lib/api'
 import { useAuth } from '@/store/auth'
 
@@ -104,6 +105,13 @@ export function transferirStock(
 
 export type FormaPago = 'efectivo' | 'transferencia' | 'tarjeta' | 'otro'
 
+/**
+ * Cómo se factura la venta: separa la plata por caja (lo del RI a su caja;
+ * monotributo y sin factura a la general). Definido en `@/types` y
+ * re-exportado acá junto al resto del contrato de ventas.
+ */
+export type { FacturacionVenta } from '@/types'
+
 export interface ItemVenta {
   producto: number
   nombre: string
@@ -118,6 +126,7 @@ export interface Venta {
   sucursal: number
   sucursal_nombre: string
   forma_pago: FormaPago
+  facturacion: FacturacionVenta
   nota: string
   total: number
   usuario: string | null
@@ -125,6 +134,8 @@ export interface Venta {
   creado: string // ISO
   /** Id del movimiento de caja generado (null si no había turno abierto). */
   movimiento_caja?: number | null
+  /** Nombre de la caja donde quedó anotada (el canal fiscal decide cuál). */
+  caja_arqueo?: string | null
   /** Aviso del backend cuando la venta no entró en ningún arqueo. */
   aviso_caja?: string | null
 }
@@ -132,10 +143,14 @@ export interface Venta {
 export interface VentaInput {
   sucursal: number
   forma_pago: FormaPago
+  /** Cómo se factura: decide a qué caja entra la plata (default: sin factura). */
+  facturacion?: FacturacionVenta
   nota?: string
   items: Array<{ producto: number; cantidad: number; precio_unitario: number }>
-  /** Caja donde anotar la venta en el arqueo (opcional). */
+  /** Caja donde anotar la venta si no hay cajas con canal fiscal (opcional). */
   caja?: number
+  /** True = el vendedor confirmó vender con faltante: el stock queda negativo. */
+  permitir_faltante?: boolean
 }
 
 export function registrarVenta(input: VentaInput): Promise<Venta> {

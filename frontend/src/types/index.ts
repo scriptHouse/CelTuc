@@ -589,10 +589,26 @@ export interface CajaConfig {
   denominaciones: number[]
 }
 
+/**
+ * Canal fiscal de una caja: qué ventas entran solas según cómo se facturan.
+ * 'factura_ri' recibe lo facturado con Responsable Inscripto (Factura A/B);
+ * 'general' recibe la Factura C de monotributo y lo que va sin factura;
+ * '' es una caja común, fuera del enrutamiento (se elige a mano).
+ */
+export type CanalCaja = 'factura_ri' | 'general' | ''
+
+/**
+ * Cómo se factura una venta de mostrador. Es una etiqueta que queda guardada
+ * en la venta y decide a qué caja entra la plata; la factura fiscal en sí se
+ * emite desde el módulo Facturación, igual que siempre.
+ */
+export type FacturacionVenta = 'factura_ri' | 'factura_c' | 'sin_factura'
+
 /** Una caja física del local ("Mostrador", "Service"...). */
 export interface CajaRegistradora {
   id: string
   nombre: string
+  canal: CanalCaja
   activa: boolean
   creadaEn: string // ISO
 }
@@ -609,6 +625,8 @@ export interface MovimientoCaja {
   monto: number
   motivo: string
   detalle?: string
+  /** Cómo se facturó la venta que originó el movimiento (solo tipo venta). */
+  facturacion?: FacturacionVenta
   usuario: string
   fecha: string // ISO
 }

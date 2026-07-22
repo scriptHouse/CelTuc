@@ -1,15 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Banknote, Loader2, Minus, Plus, ShoppingCart, Trash2 } from 'lucide-react'
-import type { ProductoCatalogo } from '@/types'
+import { AlertTriangle, Banknote, FileCheck2, Loader2, Lock, Minus, Plus, ShoppingCart, Trash2, Wallet } from 'lucide-react'
+import type { CajaRegistradora, ProductoCatalogo } from '@/types'
 import { listarProductos } from '@/services/productos'
 import {
   listarStock,
   listarSucursales,
   listarVentas,
   registrarVenta,
+  type FacturacionVenta,
   type FormaPago,
 } from '@/services/inventario'
+import { FACTURACIONES, cajaParaFacturacion } from '@/components/caja/medios'
+import { guardarBorradorFacturaVenta } from '@/lib/borradorFactura'
+import { puedeVer } from '@/lib/permisos'
+import { useAuth } from '@/store/auth'
+import { useConfirm } from '@/components/ConfirmProvider'
 import { ApiError } from '@/lib/api'
 import { money, money0, num, tiempoRelativo } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -44,7 +51,17 @@ const FORMAS: Array<{ value: FormaPago; label: string }> = [
   { value: 'otro', label: 'Otro' },
 ]
 
-export function VentaRapida({ cajaId }: { cajaId?: string }) {
+export function VentaRapida({
+  cajaId,
+  cajas = [],
+  cajasAbiertas = [],
+}: {
+  cajaId?: string
+  /** Cajas del local (con su canal fiscal) para mostrar a dónde va la plata. */
+  cajas?: CajaRegistradora[]
+  /** Ids de cajas con turno abierto (para avisar si la de destino está cerrada). */
+  cajasAbiertas?: string[]
+}) {
   const [abierta, setAbierta] = useState(false)
 
   // Sin permiso de inventario (la API responde 403) el modulito no se muestra:
@@ -117,6 +134,8 @@ export function VentaRapida({ cajaId }: { cajaId?: string }) {
         onCerrar={() => setAbierta(false)}
         sucursales={sucursales}
         cajaId={cajaId}
+        cajas={cajas}
+        cajasAbiertas={cajasAbiertas}
       />
     </>
   )
@@ -127,14 +146,21 @@ function VentaModal({
   onCerrar,
   sucursales,
   cajaId,
+  cajas,
+  cajasAbiertas,
 }: {
   abierta: boolean
   onCerrar: () => void
   sucursales: Array<{ id: number; nombre: string; activa: boolean; orden: number }>
   cajaId?: string
+  cajas: CajaRegistradora[]
+  cajasAbiertas: string[]
 }) {
   const toast = useToast()
   const queryClient = useQueryClient()
+  const confirm = useConfirm()
+  const navigate = useNavigate()
+  const usuario = useAuth((s) => s.usuario)
 
   const activas = useMemo(
     () => sucursales.filter((s) => s.activa).sort((a, b) => a.orden - b.orden || a.id - b.id),
@@ -156,6 +182,7 @@ function VentaModal({
 
   const [sucursalId, setSucursalId] = useState<number | null>(null)
   const [formaPago, setFormaPago] = useState<FormaPago>('efectivo')
+  const [facturacion, setFacturacion] = useState<FacturacionVenta>('sin_factura')
   const [lineas, setLineas] = useState<Linea[]>([])
   const [nota, setNota] = useState('')
   const [buscar, setBuscar] = useState('')
@@ -164,11 +191,16 @@ function VentaModal({
     if (!abierta) return
     setSucursalId(activas[0]?.id ?? null)
     setFormaPago('efectivo')
+    setFacturacion('sin_factura')
     setLineas([])
     setNota('')
     setBuscar('')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [abierta])
+
+  // La caja que recibe la plata según cómo se factura (si hay cajas con canal).
+  const cajaDestino = cajaParaFacturacion(cajas, facturacion)
+  const destinoAbierto = cajaDestino !== null && cajasAbiertas.includes(cajaDestino.id)
 
   const stockDe = useMemo(() => {
     const mapa = new Map<string, number>()
@@ -223,7 +255,7 @@ function VentaModal({
   const hayFaltantes = sucursalId !== null && lineas.some((l) => l.cantidad > disponibles(l.producto.id))
 
   const guardar = useMutation({
-    mutationFn: () => {
+    mutationFn: (permitirFaltante: boolean) => {
       if (sucursalId === null) throw new ApiError(0, 'Elegí la sucursal.', null)
       if (lineas.length === 0) throw new ApiError(0, 'Agregá al menos un producto.', null)
       if (lineas.some((l) => !Number.isFinite(l.precio) || l.precio < 0)) {
@@ -232,8 +264,10 @@ function VentaModal({
       return registrarVenta({
         sucursal: sucursalId,
         forma_pago: formaPago,
+        facturacion,
         nota: nota.trim(),
         caja: cajaId ? Number(cajaId) : undefined,
+        permitir_faltante: permitirFaltante || undefined,
         items: lineas.map((l) => ({
           producto: l.producto.id,
           cantidad: l.cantidad,
@@ -241,39 +275,102 @@ function VentaModal({
         })),
       })
     },
-    onSuccess: (venta) => {
+    onSuccess: async (venta) => {
       queryClient.invalidateQueries({ queryKey: ['inv-stock'] })
       queryClient.invalidateQueries({ queryKey: ['inv-ventas'] })
       queryClient.invalidateQueries({ queryKey: ['inv-movimientos'] })
       queryClient.invalidateQueries({ queryKey: ['caja'] })
+      const arqueo = venta.movimiento_caja
+        ? venta.caja_arqueo
+          ? ` y anotada en «${venta.caja_arqueo}»`
+          : ' y anotada en el arqueo'
+        : ''
       toast.success(
         `Venta #${venta.id} registrada`,
-        `${money0(Number(venta.total))} en ${venta.sucursal_nombre} — stock descontado${venta.movimiento_caja ? ' y anotada en el arqueo' : ''}.`,
+        `${money0(Number(venta.total))} en ${venta.sucursal_nombre} — stock descontado${arqueo}.`,
       )
       if (!venta.movimiento_caja) {
         toast.info('La venta no entró en ningún arqueo', venta.aviso_caja ?? 'No hay un turno de caja abierto.')
       }
       onCerrar()
+
+      // Venta marcada como facturable: ofrecemos emitir la factura YA, en el
+      // módulo Facturación de siempre (mismo modal, mismas validaciones, mismo
+      // ARCA) con los ítems precargados. Solo si la cuenta puede facturar.
+      if (venta.facturacion !== 'sin_factura' && puedeVer(usuario, 'ver_facturacion')) {
+        const esRI = venta.facturacion === 'factura_ri'
+        const ok = await confirm({
+          title: '¿Emitir la factura ahora?',
+          icon: FileCheck2,
+          confirmLabel: 'Facturar ahora',
+          cancelLabel: 'Después',
+          description: `La venta #${venta.id} ya quedó registrada. Te llevo a Facturación con los ítems precargados para emitir la ${esRI ? 'Factura A/B (Responsable Inscripto)' : 'Factura C (Monotributo)'} con CAE, como siempre.`,
+        })
+        if (ok) {
+          guardarBorradorFacturaVenta({
+            ventaId: venta.id,
+            emisorCondicion: esRI ? 'responsable_inscripto' : 'monotributista',
+            items: lineas.map((l) => ({
+              descripcion: [l.producto.nombre, l.producto.calidad].filter(Boolean).join(' · '),
+              cantidad: l.cantidad,
+              precioFinal: Number.isFinite(l.precio) ? l.precio : 0,
+            })),
+            observaciones: `Venta de mostrador #${venta.id}`,
+          })
+          navigate('/facturacion')
+        }
+      }
     },
     onError: (e) =>
       toast.error('No se pudo registrar', e instanceof ApiError ? e.message : undefined),
   })
 
+  /** La venta NUNCA se bloquea por stock: con faltante solo se pide confirmar. */
+  async function handleRegistrar() {
+    if (hayFaltantes) {
+      const faltantes = lineas.filter((l) => l.cantidad > disponibles(l.producto.id))
+      const ok = await confirm({
+        title: 'Stock insuficiente según el sistema',
+        tone: 'warning',
+        icon: AlertTriangle,
+        confirmLabel: 'Registrar la venta igual',
+        cancelLabel: 'Revisar',
+        description: (
+          <span className="block space-y-2.5">
+            <span className="block">
+              Estás vendiendo más unidades de las que figuran en stock:
+            </span>
+            <span className="block space-y-1 rounded-xl bg-ink-50 px-3.5 py-2.5 text-left">
+              {faltantes.map((l) => (
+                <span key={l.key} className="flex items-center justify-between gap-3">
+                  <span className="min-w-0 truncate">{l.producto.nombre}</span>
+                  <span className="tnum shrink-0 font-medium text-ink-900">
+                    quedan {num(disponibles(l.producto.id))} · vendés {num(l.cantidad)}
+                  </span>
+                </span>
+              ))}
+            </span>
+            <span className="block">
+              La venta se registra <b>igual</b> y el stock queda en negativo, para
+              corregir después el conteo en Inventario.
+            </span>
+          </span>
+        ),
+      })
+      if (!ok) return
+    }
+    guardar.mutate(hayFaltantes)
+  }
+
   return (
     <Modal open={abierta} onClose={onCerrar} size="xl" labelledBy="venta-rapida-titulo">
-      <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-4">
-        <div>
-          <h2 id="venta-rapida-titulo" className="text-lg font-semibold text-ink-950">
-            Registrar venta
-          </h2>
-          <p className="text-xs text-ink-400">
-            Descuenta el stock al instante y queda en el historial con tu usuario.
-          </p>
-        </div>
-        <span className="hidden items-center gap-1.5 rounded-full bg-emerald-600/10 px-2.5 py-1 text-[0.65rem] font-semibold uppercase tracking-wide text-emerald-700 ring-1 ring-emerald-600/25 sm:inline-flex dark:text-emerald-400">
-          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-          backend real
-        </span>
+      <div className="border-b border-line px-5 py-4">
+        <h2 id="venta-rapida-titulo" className="text-lg font-semibold text-ink-950">
+          Registrar venta
+        </h2>
+        <p className="text-xs text-ink-400">
+          Descuenta el stock al instante y queda en el historial con tu usuario.
+        </p>
       </div>
 
       <div className="max-h-[72vh] space-y-4 overflow-y-auto px-5 py-5">
@@ -310,6 +407,58 @@ function VentaModal({
               Con efectivo/transferencia se sugiere el precio cash; con tarjeta, el de lista.
             </p>
           </div>
+        </div>
+
+        {/* Cómo se factura: decide sola a qué caja entra la plata. */}
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-ink-500">¿Cómo se factura?</label>
+          <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Cómo se factura">
+            {FACTURACIONES.map((f) => {
+              const activa = facturacion === f.value
+              const Icono = f.icono
+              return (
+                <button
+                  key={f.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={activa}
+                  onClick={() => setFacturacion(f.value)}
+                  className={cn(
+                    'flex flex-col items-start gap-0.5 rounded-2xl border px-3 py-2.5 text-left transition-all duration-150',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900',
+                    activa
+                      ? 'border-ink-950 bg-ink-950 text-on-ink shadow-[0_6px_14px_rgba(10,10,11,0.16)]'
+                      : 'border-line-strong bg-surface text-ink-700 hover:border-ink-300 hover:bg-ink-50',
+                  )}
+                >
+                  <span className="inline-flex items-center gap-1.5 text-sm font-semibold">
+                    <Icono className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+                    {f.label}
+                  </span>
+                  <span className={cn('text-[0.68rem]', activa ? 'text-on-ink/70' : 'text-ink-400')}>
+                    {f.hint}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+          {cajaDestino && (
+            <p
+              className={cn(
+                'mt-2 inline-flex items-center gap-1.5 text-xs',
+                destinoAbierto ? 'text-ink-500' : 'font-medium text-amber-700 dark:text-amber-400',
+              )}
+            >
+              {destinoAbierto ? (
+                <Wallet className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              ) : (
+                <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              )}
+              {destinoAbierto
+                ? <>La plata entra al arqueo de <b>«{cajaDestino.nombre}»</b>.</>
+                : <>La caja <b>«{cajaDestino.nombre}»</b> está cerrada: abrila para que la venta entre a su arqueo.</>}
+            </p>
+          )}
         </div>
 
         <div>
@@ -419,8 +568,12 @@ function VentaModal({
         </div>
 
         {hayFaltantes && (
-          <p className="rounded-xl bg-ink-50 px-3 py-2 text-xs font-medium text-ink-700">
-            Hay cantidades por encima del stock: la venta se va a rechazar tal cual está.
+          <p className="flex items-start gap-2 rounded-xl bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-800 ring-1 ring-amber-500/25 dark:text-amber-300">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span>
+              Hay cantidades por encima del stock que figura. La venta se puede registrar
+              igual: te pedimos una confirmación y el stock queda en negativo.
+            </span>
           </p>
         )}
 
@@ -430,7 +583,7 @@ function VentaModal({
           </Button>
           <Button
             type="button"
-            onClick={() => guardar.mutate()}
+            onClick={handleRegistrar}
             disabled={guardar.isPending || lineas.length === 0 || sucursalId === null}
             className="bg-emerald-600 text-white hover:bg-emerald-700 active:bg-emerald-700 focus-visible:ring-emerald-600"
           >

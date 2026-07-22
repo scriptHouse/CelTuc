@@ -68,6 +68,7 @@ export function Select({
   const triggerRef = useRef<HTMLButtonElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
 
   const selectedOption = options.find((option) => option.value === value)
 
@@ -103,6 +104,17 @@ export function Select({
     const activa = listRef.current?.children[resaltada]
     if (activa instanceof HTMLElement) activa.scrollIntoView({ block: 'nearest' })
   }, [isOpen, resaltada, filteredOptions.length])
+
+  // El panel es `absolute`: dentro de un contenedor con scroll (el cuerpo de
+  // un modal) puede quedar cortado abajo. Al abrir, se acerca el scroll del
+  // contenedor lo justo para que el desplegable se vea entero.
+  useEffect(() => {
+    if (!isOpen) return
+    const frame = window.requestAnimationFrame(() => {
+      panelRef.current?.scrollIntoView({ block: 'nearest' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [isOpen])
 
   function abrir() {
     // Al abrir, el buscador está vacío: las opciones filtradas son todas.
@@ -178,7 +190,10 @@ export function Select({
       </button>
 
       {isOpen && (
-        <div className="ct-dropdown absolute left-0 right-0 z-40 mt-2 overflow-hidden rounded-xl border border-line bg-surface shadow-[0_18px_50px_rgba(10,10,11,0.16)]">
+        <div
+          ref={panelRef}
+          className="ct-dropdown absolute left-0 right-0 z-40 mt-2 overflow-hidden rounded-xl border border-line bg-surface shadow-[0_18px_50px_rgba(10,10,11,0.16)]"
+        >
           {searchable && (
             <div className="border-b border-line p-2">
               <div className="relative">

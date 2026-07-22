@@ -71,9 +71,24 @@ class ConfiguracionCaja(ModeloBase):
 
 
 class Caja(ModeloBase):
-    """Una caja fisica del local ('Principal', 'Mostrador', 'Service'...)."""
+    """Una caja fisica del local ('Principal', 'Mostrador', 'Service'...).
+
+    El ``canal`` separa la plata por regimen fiscal: lo facturado con el
+    Responsable Inscripto (Factura A/B) va a su caja, y lo demas (Factura C
+    de monotributo o sin factura) a la general. Las ventas de mostrador se
+    enrutan solas segun como se facturan; una caja sin canal no participa
+    del enrutamiento (comportamiento historico: se elige a mano).
+    """
+
+    class Canal(models.TextChoices):
+        FACTURA_RI = 'factura_ri', 'Facturado RI (Factura A/B)'
+        GENERAL = 'general', 'Monotributo y sin factura'
 
     nombre = models.CharField('nombre', max_length=120)
+    canal = models.CharField(
+        'canal fiscal', max_length=20, choices=Canal.choices, blank=True, default='',
+        help_text='Que ventas entran solas a esta caja segun como se facturan.',
+    )
     orden = models.PositiveSmallIntegerField('orden', default=0)
     activa = models.BooleanField('activa', default=True)
 
@@ -87,6 +102,13 @@ class Caja(ModeloBase):
                 fields=('nombre',),
                 condition=models.Q(borrado=False),
                 name='uq_caja_viva',
+            ),
+            # Un solo cajon por canal fiscal: si hubiera dos, el enrutamiento
+            # de ventas seria ambiguo.
+            models.UniqueConstraint(
+                fields=('canal',),
+                condition=models.Q(borrado=False) & ~models.Q(canal=''),
+                name='uq_canal_caja_viva',
             ),
         ]
 
@@ -329,24 +351,58 @@ def registrar_movimiento(sesion, *, tipo, medio='', monto, motivo, detalle='',
         )
 
 
-def registrar_venta_en_caja(venta, *, caja=None, usuario=None):
-    """Engancha una venta de mostrador al turno abierto (mejor esfuerzo).
+# Que canal de caja recibe cada forma de facturar la venta: lo del RI a su
+# caja; la Factura C del monotributo y lo sin facturar, juntos en la general.
+CANAL_POR_FACTURACION = {
+    Venta.Facturacion.FACTURA_RI: Caja.Canal.FACTURA_RI,
+    Venta.Facturacion.FACTURA_C: Caja.Canal.GENERAL,
+    Venta.Facturacion.SIN_FACTURA: Caja.Canal.GENERAL,
+}
 
-    Busca la sesion abierta de la `caja` indicada; sin caja, usa la unica sesion
-    abierta si hay exactamente una. Si no hay turno donde anotarla devuelve None
-    (la venta vale igual: el descuento de stock ya ocurrio en inventario).
+
+def caja_para_venta(venta):
+    """La caja del canal fiscal de la venta, si el local tiene cajas con canal."""
+    canal = CANAL_POR_FACTURACION.get(venta.facturacion)
+    if not canal:
+        return None
+    return Caja.objects.filter(canal=canal, activa=True).first()
+
+
+def registrar_venta_en_caja(venta, *, caja=None, usuario=None):
+    """Engancha una venta de mostrador al turno abierto que corresponde.
+
+    Si existe una caja del canal fiscal de la venta (facturado RI a su caja;
+    monotributo y sin factura a la general), la venta va SOLO a esa caja: con
+    su turno cerrado se avisa (ValidationError) en vez de mezclar la plata en
+    otro cajon. Sin cajas con canal vale el comportamiento historico: la
+    `caja` indicada o la unica sesion abierta; sin turno devuelve None. La
+    venta vale igual en todos los casos (el stock ya se desconto).
     """
     if venta.total is None or venta.total <= 0:
         return None
-    sesion = None
-    if caja is not None:
-        sesion = SesionCaja.objects.filter(caja=caja, estado=SesionCaja.Estado.ABIERTA).first()
-    if sesion is None:
-        abiertas = list(SesionCaja.objects.filter(estado=SesionCaja.Estado.ABIERTA)[:2])
-        if len(abiertas) == 1:
-            sesion = abiertas[0]
-    if sesion is None:
-        return None
+
+    caja_canal = caja_para_venta(venta)
+    if caja_canal is not None:
+        sesion = SesionCaja.objects.filter(
+            caja=caja_canal, estado=SesionCaja.Estado.ABIERTA,
+        ).first()
+        if sesion is None:
+            raise ValidationError(
+                f'La caja "{caja_canal.nombre}" no tiene turno abierto: '
+                'abrila para que esta venta entre a su arqueo.'
+            )
+    else:
+        sesion = None
+        if caja is not None:
+            sesion = SesionCaja.objects.filter(
+                caja=caja, estado=SesionCaja.Estado.ABIERTA,
+            ).first()
+        if sesion is None:
+            abiertas = list(SesionCaja.objects.filter(estado=SesionCaja.Estado.ABIERTA)[:2])
+            if len(abiertas) == 1:
+                sesion = abiertas[0]
+        if sesion is None:
+            return None
 
     items = list(venta.items.select_related('producto')[:4])
     detalle = ', '.join(f'{i.cantidad}x {i.producto.nombre}' for i in items)[:200]

@@ -35,7 +35,7 @@ class ConfiguracionCajaSerializer(serializers.ModelSerializer):
 class CajaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Caja
-        fields = ('id', 'nombre', 'orden', 'activa', 'creado')
+        fields = ('id', 'nombre', 'canal', 'orden', 'activa', 'creado')
         read_only_fields = ('creado',)
 
     def validate_nombre(self, value):
@@ -47,6 +47,19 @@ class CajaSerializer(serializers.ModelSerializer):
             repetida = repetida.exclude(pk=self.instance.pk)
         if repetida.exists():
             raise serializers.ValidationError('Ya existe una caja con ese nombre.')
+        return value
+
+    def validate_canal(self, value):
+        if not value:
+            return value
+        repetida = Caja.objects.filter(canal=value)
+        if self.instance is not None:
+            repetida = repetida.exclude(pk=self.instance.pk)
+        if repetida.exists():
+            raise serializers.ValidationError(
+                'Ya hay una caja para ese canal: no puede haber dos, '
+                'las ventas no sabrian a cual entrar.'
+            )
         return value
 
 
@@ -72,6 +85,7 @@ class MovimientoCajaSerializer(serializers.ModelSerializer):
     caja = serializers.IntegerField(source='sesion.caja_id', read_only=True)
     monto = _decimal()
     venta = serializers.PrimaryKeyRelatedField(read_only=True)
+    facturacion = serializers.SerializerMethodField()
     usuario = serializers.SerializerMethodField()
     fecha = serializers.DateTimeField(source='creado', read_only=True)
 
@@ -79,8 +93,12 @@ class MovimientoCajaSerializer(serializers.ModelSerializer):
         model = MovimientoCaja
         fields = (
             'id', 'caja', 'sesion', 'tipo', 'medio', 'monto', 'motivo', 'detalle',
-            'venta', 'usuario', 'fecha',
+            'venta', 'facturacion', 'usuario', 'fecha',
         )
+
+    def get_facturacion(self, obj):
+        """Como se facturo la venta que origino el movimiento (None si es manual)."""
+        return obj.venta.facturacion if obj.venta_id else None
 
     def get_usuario(self, obj):
         return obj.creado_por.username if obj.creado_por_id else None

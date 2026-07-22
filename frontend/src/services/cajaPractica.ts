@@ -55,6 +55,7 @@ function seed(): SandboxDB {
     caja: {
       id: 'practica',
       nombre: 'Caja de práctica',
+      canal: '',
       activa: true,
       creadaEn: new Date().toISOString(),
     },

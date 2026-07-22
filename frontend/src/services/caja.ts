@@ -50,6 +50,7 @@ interface ConfigDTO {
 interface CajaDTO {
   id: number
   nombre: string
+  canal: string
   orden: number
   activa: boolean
   creado: string
@@ -77,6 +78,7 @@ interface MovimientoDTO {
   motivo: string
   detalle: string
   venta: number | null
+  facturacion: string | null
   usuario: string | null
   fecha: string
 }
@@ -127,7 +129,13 @@ function mapConfig(dto: ConfigDTO): CajaConfig {
 }
 
 function mapCaja(dto: CajaDTO): CajaRegistradora {
-  return { id: String(dto.id), nombre: dto.nombre, activa: dto.activa, creadaEn: dto.creado }
+  return {
+    id: String(dto.id),
+    nombre: dto.nombre,
+    canal: (dto.canal as CajaRegistradora['canal']) || '',
+    activa: dto.activa,
+    creadaEn: dto.creado,
+  }
 }
 
 function mapSesion(dto: SesionDTO): SesionCaja {
@@ -154,6 +162,7 @@ function mapMovimiento(dto: MovimientoDTO): MovimientoCaja {
     monto: Number(dto.monto),
     motivo: dto.motivo,
     detalle: dto.detalle || undefined,
+    facturacion: (dto.facturacion as MovimientoCaja['facturacion']) ?? undefined,
     usuario: dto.usuario ?? '—',
     fecha: dto.fecha,
   }
@@ -223,7 +232,7 @@ export async function crearCaja(nombre: string): Promise<CajaRegistradora> {
 
 export async function actualizarCaja(
   id: string,
-  input: Partial<Pick<CajaRegistradora, 'nombre' | 'activa'>>,
+  input: Partial<Pick<CajaRegistradora, 'nombre' | 'activa' | 'canal'>>,
 ): Promise<CajaRegistradora> {
   return mapCaja(await api.patch<CajaDTO>(`/caja/cajas/${id}/`, input, token()))
 }

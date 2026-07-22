@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type {
+  CajaRegistradora,
   Cliente,
   Comprobante,
   CondicionEmisor,
@@ -56,6 +57,16 @@ import {
 } from '@/services/facturacion'
 import { listarProductos } from '@/services/productos'
 import { listarSucursales } from '@/services/inventario'
+import {
+  abrirCaja,
+  cajasConTurnoAbierto,
+  listarCajas,
+  obtenerConfigCaja,
+  ultimoCierreDeCaja,
+  type AbrirCajaInput,
+} from '@/services/caja'
+import { tomarBorradorFacturaVenta } from '@/lib/borradorFactura'
+import { AperturaModal, type AperturaValues } from '@/components/caja/AperturaModal'
 import {
   calcularTotales,
   condicionesClientePara,
@@ -212,6 +223,86 @@ export function FacturacionPage() {
   const [limitesModal, setLimitesModal] = useState(false)
   const [detalleId, setDetalleId] = useState<number | null>(null)
 
+  // --- Facturar una venta de mostrador (viene de Caja) -----------------------
+  // Si Caja dejó un borrador, se elige la cuenta que corresponde (RI o Mono),
+  // se precargan los ítems y se abre el modal de emisión DE SIEMPRE: el flujo
+  // de ARCA no cambia en nada, solo llega con los campos ya completos.
+  const [prefill, setPrefill] = useState<PrefillFactura | null>(null)
+  useEffect(() => {
+    if (!emisores.length) return
+    const borrador = tomarBorradorFacturaVenta()
+    if (!borrador) return
+    const cuenta = emisores.find((e) => e.activo && e.condicion === borrador.emisorCondicion)
+    if (!cuenta) {
+      toast.error(
+        'No hay una cuenta para facturar esta venta',
+        borrador.emisorCondicion === 'responsable_inscripto'
+          ? 'Hace falta una cuenta Responsable Inscripto activa.'
+          : 'Hace falta una cuenta Monotributista activa.',
+      )
+      return
+    }
+    const esRI = cuenta.condicion === 'responsable_inscripto'
+    setEmisorId(cuenta.id)
+    setPrefill({
+      // El precio de la venta es lo que pagó el cliente (final). En A/B el
+      // ítem viaja NETO y el modal le suma el 21 %: se divide acá para que el
+      // total de la factura coincida con lo cobrado en el mostrador.
+      items: borrador.items.map((i) => ({
+        descripcion: i.descripcion,
+        cantidad: i.cantidad,
+        precioUnitario: esRI
+          ? Math.round((i.precioFinal / (1 + IVA_RATE)) * 100) / 100
+          : i.precioFinal,
+      })),
+      observaciones: borrador.observaciones,
+      pagada: true, // la venta de mostrador ya se cobró
+    })
+    setFacturaModal(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emisores])
+
+  // --- Aviso post-emisión: la caja de esa plata no está abierta --------------
+  const [avisoCajaCerrada, setAvisoCajaCerrada] = useState<CajaRegistradora | null>(null)
+  const [aperturaCaja, setAperturaCaja] = useState<CajaRegistradora | null>(null)
+
+  /** Tras emitir: si la caja del canal del emisor está cerrada, avisamos. */
+  async function chequearCajaAbierta(c: Comprobante) {
+    try {
+      const condicion = c.emisor_condicion ?? emisor?.condicion
+      if (!condicion) return
+      const canal = condicion === 'responsable_inscripto' ? 'factura_ri' : 'general'
+      const [cajas, abiertas] = await Promise.all([listarCajas(), cajasConTurnoAbierto()])
+      const cajaCanal = cajas.find((cj) => cj.activa && cj.canal === canal)
+      if (cajaCanal && !abiertas.includes(cajaCanal.id)) setAvisoCajaCerrada(cajaCanal)
+    } catch {
+      /* sin permiso de Caja (403) no hay aviso: la factura salió igual */
+    }
+  }
+
+  // Datos para reusar la apertura de turno de Caja (solo se piden al abrirla).
+  const { data: configCaja } = useQuery({
+    queryKey: ['caja', 'config'],
+    queryFn: obtenerConfigCaja,
+    enabled: aperturaCaja != null,
+    retry: false,
+  })
+  const { data: ultimoCierreCaja = null } = useQuery({
+    queryKey: ['caja', 'ultimo', aperturaCaja?.id],
+    queryFn: () => ultimoCierreDeCaja(aperturaCaja!.id),
+    enabled: aperturaCaja != null,
+    retry: false,
+  })
+  const abrirCajaMut = useMutation({
+    mutationFn: (input: AbrirCajaInput) => abrirCaja(input),
+    onSuccess: (s) => {
+      queryClient.invalidateQueries({ queryKey: ['caja'] })
+      setAperturaCaja(null)
+      toast.success('Caja abierta', `Turno #${s.numero} con fondo de ${money0(s.fondoInicial)}.`)
+    },
+    onError: (e: Error) => toast.error('No se pudo abrir la caja', e.message),
+  })
+
   // Límite de facturación del mes en curso (para la barra de uso de la cuenta).
   const hoyAR = hoyInput()
   const anioActual = Number(hoyAR.slice(0, 4))
@@ -236,10 +327,14 @@ export function FacturacionPage() {
       queryClient.invalidateQueries({ queryKey: ['inv-stock'] })
       queryClient.invalidateQueries({ queryKey: ['inv-movimientos'] })
       setFacturaModal(false)
+      setPrefill(null)
       setDetalleId(c.id)
       toast.success(`Factura ${c.tipo} emitida`, c.cae ? `CAE ${c.cae}` : `Total ${money(c.total)}`)
       // La factura salió igual: esto es solo lo que NO se pudo descontar.
       if (c.avisos_stock?.length) toast.info('Stock sin descontar', c.avisos_stock.join(' '))
+      // ¿La caja que recibe esta plata está abierta? Si no, se avisa y se
+      // ofrece abrirla acá mismo (mejor esfuerzo: no bloquea nada).
+      void chequearCajaAbierta(c)
     },
     onError: async (e: Error, variables) => {
       // El backend avisa (409) ANTES de pedir el CAE si el mes queda pasado del
@@ -607,8 +702,12 @@ export function FacturacionPage() {
           productos={productos}
           limites={limitesAnio?.limites}
           anioLimites={limitesAnio?.anio}
+          prefill={prefill}
           saving={emitirMut.isPending}
-          onClose={() => setFacturaModal(false)}
+          onClose={() => {
+            setFacturaModal(false)
+            setPrefill(null)
+          }}
           onSubmit={(payload) => emitirMut.mutate({ ...payload, emisor: emisor.id })}
         />
       )}
@@ -633,8 +732,74 @@ export function FacturacionPage() {
       />
 
       <DetalleModal id={detalleId} onClose={() => setDetalleId(null)} />
+
+      {/* Aviso post-emisión: la caja de esa plata no tiene turno abierto. */}
+      <Modal open={avisoCajaCerrada != null} onClose={() => setAvisoCajaCerrada(null)} size="md">
+        {avisoCajaCerrada && (
+          <div className="px-5 py-5">
+            <div className="flex items-start gap-3.5">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-amber-500/10 text-amber-700 ring-1 ring-amber-500/25 dark:text-amber-400">
+                <AlertTriangle className="h-5 w-5" aria-hidden />
+              </span>
+              <div className="min-w-0">
+                <h2 className="text-lg font-semibold text-ink-950">Hoy no se abrió la caja</h2>
+                <p className="mt-1 text-sm leading-relaxed text-ink-600">
+                  La factura salió bien, pero la caja <b>«{avisoCajaCerrada.nombre}»</b> no tiene
+                  ningún turno abierto: esta plata no está entrando a ningún arqueo del día.
+                  Te sugerimos abrirla para llevar el control.
+                </p>
+              </div>
+            </div>
+            <div className="mt-5 flex flex-col-reverse gap-2.5 sm:flex-row sm:justify-end">
+              <Button variant="outline" onClick={() => setAvisoCajaCerrada(null)}>
+                Ahora no
+              </Button>
+              <Button
+                onClick={() => {
+                  setAperturaCaja(avisoCajaCerrada)
+                  setAvisoCajaCerrada(null)
+                }}
+              >
+                <Wallet className="h-4 w-4" />
+                Abrir la caja
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Apertura de turno reutilizada tal cual del módulo Caja. */}
+      {configCaja && (
+        <AperturaModal
+          open={aperturaCaja != null}
+          caja={aperturaCaja}
+          config={configCaja}
+          ultimoCierre={ultimoCierreCaja}
+          saving={abrirCajaMut.isPending}
+          onClose={() => setAperturaCaja(null)}
+          onSubmit={async (values: AperturaValues) => {
+            if (!aperturaCaja) return
+            try {
+              await abrirCajaMut.mutateAsync({
+                cajaId: aperturaCaja.id,
+                usuario: usuario?.username ?? 'operador',
+                ...values,
+              })
+            } catch {
+              /* el toast sale del onError */
+            }
+          }}
+        />
+      )}
     </div>
   )
+}
+
+/** Precarga del modal de emisión cuando la factura nace de una venta de Caja. */
+interface PrefillFactura {
+  items: Array<{ descripcion: string; cantidad: number; precioUnitario: number }>
+  observaciones: string
+  pagada: boolean
 }
 
 // ===== Detalle (con CAE y QR) =====
@@ -843,6 +1008,7 @@ function NuevaFacturaModal({
   productos,
   limites,
   anioLimites,
+  prefill,
   saving,
   onClose,
   onSubmit,
@@ -853,6 +1019,8 @@ function NuevaFacturaModal({
   /** Límites mensuales del año en curso de la cuenta (para avisar antes de emitir). */
   limites?: LimiteMes[]
   anioLimites?: number
+  /** Ítems/nota precargados cuando la factura nace de una venta de Caja. */
+  prefill?: PrefillFactura | null
   saving: boolean
   onClose: () => void
   onSubmit: (payload: Omit<NuevoComprobante, 'emisor'>) => void
@@ -910,13 +1078,25 @@ function NuevaFacturaModal({
     setFormatearDoc(true)
     setFechaEmision(hoyInput())
     setVencimiento(addDaysInput(15))
-    setPagada(false)
-    setObservaciones('')
-    setItems([{ key: nextKey(), descripcion: '', cantidad: 1, precioUnitario: 0 }])
+    // Con precarga desde una venta: los ítems ya vienen armados, la venta ya
+    // se cobró en el mostrador (pagada) y NO llevan `producto` — el stock ya
+    // lo descontó la venta, así que acá no se vuelve a tocar.
+    setPagada(prefill?.pagada ?? false)
+    setObservaciones(prefill?.observaciones ?? '')
+    setItems(
+      prefill?.items.length
+        ? prefill.items.map((i) => ({
+            key: nextKey(),
+            descripcion: i.descripcion,
+            cantidad: i.cantidad,
+            precioUnitario: i.precioUnitario,
+          }))
+        : [{ key: nextKey(), descripcion: '', cantidad: 1, precioUnitario: 0 }],
+    )
     setSucursalStock('')
     setTelefono('')
     setSugerenciasAbiertas(false)
-  }, [open, emisor])
+  }, [open, emisor, prefill])
 
   const tipo = tipoComprobante(emisor.condicion, condicion)
   const totales = useMemo(
@@ -1048,6 +1228,15 @@ function NuevaFacturaModal({
       </div>
 
       <div className="space-y-5 overflow-y-auto px-5 py-5">
+        {prefill && (
+          <p className="flex items-start gap-2 rounded-xl bg-emerald-600/10 px-3.5 py-2.5 text-xs leading-relaxed text-emerald-800 ring-1 ring-emerald-600/20 dark:text-emerald-300">
+            <ReceiptText className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span>
+              Precargada desde la <b>venta de mostrador</b>: los ítems ya están y el stock ya se
+              descontó al vender. Completá los datos del cliente y emití como siempre.
+            </span>
+          </p>
+        )}
         {/* Cliente */}
         <section className="space-y-3">
           <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-400">Cliente</h3>

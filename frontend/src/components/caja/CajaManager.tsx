@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2 } from 'lucide-react'
-import type { CajaConfig, CajaRegistradora } from '@/types'
+import type { CajaConfig, CajaRegistradora, CanalCaja } from '@/types'
 import { DENOMINACIONES_ARS } from '@/types'
 import { money0 } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { Select } from '@/components/ui/Select'
 import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
 import {
@@ -51,7 +52,7 @@ export function CajaManager({ open, onClose }: { open: boolean; onClose: () => v
     onError: (e: Error) => toast.error('No se pudo crear la caja', e.message),
   })
   const actualizar = useMutation({
-    mutationFn: ({ id, input }: { id: string; input: Partial<Pick<CajaRegistradora, 'nombre' | 'activa'>> }) =>
+    mutationFn: ({ id, input }: { id: string; input: Partial<Pick<CajaRegistradora, 'nombre' | 'activa' | 'canal'>> }) =>
       actualizarCaja(id, input),
     onSuccess: invalidar,
     onError: (e: Error) => toast.error('No se pudo actualizar', e.message),
@@ -225,12 +226,18 @@ export function CajaManager({ open, onClose }: { open: boolean; onClose: () => v
         {/* ===== Cajas ===== */}
         <section>
           <TituloSeccion>Cajas del local</TituloSeccion>
+          <p className="mb-2 text-xs leading-relaxed text-ink-500">
+            El <b>canal fiscal</b> separa la plata sola: lo facturado con Responsable Inscripto
+            (Factura A/B) entra a su caja, y la Factura C de monotributo junto con lo sin factura
+            entran a la general. Una caja «común» queda fuera del enrutamiento.
+          </p>
           <div className="divide-y divide-line overflow-hidden rounded-2xl border border-line">
             {cajas.map((caja) => (
               <FilaCaja
                 key={caja.id}
                 caja={caja}
                 onRenombrar={(nombre) => actualizar.mutate({ id: caja.id, input: { nombre } })}
+                onCanal={(canal) => actualizar.mutate({ id: caja.id, input: { canal } })}
                 onActiva={(activa) => actualizar.mutate({ id: caja.id, input: { activa } })}
                 onEliminar={() => handleEliminarCaja(caja)}
                 puedeEliminar={cajas.length > 1}
@@ -345,16 +352,24 @@ function Switch({
   )
 }
 
+const OPCIONES_CANAL: Array<{ value: CanalCaja; label: string }> = [
+  { value: '', label: 'Caja común' },
+  { value: 'factura_ri', label: 'Facturado RI (A/B)' },
+  { value: 'general', label: 'Monotributo y sin factura' },
+]
+
 function FilaCaja({
   caja,
   puedeEliminar,
   onRenombrar,
+  onCanal,
   onActiva,
   onEliminar,
 }: {
   caja: CajaRegistradora
   puedeEliminar: boolean
   onRenombrar: (nombre: string) => void
+  onCanal: (canal: CanalCaja) => void
   onActiva: (activa: boolean) => void
   onEliminar: () => void
 }) {
@@ -362,7 +377,7 @@ function FilaCaja({
   useEffect(() => setNombre(caja.nombre), [caja.nombre])
 
   return (
-    <div className="flex items-center gap-2.5 px-4 py-3">
+    <div className="flex flex-wrap items-center gap-2.5 px-4 py-3">
       <Input
         value={nombre}
         onChange={(e) => setNombre(e.target.value)}
@@ -372,7 +387,13 @@ function FilaCaja({
           else setNombre(caja.nombre)
         }}
         aria-label={`Nombre de la caja ${caja.nombre}`}
-        className="h-9 flex-1"
+        className="h-9 min-w-36 flex-1"
+      />
+      <Select
+        options={OPCIONES_CANAL}
+        value={caja.canal}
+        onChange={(v) => onCanal(v as CanalCaja)}
+        className="w-full sm:w-56"
       />
       <label className="flex items-center gap-1.5 text-xs text-ink-500">
         <Switch checked={caja.activa} onChange={onActiva} label={`Caja ${caja.nombre} activa`} />

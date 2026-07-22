@@ -137,6 +137,32 @@ class VentasTests(TestCase):
         self.assertEqual(StockProducto.objects.get(producto=self.fuente, sucursal=self.solar).cantidad, 10)
         self.assertEqual(MovimientoStock.objects.filter(tipo=MovimientoStock.Tipo.VENTA).count(), 0)
 
+    def test_venta_confirmada_con_faltante_registra_y_deja_negativo(self):
+        """La venta NUNCA se pierde: confirmado el faltante, el stock queda en rojo."""
+        venta = registrar_venta(
+            self.solar,
+            [(self.cable, 5, Decimal('11600'))],  # hay 2, se venden 5
+            permitir_faltante=True,
+        )
+        self.assertEqual(venta.total, Decimal('58000'))
+        self.assertEqual(
+            StockProducto.objects.get(producto=self.cable, sucursal=self.solar).cantidad, -3,
+        )
+        mov = MovimientoStock.objects.get(tipo=MovimientoStock.Tipo.VENTA)
+        self.assertEqual(mov.delta, -5)
+        self.assertEqual(mov.resultante, -3)
+
+    def test_api_venta_con_faltante_confirmado_201(self):
+        r = self.cliente.post('/api/inventario/ventas/', {
+            'sucursal': self.solar.id,
+            'permitir_faltante': True,
+            'items': [{'producto': self.cable.id, 'cantidad': 5, 'precio_unitario': 11600}],
+        }, format='json')
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(
+            StockProducto.objects.get(producto=self.cable, sucursal=self.solar).cantidad, -3,
+        )
+
     def test_api_post_y_get(self):
         r = self.cliente.post('/api/inventario/ventas/', {
             'sucursal': self.solar.id,

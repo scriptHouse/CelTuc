@@ -512,16 +512,31 @@ export function AyudaCaja() {
         </p>
       </AyudaSeccion>
 
+      <AyudaSeccion titulo="Las dos cajas: lo del RI y lo demás">
+        <p>
+          La plata se separa sola en <b>dos cajas</b> según cómo se factura la venta:
+          «<b>Facturación RI</b>» recibe lo facturado con Responsable Inscripto (Factura A/B) y
+          «<b>Monotributo y sin factura</b>» recibe la Factura C del monotributo y las ventas sin
+          factura. Al registrar la venta elegís cómo se factura y <b>el sistema la manda a la caja
+          correcta</b>, sin importar cuál tengas seleccionada en pantalla. Cada caja tiene su
+          propio turno, su arqueo y sus comprobantes Z, así los números de cada régimen nunca se
+          mezclan.
+        </p>
+      </AyudaSeccion>
+
       <AyudaSeccion titulo="La venta de mostrador (el botón VERDE)">
         <p>
           El botón <b>verde</b> «Registrar venta» es la puerta de entrada de la plata: una venta
-          ahí <b>descuenta el stock del Inventario al instante</b> Y <b>entra sola al arqueo</b> del
-          turno abierto, con su medio de pago. Una sola carga para las dos cosas. Si no hay caja
-          abierta, la venta vale igual (el stock baja) pero te avisa que no entró en ningún arqueo.
+          ahí <b>descuenta el stock del Inventario al instante</b> Y <b>entra sola al arqueo</b> de
+          la caja que corresponde, con su medio de pago. Una sola carga para las dos cosas. Si esa
+          caja no tiene turno abierto, la venta vale igual (el stock baja) pero te avisa que no
+          entró en ningún arqueo.
         </p>
         <AyudaPasos
           pasos={[
             <>Tocá <b>«Registrar venta»</b> y elegí la <b>sucursal</b> de la que sale la mercadería.</>,
+            <>Marcá <b>cómo se factura</b> (Sin factura, Factura C o Factura A/B): eso decide a qué caja entra la plata, y abajo te muestra a cuál.</>,
+            <>Si marcaste Factura C o A/B, al guardar te ofrece <b>«Facturar ahora»</b>: te lleva a Facturación con los ítems precargados para emitir el comprobante con CAE (mismo flujo de siempre; el stock no se vuelve a descontar).</>,
             <>Buscá los productos (el precio se sugiere solo: <b>cash</b> para efectivo/transferencia, <b>lista</b> para tarjeta) y ajustá cantidades o precios si hace falta.</>,
             <>Elegí la forma de pago y confirmá: el stock baja al instante y la venta queda registrada.</>,
           ]}

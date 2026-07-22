@@ -154,8 +154,10 @@ class VentasView(_BaseInventario, APIView):
                 datos['sucursal'],
                 [(i['producto'], i['cantidad'], i['precio_unitario']) for i in datos['items']],
                 forma_pago=datos.get('forma_pago', ''),
+                facturacion=datos.get('facturacion', ''),
                 nota=datos.get('nota', ''),
                 usuario=request.user,
+                permitir_faltante=datos.get('permitir_faltante', False),
             )
         except ValidationError as e:
             return Response({'detail': ' '.join(e.messages)}, status=400)
@@ -177,6 +179,9 @@ class VentasView(_BaseInventario, APIView):
 
         data = VentaSerializer(venta).data
         data['movimiento_caja'] = movimiento_caja.pk if movimiento_caja else None
+        # Nombre de la caja donde quedo anotada (el enrutamiento por canal
+        # fiscal puede mandarla a otra caja que la seleccionada en pantalla).
+        data['caja_arqueo'] = movimiento_caja.sesion.caja.nombre if movimiento_caja else None
         data['aviso_caja'] = aviso_caja
         return Response(data, status=201)
 

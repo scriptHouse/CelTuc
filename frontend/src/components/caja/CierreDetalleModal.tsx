@@ -1,13 +1,13 @@
 import type { ReactNode } from 'react'
 import { Mail, Printer } from 'lucide-react'
-import type { CierreCaja, MedioPagoCaja } from '@/types'
+import type { CierreCaja, FacturacionVenta, MedioPagoCaja } from '@/types'
 import { MEDIOS_PAGO_CAJA } from '@/types'
 import { fechaHora, money, money0 } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { useToast } from '@/components/ToastProvider'
-import { MEDIO_LABEL } from '@/components/caja/medios'
+import { FACTURACIONES, MEDIO_LABEL } from '@/components/caja/medios'
 import { DiffChip } from '@/components/caja/DiffChip'
 
 /**
@@ -32,6 +32,18 @@ export function CierreDetalleModal({
 
   const mediosConVentas = MEDIOS_PAGO_CAJA.filter((m) => cierre.ventasPorMedio[m.value] > 0)
   const mediosConDif = MEDIOS_PAGO_CAJA.filter((m) => cierre.diferenciaPorMedio[m.value] !== 0)
+
+  // Ventas por facturación, calculadas del snapshot inmutable de movimientos:
+  // dentro de la caja general separa Factura C de lo que fue sin factura.
+  const porFacturacion = cierre.movimientos.reduce(
+    (acc, m) => {
+      if (m.tipo !== 'venta' || !m.facturacion) return acc
+      acc[m.facturacion] = { monto: (acc[m.facturacion]?.monto ?? 0) + m.monto, ops: (acc[m.facturacion]?.ops ?? 0) + 1 }
+      return acc
+    },
+    {} as Partial<Record<FacturacionVenta, { monto: number; ops: number }>>,
+  )
+  const facturacionesConVentas = FACTURACIONES.filter((f) => porFacturacion[f.value])
   const denomsContadas = Object.entries(cierre.conteoCierre ?? {})
     .map(([den, cant]) => [Number(den), cant] as [number, number])
     .filter(([, cant]) => cant > 0)
@@ -75,6 +87,18 @@ export function CierreDetalleModal({
               />
             ))}
           </Seccion>
+
+          {facturacionesConVentas.length > 0 && (
+            <Seccion titulo="Ventas por facturación">
+              {facturacionesConVentas.map((f) => (
+                <Linea
+                  key={f.value}
+                  l={`${f.label} (${porFacturacion[f.value]!.ops})`}
+                  r={money(porFacturacion[f.value]!.monto)}
+                />
+              ))}
+            </Seccion>
+          )}
 
           <Seccion titulo="Movimiento de efectivo">
             <Linea l="Fondo inicial" r={money(cierre.fondoInicial)} />

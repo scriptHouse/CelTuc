@@ -47,7 +47,7 @@ import { AperturaModal, type AperturaValues } from '@/components/caja/AperturaMo
 import { MovimientoModal, type MovimientoValues } from '@/components/caja/MovimientoModal'
 import { CierreDetalleModal } from '@/components/caja/CierreDetalleModal'
 import { DiffChip } from '@/components/caja/DiffChip'
-import { MEDIO_ICONO, MEDIO_LABEL, TIPO_MOV_ICONO, operacionesLabel, signoMovimiento } from '@/components/caja/medios'
+import { CANAL_DESCRIPCION, FACTURACION_LABEL, MEDIO_ICONO, MEDIO_LABEL, TIPO_MOV_ICONO, operacionesLabel, signoMovimiento } from '@/components/caja/medios'
 import { MEDIOS_PAGO_CAJA } from '@/types'
 
 /**
@@ -362,14 +362,15 @@ export function CajaPage() {
           onSalir={() => salirPractica()}
         />
       ) : (
-        /* Venta de mostrador: descuenta stock Y entra sola al arqueo del turno
-           abierto de la caja seleccionada (una sola carga). */
-        <VentaRapida cajaId={cajaId || undefined} />
+        /* Venta de mostrador: descuenta stock Y entra sola al arqueo de la caja
+           que corresponde según cómo se factura (una sola carga). */
+        <VentaRapida cajaId={cajaId || undefined} cajas={cajasVisibles} cajasAbiertas={abiertas} />
       )}
 
       {/* Selector multi-caja */}
       {config?.multiCaja && cajasVisibles.length > 1 && (
-        <div className="ct-rise mb-5 flex flex-wrap items-center gap-2" role="tablist" aria-label="Cajas">
+        <div className="ct-rise mb-5">
+        <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Cajas">
           {cajasVisibles.map((c) => {
             const activa = c.id === cajaId
             const abierta = abiertas.includes(c.id)
@@ -402,6 +403,10 @@ export function CajaPage() {
               </button>
             )
           })}
+        </div>
+        {cajaActual?.canal && (
+          <p className="mt-2 text-xs text-ink-400">{CANAL_DESCRIPCION[cajaActual.canal]}</p>
+        )}
         </div>
       )}
 
@@ -520,6 +525,7 @@ export function CajaPage() {
                           <p className="truncate text-xs text-ink-400">
                             <span className="tnum">{horaDe(m.fecha)}</span> · {m.usuario}
                             {m.tipo !== 'venta' ? '' : ` · ${MEDIO_LABEL[m.medio]}`}
+                            {m.tipo === 'venta' && m.facturacion ? ` · ${FACTURACION_LABEL[m.facturacion]}` : ''}
                             {m.detalle ? ` · ${m.detalle}` : ''}
                           </p>
                         </div>

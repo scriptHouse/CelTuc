@@ -107,8 +107,8 @@ class VentaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Venta
         fields = (
-            'id', 'sucursal', 'sucursal_nombre', 'forma_pago', 'nota', 'total',
-            'usuario', 'items', 'creado',
+            'id', 'sucursal', 'sucursal_nombre', 'forma_pago', 'facturacion', 'nota',
+            'total', 'usuario', 'items', 'creado',
         )
 
     def get_usuario(self, obj):
@@ -128,11 +128,17 @@ class CrearVentaSerializer(serializers.Serializer):
     forma_pago = serializers.ChoiceField(
         choices=Venta.FormaPago.choices, default=Venta.FormaPago.EFECTIVO,
     )
+    facturacion = serializers.ChoiceField(
+        choices=Venta.Facturacion.choices, default=Venta.Facturacion.SIN_FACTURA,
+    )
     nota = serializers.CharField(required=False, allow_blank=True, max_length=200)
     items = ItemVentaInputSerializer(many=True)
     # Caja donde anotar la venta en el arqueo (id; opcional). Se valida en la
     # vista con import tardio para no acoplar inventario a la app caja.
     caja = serializers.IntegerField(required=False, allow_null=True)
+    # True = el vendedor ya confirmo la advertencia de stock insuficiente: la
+    # venta se registra igual y el stock queda en negativo.
+    permitir_faltante = serializers.BooleanField(required=False, default=False)
 
     def validate_items(self, value):
         if not value:

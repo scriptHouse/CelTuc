@@ -166,10 +166,16 @@ class CierreTests(TestCase):
 
 
 class VentaEnCajaTests(TestCase):
-    """La integracion clave: la venta de mostrador entra sola al arqueo."""
+    """La integracion clave: la venta de mostrador entra sola al arqueo.
+
+    Estos tests cubren el comportamiento SIN cajas fiscales (canal): por eso
+    se eliminan las que siembra la migracion 0004; el enrutamiento por canal
+    se prueba aparte en `CajasFiscalesTests`.
+    """
 
     def setUp(self):
         self.caja = Caja.objects.create(nombre='Principal test')
+        Caja.todos.exclude(pk=self.caja.pk).delete()
         categoria, _ = CategoriaProducto.objects.get_or_create(nombre='Categoria test')
         self.producto = Producto.objects.create(categoria=categoria, nombre='Fuente caja test')
         self.sucursal = Sucursal.objects.create(nombre='Solar caja test', orden=1)
@@ -217,6 +223,8 @@ class ApiCajaTests(TestCase):
 
     def setUp(self):
         self.caja = Caja.objects.create(nombre='Principal test')
+        # Sin cajas fiscales: aca se prueba el contrato historico de la API.
+        Caja.todos.exclude(pk=self.caja.pk).delete()
 
         rol = Rol.objects.create(nombre='Cajero test')
         rol.permisos.set(Permiso.objects.filter(codigo__in=('ver_caja', 'ver_inventario')))
@@ -338,3 +346,123 @@ class ApiCajaTests(TestCase):
         r = admin.delete(f'/api/caja/cajas/{self.caja.pk}/')
         self.assertEqual(r.status_code, 400)
         self.assertIn('al menos una caja', r.data['detail'])
+
+
+class CajasFiscalesTests(TestCase):
+    """Dos cajas por canal fiscal: lo facturado RI a una, el resto a la otra.
+
+    Las cajas las siembra la migracion 0004: «Facturación RI» (canal
+    factura_ri) y «Monotributo y sin factura» (canal general, la vieja
+    "Principal"). La venta se etiqueta con su facturacion y entra SOLA a la
+    caja que corresponde, sin importar cual este seleccionada en pantalla.
+    """
+
+    def setUp(self):
+        self.caja_ri = Caja.objects.get(canal=Caja.Canal.FACTURA_RI)
+        self.caja_general = Caja.objects.get(canal=Caja.Canal.GENERAL)
+        categoria, _ = CategoriaProducto.objects.get_or_create(nombre='Categoria test')
+        self.producto = Producto.objects.create(categoria=categoria, nombre='Modulo fiscal test')
+        self.sucursal = Sucursal.objects.create(nombre='Solar fiscal test', orden=1)
+        aplicar_ajuste(self.producto, self.sucursal, delta=20)
+
+    def _venta(self, facturacion, forma_pago='efectivo'):
+        return registrar_venta(
+            self.sucursal,
+            [(self.producto, 1, Decimal('10000'))],
+            forma_pago=forma_pago,
+            facturacion=facturacion,
+        )
+
+    def test_migracion_siembra_las_dos_cajas_y_multicaja(self):
+        self.assertEqual(self.caja_ri.nombre, 'Facturación RI')
+        self.assertEqual(self.caja_general.nombre, 'Monotributo y sin factura')
+        self.assertTrue(self.caja_ri.activa)
+        self.assertTrue(self.caja_general.activa)
+        self.assertTrue(ConfiguracionCaja.instancia().multi_caja)
+
+    def test_venta_ri_va_a_su_caja_aunque_se_indique_otra(self):
+        sesion_ri = abrir_caja(self.caja_ri, fondo_inicial=0)
+        abrir_caja(self.caja_general, fondo_inicial=0)
+        venta = self._venta('factura_ri')
+        # Aunque en pantalla este seleccionada la general, el canal manda.
+        mov = registrar_venta_en_caja(venta, caja=self.caja_general)
+        self.assertEqual(mov.sesion_id, sesion_ri.pk)
+
+    def test_monotributo_y_sin_factura_van_a_la_general(self):
+        abrir_caja(self.caja_ri, fondo_inicial=0)
+        sesion_general = abrir_caja(self.caja_general, fondo_inicial=0)
+        mov_c = registrar_venta_en_caja(self._venta('factura_c'), caja=self.caja_ri)
+        mov_sf = registrar_venta_en_caja(self._venta('sin_factura'))
+        self.assertEqual(mov_c.sesion_id, sesion_general.pk)
+        self.assertEqual(mov_sf.sesion_id, sesion_general.pk)
+
+    def test_caja_del_canal_cerrada_avisa_y_no_mezcla_la_plata(self):
+        abrir_caja(self.caja_general, fondo_inicial=0)  # la RI queda cerrada
+        venta = self._venta('factura_ri')
+        with self.assertRaises(ValidationError) as ctx:
+            registrar_venta_en_caja(venta)
+        self.assertIn('Facturación RI', ' '.join(ctx.exception.messages))
+        # No quedo anotada en la caja equivocada.
+        self.assertFalse(MovimientoCaja.objects.filter(venta=venta).exists())
+
+    def test_caja_del_canal_inactiva_cae_al_comportamiento_historico(self):
+        self.caja_ri.activa = False
+        self.caja_ri.save(update_fields=['activa'])
+        self.caja_general.activa = False
+        self.caja_general.save(update_fields=['activa'])
+        comun = Caja.objects.create(nombre='Comun test')
+        sesion = abrir_caja(comun, fondo_inicial=0)
+        mov = registrar_venta_en_caja(self._venta('factura_ri'))
+        self.assertEqual(mov.sesion_id, sesion.pk)
+
+    def test_api_venta_ri_entra_a_su_caja_y_avisa_si_esta_cerrada(self):
+        rol = Rol.objects.create(nombre='Cajero fiscal test')
+        rol.permisos.set(Permiso.objects.filter(codigo__in=('ver_caja', 'ver_inventario')))
+        cajero = Usuario.objects.create_user(
+            email='cajero.fiscal@celtuc.test', username='cajero.fiscal', password='x', rol=rol,
+        )
+        cliente = APIClient()
+        cliente.force_authenticate(cajero)
+
+        def vender():
+            return cliente.post('/api/inventario/ventas/', {
+                'sucursal': self.sucursal.pk,
+                'forma_pago': 'efectivo',
+                'facturacion': 'factura_ri',
+                'caja': self.caja_general.pk,  # el canal la manda a la RI igual
+                'items': [{'producto': self.producto.pk, 'cantidad': 1, 'precio_unitario': 10000}],
+            }, format='json')
+
+        # Con la caja RI cerrada: la venta vale pero avisa que no entro al arqueo.
+        r = vender()
+        self.assertEqual(r.status_code, 201)
+        self.assertIsNone(r.data['movimiento_caja'])
+        self.assertIn('Facturación RI', r.data['aviso_caja'])
+
+        # Con la caja RI abierta: entra a su arqueo y la respuesta dice a cual.
+        abrir_caja(self.caja_ri, fondo_inicial=0)
+        r = vender()
+        self.assertEqual(r.status_code, 201)
+        self.assertIsNotNone(r.data['movimiento_caja'])
+        self.assertEqual(r.data['caja_arqueo'], 'Facturación RI')
+        self.assertEqual(r.data['facturacion'], 'factura_ri')
+
+        estado = cliente.get(f'/api/caja/cajas/{self.caja_ri.pk}/estado/').data
+        self.assertEqual(len(estado['movimientos']), 1)
+        # La etiqueta de facturacion viaja con el movimiento (se ve en el feed y el Z).
+        self.assertEqual(estado['movimientos'][0]['facturacion'], 'factura_ri')
+
+    def test_no_puede_haber_dos_cajas_del_mismo_canal(self):
+        admin = Usuario.objects.create_superuser(
+            email='admin.fiscal@celtuc.test', username='admin.fiscal', password='x',
+        )
+        cliente = APIClient()
+        cliente.force_authenticate(admin)
+        r = cliente.post(
+            '/api/caja/cajas/', {'nombre': 'Otra RI', 'canal': 'factura_ri'}, format='json',
+        )
+        self.assertEqual(r.status_code, 400)
+        # Sin canal (caja comun) se puede crear la que haga falta.
+        r = cliente.post('/api/caja/cajas/', {'nombre': 'Service'}, format='json')
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.data['canal'], '')

@@ -94,7 +94,7 @@ class EstadoCajaView(_BaseCaja, APIView):
         )
         if sesion is None:
             return Response({'sesion': None, 'movimientos': []})
-        movimientos = sesion.movimientos.select_related('creado_por').all()
+        movimientos = sesion.movimientos.select_related('creado_por', 'venta').all()
         return Response({
             'sesion': SesionCajaSerializer(sesion).data,
             'movimientos': MovimientoCajaSerializer(movimientos, many=True).data,
@@ -187,7 +187,7 @@ class CierresView(_BaseCaja, APIView):
     def get(self, request):
         qs = CierreCaja.objects.select_related(
             'sesion', 'sesion__caja', 'sesion__creado_por', 'creado_por',
-        ).prefetch_related('sesion__movimientos__creado_por')
+        ).prefetch_related('sesion__movimientos__creado_por', 'sesion__movimientos__venta')
         caja = request.query_params.get('caja')
         if caja and caja.isdigit():
             qs = qs.filter(sesion__caja_id=caja)
