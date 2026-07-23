@@ -127,6 +127,17 @@ export function AyudaProductosManager() {
         />
       </AyudaSeccion>
 
+      <AyudaSeccion titulo="Cargar varios de una: «Carga masiva»">
+        <p>
+          Al lado de «Nuevo producto» está <b>«Carga masiva»</b>: una planilla con un producto por
+          fila (nombre, marca, calidad, nota y los 4 precios) donde agregás todas las filas que
+          necesites y un solo <b>Guardar</b> los crea juntos. Las filas vacías se ignoran; si
+          alguna falla, queda en la planilla con el motivo para corregirla y reintentar. Lo que no
+          está en la planilla (equipos vinculados, «a pedido», «nuevo») se completa después
+          editando el producto.
+        </p>
+      </AyudaSeccion>
+
       <AyudaSeccion titulo="Qué es cada campo del producto">
         <AyudaCampos
           campos={[
@@ -244,6 +255,16 @@ export function AyudaServiceManager() {
             <>Cargá la Lista USD de cada variante que aplique (si la sección tiene calidades, vas a ver un bloque por calidad). Guardar.</>,
           ]}
         />
+      </AyudaSeccion>
+
+      <AyudaSeccion titulo="Cargar varias filas de una: «Carga masiva»">
+        <p>
+          Al lado de «Nuevo ítem» está <b>«Carga masiva»</b>: una planilla con un ítem por fila
+          (etiqueta, nota y los precios de cada variante) donde agregás todas las filas que
+          necesites y un solo <b>Guardar</b> los crea juntos. Las filas vacías se ignoran; si
+          alguna falla, queda en la planilla con el motivo para corregirla y reintentar. Los
+          equipos que abarca cada fila se vinculan después, editando el ítem.
+        </p>
       </AyudaSeccion>
 
       <AyudaSeccion titulo="Secciones, variantes y equipos">

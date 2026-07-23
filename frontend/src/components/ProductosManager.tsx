@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, Loader2, Plus, Search, Settings2, ShoppingBag, Trash2, X } from 'lucide-react'
+import { ChevronDown, ListPlus, Loader2, Plus, Search, Settings2, ShoppingBag, Trash2, X } from 'lucide-react'
 import type {
   CategoriaCatalogo,
   ConfiguracionCatalogo,
@@ -428,7 +428,8 @@ function CategoriaPanel({
 }) {
   const [editandoMeta, setEditandoMeta] = useState(false)
   const [busqueda, setBusqueda] = useState('')
-  const [creando, setCreando] = useState(false)
+  // Alta de productos: 'uno' abre el formulario completo; 'masiva' la planilla.
+  const [creando, setCreando] = useState<false | 'uno' | 'masiva'>(false)
 
   const filas = useMemo(() => {
     const q = busqueda.trim()
@@ -480,7 +481,7 @@ function CategoriaPanel({
         />
       </div>
 
-      {creando && (
+      {creando === 'uno' && (
         <div className="rounded-2xl border border-line bg-surface p-4">
           <ProductoForm
             categoria={categoria}
@@ -492,6 +493,17 @@ function CategoriaPanel({
               setCreando(false)
               onListo()
             }}
+          />
+        </div>
+      )}
+
+      {creando === 'masiva' && (
+        <div className="rounded-2xl border border-line bg-surface p-4">
+          <CargaMasivaProductos
+            categoria={categoria}
+            productosDeCategoria={productos.filter((p) => p.categoria === categoria.id)}
+            onCerrar={() => setCreando(false)}
+            onListo={onListo}
           />
         </div>
       )}
@@ -513,13 +525,22 @@ function CategoriaPanel({
       )}
 
       {!creando && (
-        <button
-          type="button"
-          onClick={() => setCreando(true)}
-          className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-line-strong px-4 py-3.5 text-sm font-medium text-ink-500 transition-colors hover:border-ink-300 hover:bg-ink-50 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
-        >
-          <Plus className="h-4 w-4" /> Nuevo producto
-        </button>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => setCreando('uno')}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-line-strong px-4 py-3.5 text-sm font-medium text-ink-500 transition-colors hover:border-ink-300 hover:bg-ink-50 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
+          >
+            <Plus className="h-4 w-4" /> Nuevo producto
+          </button>
+          <button
+            type="button"
+            onClick={() => setCreando('masiva')}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-line-strong px-4 py-3.5 text-sm font-medium text-ink-500 transition-colors hover:border-ink-300 hover:bg-ink-50 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
+          >
+            <ListPlus className="h-4 w-4" /> Carga masiva
+          </button>
+        </div>
       )}
     </div>
   )
@@ -1028,6 +1049,293 @@ function ProductoForm({
               'Crear producto'
             ) : (
               'Guardar'
+            )}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ===== Carga masiva (planilla): varios productos en una tabla, un solo guardar =====
+
+const MAX_FILAS_MASIVA = 30
+
+interface FilaMasivaProducto {
+  key: number
+  nombre: string
+  marca: string
+  calidad: string
+  nota: string
+  lu: string
+  cu: string
+  la: string
+  ca: string
+  /** Mensaje del backend si la fila falló al guardar (queda para reintentar). */
+  error?: string
+}
+
+type CampoMasivo = 'nombre' | 'marca' | 'calidad' | 'nota' | 'lu' | 'cu' | 'la' | 'ca'
+
+const COLUMNAS_PRECIO: Array<{ campo: Extract<CampoMasivo, 'lu' | 'cu' | 'la' | 'ca'>; etiqueta: string }> = [
+  { campo: 'lu', etiqueta: 'Lista USD' },
+  { campo: 'cu', etiqueta: 'Cash USD' },
+  { campo: 'la', etiqueta: 'Lista $' },
+  { campo: 'ca', etiqueta: 'Cash $' },
+]
+
+function CargaMasivaProductos({
+  categoria,
+  productosDeCategoria,
+  onCerrar,
+  onListo,
+}: {
+  categoria: CategoriaCatalogo
+  productosDeCategoria: ProductoCatalogo[]
+  onCerrar: () => void
+  onListo: () => void
+}) {
+  const toast = useToast()
+  const confirm = useConfirm()
+  const claveRef = useRef(0)
+
+  const filaVacia = (): FilaMasivaProducto => ({
+    key: claveRef.current++,
+    nombre: '',
+    marca: '',
+    calidad: '',
+    nota: '',
+    lu: '',
+    cu: '',
+    la: '',
+    ca: '',
+  })
+
+  const [filas, setFilas] = useState<FilaMasivaProducto[]>(() => Array.from({ length: 3 }, filaVacia))
+  const [guardando, setGuardando] = useState(false)
+
+  const tieneDatos = (f: FilaMasivaProducto) =>
+    Boolean(`${f.nombre}${f.marca}${f.calidad}${f.nota}${f.lu}${f.cu}${f.la}${f.ca}`.trim())
+  const conDatos = filas.filter(tieneDatos)
+
+  function setCampo(key: number, campo: CampoMasivo, valor: string) {
+    setFilas((prev) => prev.map((f) => (f.key === key ? { ...f, [campo]: valor, error: undefined } : f)))
+  }
+
+  async function handleGuardar() {
+    if (guardando) return
+    // Validación previa de TODAS las filas con datos: no se manda nada a medias.
+    for (const fila of conDatos) {
+      const n = filas.indexOf(fila) + 1
+      if (!fila.nombre.trim()) {
+        toast.error(`A la fila ${n} le falta el nombre`)
+        return
+      }
+      for (const { campo, etiqueta } of COLUMNAS_PRECIO) {
+        const texto = fila[campo]
+        const valor = aNumero(texto)
+        if (texto.trim() !== '' && (valor === null || valor < 0)) {
+          toast.error(`La fila ${n} tiene un precio inválido en "${etiqueta}"`)
+          return
+        }
+      }
+    }
+
+    setGuardando(true)
+    const base = productosDeCategoria.reduce((max, p) => Math.max(max, p.orden), -1) + 1
+    let creadas = 0
+    const restantes: FilaMasivaProducto[] = []
+    for (const [i, fila] of conDatos.entries()) {
+      try {
+        await crearProducto({
+          categoria: categoria.id,
+          orden: base + i,
+          nombre: fila.nombre.trim(),
+          marca: fila.marca.trim(),
+          calidad: fila.calidad.trim(),
+          nota: fila.nota.trim(),
+          precio_lista_usd: aNumero(fila.lu),
+          precio_cash_usd: aNumero(fila.cu),
+          precio_lista_ars: aNumero(fila.la),
+          precio_cash_ars: aNumero(fila.ca),
+        })
+        creadas++
+      } catch (e) {
+        restantes.push({ ...fila, error: e instanceof ApiError ? e.message : 'No se pudo crear.' })
+      }
+    }
+    setGuardando(false)
+
+    if (creadas > 0) {
+      toast.success(
+        creadas === 1 ? '1 producto creado' : `${creadas} productos creados`,
+        `En ${categoria.nombre}.`,
+      )
+      onListo()
+    }
+    if (restantes.length > 0) {
+      // Las filas que fallaron quedan en la planilla con su error, para corregir
+      // y reintentar sin perder lo tipeado.
+      setFilas(restantes)
+      toast.error(
+        restantes.length === 1
+          ? 'Un producto no se pudo crear'
+          : `${restantes.length} productos no se pudieron crear`,
+        'Quedaron en la planilla con el detalle.',
+      )
+    } else {
+      onCerrar()
+    }
+  }
+
+  async function handleCancelar() {
+    if (conDatos.length > 0) {
+      const ok = await confirm({
+        title: '¿Descartar la carga masiva?',
+        description:
+          conDatos.length === 1
+            ? 'Hay 1 fila con datos sin guardar.'
+            : `Hay ${conDatos.length} filas con datos sin guardar.`,
+        confirmLabel: 'Descartar',
+        tone: 'warning',
+      })
+      if (!ok) return
+    }
+    onCerrar()
+  }
+
+  return (
+    <div>
+      <p className="text-sm font-semibold text-ink-900">Carga masiva en {categoria.nombre}</p>
+      <p className="mt-1 text-xs leading-relaxed text-ink-400">
+        Un producto por fila; las filas vacías se ignoran. Precio vacío = se calcula con la
+        fórmula. Un solo «Guardar» crea todos juntos.
+      </p>
+
+      <div className="-mx-4 mt-3 overflow-x-auto px-4 pb-1 sm:-mx-1 sm:px-1">
+        <table className="w-full min-w-[58rem] border-separate border-spacing-0">
+          <thead>
+            <tr className="text-left text-[0.68rem] font-medium uppercase tracking-[0.06em] text-ink-400">
+              <th className="w-7 pb-1.5 pr-2 font-medium">#</th>
+              <th className="min-w-[11rem] pb-1.5 pr-1.5 font-medium">Nombre</th>
+              <th className="min-w-[6.5rem] pb-1.5 pr-1.5 font-medium">Marca</th>
+              <th className="min-w-[6.5rem] pb-1.5 pr-1.5 font-medium">Calidad</th>
+              <th className="min-w-[8rem] pb-1.5 pr-1.5 font-medium">Nota</th>
+              {COLUMNAS_PRECIO.map((c) => (
+                <th key={c.campo} className="w-[5.5rem] pb-1.5 pr-1.5 font-medium">
+                  {c.etiqueta}
+                </th>
+              ))}
+              <th className="w-9 pb-1.5" />
+            </tr>
+          </thead>
+          <tbody>
+            {filas.map((fila, i) => (
+              <Fragment key={fila.key}>
+                <tr>
+                  <td className="tnum pb-1.5 pr-2 text-xs text-ink-400">{i + 1}</td>
+                  <td className="pb-1.5 pr-1.5">
+                    <Input
+                      value={fila.nombre}
+                      onChange={(e) => setCampo(fila.key, 'nombre', e.target.value)}
+                      placeholder="Fuente 20W"
+                      className="h-9 px-2 text-sm font-medium"
+                    />
+                  </td>
+                  <td className="pb-1.5 pr-1.5">
+                    <Input
+                      value={fila.marca}
+                      onChange={(e) => setCampo(fila.key, 'marca', e.target.value)}
+                      placeholder="Marca"
+                      className="h-9 px-2 text-sm"
+                    />
+                  </td>
+                  <td className="pb-1.5 pr-1.5">
+                    <Input
+                      value={fila.calidad}
+                      onChange={(e) => setCampo(fila.key, 'calidad', e.target.value)}
+                      placeholder="Calidad"
+                      className="h-9 px-2 text-sm"
+                    />
+                  </td>
+                  <td className="pb-1.5 pr-1.5">
+                    <Input
+                      value={fila.nota}
+                      onChange={(e) => setCampo(fila.key, 'nota', e.target.value)}
+                      placeholder="Nota"
+                      className="h-9 px-2 text-sm"
+                    />
+                  </td>
+                  {COLUMNAS_PRECIO.map((c) => (
+                    <td key={c.campo} className="pb-1.5 pr-1.5">
+                      <Input
+                        value={fila[c.campo]}
+                        onChange={(e) => setCampo(fila.key, c.campo, e.target.value)}
+                        inputMode="decimal"
+                        placeholder="—"
+                        className="tnum h-9 px-2 text-sm"
+                      />
+                    </td>
+                  ))}
+                  <td className="pb-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setFilas((prev) => prev.filter((f) => f.key !== fila.key))}
+                      disabled={filas.length === 1}
+                      aria-label={`Quitar fila ${i + 1}`}
+                      className="grid h-9 w-9 place-items-center rounded-lg text-ink-400 transition-colors hover:bg-ink-100 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 disabled:pointer-events-none disabled:opacity-40"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </td>
+                </tr>
+                {fila.error && (
+                  <tr>
+                    <td />
+                    <td colSpan={9} className="pb-2">
+                      <p className="rounded-lg bg-ink-100 px-2.5 py-1.5 text-xs font-medium text-ink-900">
+                        No se pudo crear: {fila.error}
+                      </p>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setFilas((prev) => [...prev, filaVacia()])}
+        disabled={filas.length >= MAX_FILAS_MASIVA}
+        className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-line-strong px-3 py-2 text-xs font-medium text-ink-500 transition-colors hover:border-ink-300 hover:bg-ink-50 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 disabled:pointer-events-none disabled:opacity-40"
+      >
+        <Plus className="h-3.5 w-3.5" />
+        {filas.length >= MAX_FILAS_MASIVA ? `Máximo ${MAX_FILAS_MASIVA} filas por tanda` : 'Agregar fila'}
+      </button>
+
+      <div className="mt-3.5 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
+        <p className="text-xs text-ink-400">
+          {conDatos.length === 0
+            ? 'Todavía no hay filas con datos.'
+            : conDatos.length === 1
+              ? '1 fila con datos.'
+              : `${conDatos.length} filas con datos.`}
+        </p>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={handleCancelar} disabled={guardando}>
+            Cancelar
+          </Button>
+          <Button size="sm" onClick={handleGuardar} disabled={guardando || conDatos.length === 0}>
+            {guardando ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" /> Guardando…
+              </>
+            ) : conDatos.length > 1 ? (
+              `Guardar ${conDatos.length} productos`
+            ) : (
+              'Guardar producto'
             )}
           </Button>
         </div>

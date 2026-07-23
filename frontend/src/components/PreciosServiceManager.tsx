@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, ChevronDown, Loader2, Plus, Search, Settings2, Trash2, Wrench, X } from 'lucide-react'
+import { Check, ChevronDown, ListPlus, Loader2, Plus, Search, Settings2, Trash2, Wrench, X } from 'lucide-react'
 import type {
   ConfiguracionPreciosService,
   DispositivoService,
@@ -395,7 +395,8 @@ function SeccionPanel({
 }) {
   const [editandoMeta, setEditandoMeta] = useState(false)
   const [busqueda, setBusqueda] = useState('')
-  const [creandoItem, setCreandoItem] = useState(false)
+  // Alta de ítems: 'uno' abre el formulario completo; 'masiva' la planilla.
+  const [creandoItem, setCreandoItem] = useState<false | 'uno' | 'masiva'>(false)
 
   const variantes = useMemo(
     () => [...seccion.variantes].sort((a, b) => a.orden - b.orden || a.id - b.id),
@@ -448,7 +449,7 @@ function SeccionPanel({
         />
       </div>
 
-      {creandoItem && (
+      {creandoItem === 'uno' && (
         <div className="rounded-2xl border border-line bg-surface p-4">
           <ItemForm
             seccion={seccion}
@@ -460,6 +461,17 @@ function SeccionPanel({
               setCreandoItem(false)
               onListo()
             }}
+          />
+        </div>
+      )}
+
+      {creandoItem === 'masiva' && (
+        <div className="rounded-2xl border border-line bg-surface p-4">
+          <CargaMasivaItems
+            seccion={seccion}
+            variantes={variantes}
+            onCerrar={() => setCreandoItem(false)}
+            onListo={onListo}
           />
         </div>
       )}
@@ -482,13 +494,22 @@ function SeccionPanel({
       )}
 
       {!creandoItem && (
-        <button
-          type="button"
-          onClick={() => setCreandoItem(true)}
-          className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-line-strong px-4 py-3.5 text-sm font-medium text-ink-500 transition-colors hover:border-ink-300 hover:bg-ink-50 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
-        >
-          <Plus className="h-4 w-4" /> Nuevo ítem
-        </button>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => setCreandoItem('uno')}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-line-strong px-4 py-3.5 text-sm font-medium text-ink-500 transition-colors hover:border-ink-300 hover:bg-ink-50 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
+          >
+            <Plus className="h-4 w-4" /> Nuevo ítem
+          </button>
+          <button
+            type="button"
+            onClick={() => setCreandoItem('masiva')}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-line-strong px-4 py-3.5 text-sm font-medium text-ink-500 transition-colors hover:border-ink-300 hover:bg-ink-50 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
+          >
+            <ListPlus className="h-4 w-4" /> Carga masiva
+          </button>
+        </div>
       )}
     </div>
   )
@@ -1047,6 +1068,326 @@ function ItemForm({
               'Crear ítem'
             ) : (
               'Guardar'
+            )}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ===== Carga masiva (planilla): varios ítems en una tabla, un solo guardar =====
+
+const MAX_FILAS_MASIVA = 30
+
+const COLUMNAS_PRECIO: Array<{ campo: 'lu' | 'cu' | 'la' | 'ca'; etiqueta: string }> = [
+  { campo: 'lu', etiqueta: 'Lista USD' },
+  { campo: 'cu', etiqueta: 'Cash USD' },
+  { campo: 'la', etiqueta: 'Lista $' },
+  { campo: 'ca', etiqueta: 'Cash $' },
+]
+
+interface FilaMasivaItem {
+  key: number
+  etiqueta: string
+  nota: string
+  precios: PreciosDraft
+  /** Mensaje del backend si la fila falló al guardar (queda para reintentar). */
+  error?: string
+}
+
+function CargaMasivaItems({
+  seccion,
+  variantes,
+  onCerrar,
+  onListo,
+}: {
+  seccion: SeccionPreciosService
+  variantes: VarianteSeccionService[]
+  onCerrar: () => void
+  onListo: () => void
+}) {
+  const toast = useToast()
+  const confirm = useConfirm()
+  const claveRef = useRef(0)
+
+  const filaVacia = (): FilaMasivaItem => {
+    const precios: PreciosDraft = {}
+    for (const v of variantes) precios[v.id] = { lu: '', cu: '', la: '', ca: '' }
+    return { key: claveRef.current++, etiqueta: '', nota: '', precios }
+  }
+
+  const [filas, setFilas] = useState<FilaMasivaItem[]>(() => Array.from({ length: 3 }, filaVacia))
+  const [guardando, setGuardando] = useState(false)
+
+  const tieneDatos = (f: FilaMasivaItem) =>
+    Boolean(
+      (
+        f.etiqueta +
+        f.nota +
+        variantes
+          .map((v) => {
+            const p = f.precios[v.id]
+            return p ? p.lu + p.cu + p.la + p.ca : ''
+          })
+          .join('')
+      ).trim(),
+    )
+  const conDatos = filas.filter(tieneDatos)
+
+  function setCampo(key: number, campo: 'etiqueta' | 'nota', valor: string) {
+    setFilas((prev) => prev.map((f) => (f.key === key ? { ...f, [campo]: valor, error: undefined } : f)))
+  }
+
+  function setPrecio(key: number, varianteId: number, campo: 'lu' | 'cu' | 'la' | 'ca', valor: string) {
+    setFilas((prev) =>
+      prev.map((f) =>
+        f.key === key
+          ? {
+              ...f,
+              error: undefined,
+              precios: {
+                ...f.precios,
+                [varianteId]: {
+                  ...(f.precios[varianteId] ?? { lu: '', cu: '', la: '', ca: '' }),
+                  [campo]: valor,
+                },
+              },
+            }
+          : f,
+      ),
+    )
+  }
+
+  /** Precios de una fila listos para la API; null si algún campo es inválido. */
+  function preciosDe(fila: FilaMasivaItem): PrecioInput[] | null {
+    const salida: PrecioInput[] = []
+    for (const v of variantes) {
+      const f = fila.precios[v.id] ?? { lu: '', cu: '', la: '', ca: '' }
+      const valores = {
+        precio_lista_usd: aNumero(f.lu),
+        precio_cash_usd: aNumero(f.cu),
+        precio_lista_ars: aNumero(f.la),
+        precio_cash_ars: aNumero(f.ca),
+      }
+      const textos = [f.lu, f.cu, f.la, f.ca]
+      const numeros = Object.values(valores)
+      if (textos.some((texto, i) => texto.trim() !== '' && (numeros[i] === null || numeros[i]! < 0))) {
+        return null
+      }
+      if (numeros.some((x) => x !== null)) salida.push({ variante: v.id, ...valores })
+    }
+    return salida
+  }
+
+  async function handleGuardar() {
+    if (guardando) return
+    // Validación previa de TODAS las filas con datos: no se manda nada a medias.
+    for (const fila of conDatos) {
+      const n = filas.indexOf(fila) + 1
+      if (!fila.etiqueta.trim()) {
+        toast.error(`A la fila ${n} le falta la etiqueta`)
+        return
+      }
+      if (preciosDe(fila) === null) {
+        toast.error(`La fila ${n} tiene un precio inválido`)
+        return
+      }
+    }
+
+    setGuardando(true)
+    const base = seccion.items.reduce((max, i) => Math.max(max, i.orden), -1) + 1
+    let creadas = 0
+    const restantes: FilaMasivaItem[] = []
+    for (const [i, fila] of conDatos.entries()) {
+      try {
+        await crearItem({
+          seccion: seccion.id,
+          orden: base + i,
+          etiqueta: fila.etiqueta.trim(),
+          nota: fila.nota.trim(),
+          precios: preciosDe(fila) ?? [],
+        })
+        creadas++
+      } catch (e) {
+        restantes.push({ ...fila, error: e instanceof ApiError ? e.message : 'No se pudo crear.' })
+      }
+    }
+    setGuardando(false)
+
+    if (creadas > 0) {
+      toast.success(
+        creadas === 1 ? '1 ítem creado' : `${creadas} ítems creados`,
+        `En ${seccion.nombre}.`,
+      )
+      onListo()
+    }
+    if (restantes.length > 0) {
+      // Las filas que fallaron quedan en la planilla con su error, para corregir
+      // y reintentar sin perder lo tipeado.
+      setFilas(restantes)
+      toast.error(
+        restantes.length === 1 ? 'Un ítem no se pudo crear' : `${restantes.length} ítems no se pudieron crear`,
+        'Quedaron en la planilla con el detalle.',
+      )
+    } else {
+      onCerrar()
+    }
+  }
+
+  async function handleCancelar() {
+    if (conDatos.length > 0) {
+      const ok = await confirm({
+        title: '¿Descartar la carga masiva?',
+        description:
+          conDatos.length === 1
+            ? 'Hay 1 fila con datos sin guardar.'
+            : `Hay ${conDatos.length} filas con datos sin guardar.`,
+        confirmLabel: 'Descartar',
+        tone: 'warning',
+      })
+      if (!ok) return
+    }
+    onCerrar()
+  }
+
+  const multiVariante = variantes.length > 1
+  const columnas = 3 + variantes.length * 4 + 1
+
+  return (
+    <div>
+      <p className="text-sm font-semibold text-ink-900">Carga masiva en {seccion.nombre}</p>
+      <p className="mt-1 text-xs leading-relaxed text-ink-400">
+        Un ítem por fila; las filas vacías se ignoran. Precio vacío = se calcula con la fórmula.
+        Los equipos que abarca cada fila se vinculan después, editando el ítem. Un solo «Guardar»
+        crea todos juntos.
+      </p>
+
+      <div className="-mx-4 mt-3 overflow-x-auto px-4 pb-1 sm:-mx-1 sm:px-1">
+        <table
+          className="w-full border-separate border-spacing-0"
+          style={{ minWidth: `${23 + variantes.length * 23}rem` }}
+        >
+          <thead className="text-left text-[0.68rem] font-medium uppercase tracking-[0.06em] text-ink-400">
+            {multiVariante && (
+              <tr>
+                <th colSpan={3} />
+                {variantes.map((v) => (
+                  <th key={v.id} colSpan={4} className="pb-1 pr-1.5 font-semibold text-ink-500">
+                    {v.nombre}
+                  </th>
+                ))}
+                <th />
+              </tr>
+            )}
+            <tr>
+              <th className="w-7 pb-1.5 pr-2 font-medium">#</th>
+              <th className="min-w-[10rem] pb-1.5 pr-1.5 font-medium">Etiqueta</th>
+              <th className="min-w-[8rem] pb-1.5 pr-1.5 font-medium">Nota</th>
+              {variantes.flatMap((v) =>
+                COLUMNAS_PRECIO.map((c) => (
+                  <th key={`${v.id}-${c.campo}`} className="w-[5.5rem] pb-1.5 pr-1.5 font-medium">
+                    {c.etiqueta}
+                  </th>
+                )),
+              )}
+              <th className="w-9 pb-1.5" />
+            </tr>
+          </thead>
+          <tbody>
+            {filas.map((fila, i) => (
+              <Fragment key={fila.key}>
+                <tr>
+                  <td className="tnum pb-1.5 pr-2 text-xs text-ink-400">{i + 1}</td>
+                  <td className="pb-1.5 pr-1.5">
+                    <Input
+                      value={fila.etiqueta}
+                      onChange={(e) => setCampo(fila.key, 'etiqueta', e.target.value)}
+                      placeholder="13 PRO"
+                      className="h-9 px-2 text-sm font-medium"
+                    />
+                  </td>
+                  <td className="pb-1.5 pr-1.5">
+                    <Input
+                      value={fila.nota}
+                      onChange={(e) => setCampo(fila.key, 'nota', e.target.value)}
+                      placeholder="Nota"
+                      className="h-9 px-2 text-sm"
+                    />
+                  </td>
+                  {variantes.flatMap((v) =>
+                    COLUMNAS_PRECIO.map((c) => (
+                      <td key={`${v.id}-${c.campo}`} className="pb-1.5 pr-1.5">
+                        <Input
+                          value={fila.precios[v.id]?.[c.campo] ?? ''}
+                          onChange={(e) => setPrecio(fila.key, v.id, c.campo, e.target.value)}
+                          inputMode="decimal"
+                          placeholder="—"
+                          className="tnum h-9 px-2 text-sm"
+                          aria-label={`${c.etiqueta} de ${v.nombre}, fila ${i + 1}`}
+                        />
+                      </td>
+                    )),
+                  )}
+                  <td className="pb-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setFilas((prev) => prev.filter((f) => f.key !== fila.key))}
+                      disabled={filas.length === 1}
+                      aria-label={`Quitar fila ${i + 1}`}
+                      className="grid h-9 w-9 place-items-center rounded-lg text-ink-400 transition-colors hover:bg-ink-100 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 disabled:pointer-events-none disabled:opacity-40"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </td>
+                </tr>
+                {fila.error && (
+                  <tr>
+                    <td />
+                    <td colSpan={columnas - 1} className="pb-2">
+                      <p className="rounded-lg bg-ink-100 px-2.5 py-1.5 text-xs font-medium text-ink-900">
+                        No se pudo crear: {fila.error}
+                      </p>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setFilas((prev) => [...prev, filaVacia()])}
+        disabled={filas.length >= MAX_FILAS_MASIVA}
+        className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-line-strong px-3 py-2 text-xs font-medium text-ink-500 transition-colors hover:border-ink-300 hover:bg-ink-50 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 disabled:pointer-events-none disabled:opacity-40"
+      >
+        <Plus className="h-3.5 w-3.5" />
+        {filas.length >= MAX_FILAS_MASIVA ? `Máximo ${MAX_FILAS_MASIVA} filas por tanda` : 'Agregar fila'}
+      </button>
+
+      <div className="mt-3.5 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
+        <p className="text-xs text-ink-400">
+          {conDatos.length === 0
+            ? 'Todavía no hay filas con datos.'
+            : conDatos.length === 1
+              ? '1 fila con datos.'
+              : `${conDatos.length} filas con datos.`}
+        </p>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={handleCancelar} disabled={guardando}>
+            Cancelar
+          </Button>
+          <Button size="sm" onClick={handleGuardar} disabled={guardando || conDatos.length === 0}>
+            {guardando ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" /> Guardando…
+              </>
+            ) : conDatos.length > 1 ? (
+              `Guardar ${conDatos.length} ítems`
+            ) : (
+              'Guardar ítem'
             )}
           </Button>
         </div>
