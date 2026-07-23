@@ -4,9 +4,10 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from inventario.models import Sucursal
 from usuarios.permissions import EsAdministrador, LecturaConPermisoEscrituraAdmin
 
-from .models import Empleado, Sucursal
+from .models import Empleado
 from .serializers import (
     AccesoSerializer,
     EmpleadoSerializer,

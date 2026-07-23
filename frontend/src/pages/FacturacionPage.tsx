@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
@@ -1218,6 +1218,27 @@ function NuevaFacturaModal({
     setTelefono('')
     setSugerenciasAbiertas(false)
   }, [open, emisor, prefill])
+
+  // El descuento de stock arranca preseleccionado en la sucursal del empleado
+  // logueado (se puede cambiar o volver a "No descontar stock"). Se aplica una
+  // sola vez por apertura, recién cuando la lista de sucursales llegó — si la
+  // cuenta no puede ver inventario, el selector no existe y queda como siempre.
+  // Con ítems precargados desde una venta no aplica: esa venta ya descontó stock.
+  const usuarioActual = useAuth((s) => s.usuario)
+  const sucursalPropiaAplicada = useRef(false)
+  useEffect(() => {
+    if (!open) {
+      sucursalPropiaAplicada.current = false
+      return
+    }
+    if (sucursalPropiaAplicada.current || sucursalesStock.length === 0) return
+    sucursalPropiaAplicada.current = true
+    if (prefill?.items.length) return
+    const propia = usuarioActual?.sucursal?.id
+    if (propia != null && sucursalesStock.some((s) => s.id === propia && s.activa)) {
+      setSucursalStock(String(propia))
+    }
+  }, [open, sucursalesStock, prefill, usuarioActual])
 
   const tipo = tipoComprobante(emisor.condicion, condicion)
   const totales = useMemo(

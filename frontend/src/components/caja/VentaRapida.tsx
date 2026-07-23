@@ -189,7 +189,14 @@ function VentaModal({
 
   useEffect(() => {
     if (!abierta) return
-    setSucursalId(activas[0]?.id ?? null)
+    // Arranca en la sucursal del empleado logueado (si está activa) para no
+    // descontar stock del local equivocado; los botones permiten cambiarla.
+    const propia = usuario?.sucursal?.id
+    setSucursalId(
+      propia != null && activas.some((s) => s.id === propia)
+        ? propia
+        : (activas[0]?.id ?? null),
+    )
     setFormaPago('efectivo')
     setFacturacion('sin_factura')
     setLineas([])

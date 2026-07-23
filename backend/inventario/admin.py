@@ -15,9 +15,9 @@ _AUDITORIA = (
 
 @admin.register(Sucursal)
 class SucursalAdmin(ModeloBaseAdminMixin, ModelAdmin):
-    list_display = ('nombre', 'activa', 'borrado', 'orden', 'actualizado')
+    list_display = ('nombre', 'codigo_postal', 'activa', 'borrado', 'orden', 'actualizado')
     list_filter = ('activa', 'borrado')
-    search_fields = ('nombre',)
+    search_fields = ('nombre', 'codigo_postal')
     readonly_fields = _AUDITORIA
     actions = ('restaurar',)
 

@@ -4,36 +4,6 @@ from django.db import models
 from comun.models import ModeloBase
 
 
-class Sucursal(ModeloBase):
-    """Sucursal (local) del negocio a la que puede pertenecer un empleado.
-
-    Es una identidad simple: nombre, codigo postal y estado (activa/inactiva).
-    No se confunde con `inventario.Sucursal`, que modela el stock por local:
-    esta describe la pertenencia de los empleados y, con eso, la direccion que
-    los documentos traen preseleccionada segun quien esta logueado.
-    """
-
-    nombre = models.CharField('nombre', max_length=120)
-    codigo_postal = models.CharField('codigo postal', max_length=10, blank=True)
-    activa = models.BooleanField('activa', default=True)
-
-    class Meta:
-        db_table = 'empleados_sucursales'
-        verbose_name = 'sucursal'
-        verbose_name_plural = 'sucursales'
-        ordering = ('nombre',)
-        constraints = [
-            models.UniqueConstraint(
-                fields=('nombre',),
-                condition=models.Q(borrado=False),
-                name='uq_empleado_sucursal_viva',
-            ),
-        ]
-
-    def __str__(self):
-        return self.nombre
-
-
 class Empleado(ModeloBase):
     """Empleado de la tienda.
 
@@ -55,8 +25,10 @@ class Empleado(ModeloBase):
         help_text='Opcional: cuenta con la que este empleado inicia sesion.',
     )
 
+    # La sucursal vive en `inventario.Sucursal`: es la MISMA tabla que usa el
+    # stock (antes habia una copia propia en esta app; se unifico).
     sucursal = models.ForeignKey(
-        Sucursal,
+        'inventario.Sucursal',
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

@@ -17,9 +17,16 @@ from comun.models import ModeloBase
 
 
 class Sucursal(ModeloBase):
-    """Un local del negocio (Solar, Centro, ...)."""
+    """Un local del negocio (Solar YB, Central YB, Salta).
+
+    Es LA tabla de sucursales de todo el sistema: el stock cuelga de aca
+    (`StockProducto`), los empleados pertenecen a una (`empleados.Empleado`)
+    y el codigo postal alimenta la direccion de los documentos segun quien
+    esta logueado.
+    """
 
     nombre = models.CharField('nombre', max_length=120)
+    codigo_postal = models.CharField('codigo postal', max_length=10, blank=True)
     orden = models.PositiveSmallIntegerField('orden', default=0)
     activa = models.BooleanField('activa', default=True)
 

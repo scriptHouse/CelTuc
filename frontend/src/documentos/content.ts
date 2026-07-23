@@ -27,13 +27,13 @@ export const DIRECCION_POR_DEFECTO: Direccion = DIRECCIONES[0]
  * preselecciona sola (ver DocumentosPage). El código postal vive en el backend
  * (modelo Sucursal); acá solo mapeamos el nombre a su dirección para el papel.
  *
- * Mantener los NOMBRES en sync con la semilla del backend
- * (empleados/migrations/0004_seed_sucursales). Una sucursal nueva sin entrada
- * acá cae en la dirección por defecto hasta agregarle su línea.
+ * Mantener los NOMBRES en sync con la tabla única de sucursales del backend
+ * (inventario.Sucursal, unificada en inventario/migrations/0012). Una sucursal
+ * nueva sin entrada acá cae en la dirección por defecto hasta agregarle su línea.
  */
 export const SUCURSALES_DOC = [
-  { nombre: 'La Salta', direccion: 'Salta 186 - Yerba Buena' },
-  { nombre: 'YB', direccion: 'Yerba Buena - Tucumán' },
+  { nombre: 'Salta', direccion: 'Salta 186 - Yerba Buena' },
+  { nombre: 'Solar YB', direccion: 'Yerba Buena - Tucumán' },
   { nombre: 'Central YB', direccion: 'Yerba Buena - Tucumán' },
 ] as const
 

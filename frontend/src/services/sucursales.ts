@@ -6,6 +6,8 @@ import { useAuth } from '@/store/auth'
  * Servicio de Sucursales contra el backend (Django REST). Una sucursal es un
  * local del negocio: nombre, código postal y estado (activa/inactiva). Se usa
  * para vincular empleados y para preseleccionar la dirección de los documentos.
+ * Es la MISMA tabla que usa el inventario (`/inventario/sucursales/`); este
+ * endpoint la expone para el módulo Empleados con su permiso propio.
  * Lectura: quien tenga el módulo Empleados. Escritura: solo administradores.
  */
 

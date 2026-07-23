@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Building2, Clock, Eraser, FileSpreadsheet, FileText, Loader2, Printer } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
@@ -12,9 +12,9 @@ import { PaperScaler } from '@/documentos/PaperScaler'
 import { SUCURSALES_DOC, SUCURSAL_DOC_POR_DEFECTO, direccionDeSucursal } from '@/documentos/content'
 import { DOC_MODULES, PROXIMOS_DOCS } from '@/documentos/registry'
 
-/** Sucursal elegida para el encabezado de todos los documentos (se recuerda por
- *  dispositivo). Por defecto es la del empleado logueado; se puede cambiar. */
-const SUC_KEY = 'celtuc:doc:sucursal'
+/** Sucursal del encabezado de todos los documentos. Como en la venta rápida:
+ *  cada visita arranca en la del empleado logueado y elegir otra a mano vale
+ *  solo para esa visita (no se recuerda en el dispositivo). */
 const SUC_OPTIONS = SUCURSALES_DOC.map((s) => ({ value: s.nombre, label: s.nombre }))
 const SUC_NOMBRES: readonly string[] = SUCURSALES_DOC.map((s) => s.nombre)
 
@@ -22,14 +22,8 @@ const SUC_NOMBRES: readonly string[] = SUCURSALES_DOC.map((s) => s.nombre)
  *  celda genera la separación entre tarjetas (equivale al gap de la grilla). */
 const CHIP_CELL = 'w-1/2 p-1 sm:w-1/3 lg:w-1/4'
 
-/** Sucursal inicial: la elegida a mano (recordada) o, si no hay, la del empleado. */
+/** Sucursal inicial: la del empleado logueado (o la por defecto si no tiene). */
 function leerSucursal(sucursalUsuario?: string | null): string {
-  try {
-    const g = localStorage.getItem(SUC_KEY)
-    if (g && SUC_NOMBRES.includes(g)) return g
-  } catch {
-    /* localStorage no disponible */
-  }
   if (sucursalUsuario && SUC_NOMBRES.includes(sucursalUsuario)) return sucursalUsuario
   return SUCURSAL_DOC_POR_DEFECTO
 }
@@ -65,25 +59,18 @@ export function DocumentosPage() {
   const patch = (p: Record<string, unknown>) =>
     setEstados((s) => ({ ...s, [active.id]: { ...(s[active.id] as object), ...p } }))
 
-  // Si el empleado no eligió una sucursal a mano, seguimos la de su cuenta (puede
+  // Mientras no elija una a mano, seguimos la sucursal de su cuenta (puede
   // llegar tras el refresco de sesión que hace el Layout al montar la app).
+  const elegidaAMano = useRef(false)
   useEffect(() => {
-    try {
-      if (localStorage.getItem(SUC_KEY)) return
-    } catch {
-      /* localStorage no disponible */
-    }
+    if (elegidaAMano.current) return
     const suc = usuario?.sucursal?.nombre
     if (suc && SUC_NOMBRES.includes(suc)) setSucursal(suc)
   }, [usuario])
 
   function cambiarSucursal(v: string) {
+    elegidaAMano.current = true
     setSucursal(v)
-    try {
-      localStorage.setItem(SUC_KEY, v)
-    } catch {
-      /* localStorage no disponible */
-    }
   }
 
   async function exportarPdf() {

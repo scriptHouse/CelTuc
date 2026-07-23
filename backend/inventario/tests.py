@@ -343,13 +343,16 @@ class SeedInventarioTests(TestCase):
     """Los seeds de sucursales y stock inicial importado de las planillas."""
 
     def test_sucursales_seed(self):
+        # Tras la unificación (0012) los locales quedan con su nombre definitivo:
+        # Solar -> Solar YB, Centro -> Salta, más Central YB (sin stock aún).
         nombres = set(Sucursal.objects.values_list('nombre', flat=True))
-        self.assertIn('Solar', nombres)
-        self.assertIn('Centro', nombres)
+        self.assertIn('Solar YB', nombres)
+        self.assertIn('Salta', nombres)
+        self.assertIn('Central YB', nombres)
 
     def test_stock_importado(self):
-        solar = Sucursal.objects.get(nombre='Solar')
-        centro = Sucursal.objects.get(nombre='Centro')
+        solar = Sucursal.objects.get(nombre='Solar YB')
+        centro = Sucursal.objects.get(nombre='Salta')
         self.assertGreater(StockProducto.objects.filter(sucursal=solar, cantidad__gt=0).count(), 150)
         self.assertGreater(StockProducto.objects.filter(sucursal=centro, cantidad__gt=0).count(), 130)
         # Cada fila importada dejo su movimiento de carga inicial.
@@ -398,8 +401,10 @@ class SeedInventarioTests(TestCase):
         )
 
     def test_casos_conocidos_de_la_hoja(self):
-        solar = Sucursal.objects.get(nombre='Solar')
-        centro = Sucursal.objects.get(nombre='Centro')
+        # Las variables conservan el nombre de las planillas de origen (hoja
+        # "Solar" y hoja "Centro"), hoy renombradas a Solar YB y Salta.
+        solar = Sucursal.objects.get(nombre='Solar YB')
+        centro = Sucursal.objects.get(nombre='Salta')
         # "Fuente 20W - CO" -> 56 en Solar y 32 en Centro (celdas I5).
         fila = StockProducto.objects.get(
             producto__nombre='Fuente 20W', producto__calidad='Calidad original',

@@ -15,6 +15,8 @@ const token = () => useAuth.getState().access
 export interface Sucursal {
   id: number
   nombre: string
+  /** CP del local; la misma tabla la usan Empleados y los documentos. */
+  codigo_postal?: string
   orden: number
   activa: boolean
 }

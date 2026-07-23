@@ -3,16 +3,9 @@ from unfold.admin import ModelAdmin
 
 from comun.admin import ModeloBaseAdminMixin
 
-from .models import Empleado, Sucursal
+from .models import Empleado
 
-
-@admin.register(Sucursal)
-class SucursalAdmin(ModeloBaseAdminMixin, ModelAdmin):
-    list_display = ('nombre', 'codigo_postal', 'activa', 'borrado', 'creado')
-    list_filter = ('activa', 'borrado')
-    search_fields = ('nombre', 'codigo_postal')
-    actions = ('restaurar',)
-    readonly_fields = ('creado',)
+# La Sucursal se administra desde la app inventario (tabla unica del sistema).
 
 
 @admin.register(Empleado)

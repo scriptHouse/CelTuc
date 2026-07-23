@@ -8,7 +8,7 @@ from .models import ItemVenta, MovimientoStock, StockProducto, Sucursal, Venta
 class SucursalSerializer(serializers.ModelSerializer):
     class Meta:
         model = Sucursal
-        fields = ('id', 'nombre', 'orden', 'activa', 'creado', 'actualizado')
+        fields = ('id', 'nombre', 'codigo_postal', 'orden', 'activa', 'creado', 'actualizado')
         read_only_fields = ('creado', 'actualizado')
 
     def validate_nombre(self, value):

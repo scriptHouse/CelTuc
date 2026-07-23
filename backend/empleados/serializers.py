@@ -1,13 +1,19 @@
 from django.core.validators import MinLengthValidator
+from django.db.models import Max
 from rest_framework import serializers
 
+from inventario.models import Sucursal
 from usuarios.models import Rol, Usuario, username_validator
 
-from .models import Empleado, Sucursal
+from .models import Empleado
 
 
 class SucursalSerializer(serializers.ModelSerializer):
-    """Alta/edición y listado de sucursales (nombre, código postal y estado)."""
+    """Alta/edición y listado de sucursales (nombre, código postal y estado).
+
+    Opera sobre la tabla ÚNICA de sucursales (`inventario.Sucursal`), la misma
+    que usa el stock; desde acá se editan la identidad y el código postal.
+    """
 
     class Meta:
         model = Sucursal
@@ -26,6 +32,13 @@ class SucursalSerializer(serializers.ModelSerializer):
         if qs.exists():
             raise serializers.ValidationError('Ya existe una sucursal con ese nombre.')
         return value
+
+    def create(self, validated_data):
+        # Este endpoint no maneja `orden` (eso es de la vista de inventario):
+        # las sucursales nuevas van al final para no colarse en el medio.
+        tope = Sucursal.todos.aggregate(m=Max('orden'))['m'] or 0
+        validated_data.setdefault('orden', tope + 1)
+        return super().create(validated_data)
 
 
 class SucursalBreveSerializer(serializers.ModelSerializer):

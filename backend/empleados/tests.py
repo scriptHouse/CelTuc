@@ -2,9 +2,61 @@ from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
 
+from inventario.models import Sucursal
 from usuarios.models import Rol, Usuario
 
 from .models import Empleado
+
+
+class SucursalUnificadaTests(TestCase):
+    """La sucursal es UNA sola tabla (inventario) para stock y empleados."""
+
+    def test_seed_unificado(self):
+        # Las migraciones dejan los tres locales definitivos con su CP...
+        self.assertEqual(Sucursal.objects.get(nombre='Solar YB').codigo_postal, '4107')
+        self.assertEqual(Sucursal.objects.get(nombre='Central YB').codigo_postal, '4107')
+        self.assertEqual(Sucursal.objects.get(nombre='Salta').codigo_postal, '4000')
+        # ...y no queda ningún resto de los nombres viejos de las dos tablas.
+        self.assertFalse(
+            Sucursal.todos.filter(nombre__in=['Solar', 'Centro', 'YB', 'La Salta']).exists()
+        )
+
+    def test_empleado_apunta_a_la_sucursal_de_inventario(self):
+        suc = Sucursal.objects.get(nombre='Salta')
+        emp = Empleado.objects.create(nombre='Juan', sucursal=suc)
+        self.assertEqual(emp.sucursal.codigo_postal, '4000')
+        self.assertIn(emp, suc.empleados.all())
+
+    def test_los_dos_endpoints_exponen_la_misma_tabla(self):
+        admin = Usuario.objects.create_superuser(
+            email='admin@celtuc.ar', username='admin', password='clave-segura-123',
+        )
+        client = APIClient()
+        client.force_authenticate(admin)
+        de_empleados = client.get(reverse('empleados:sucursales')).data
+        de_inventario = client.get(reverse('inv-sucursales')).data
+        self.assertEqual(
+            {(s['id'], s['nombre']) for s in de_empleados},
+            {(s['id'], s['nombre']) for s in de_inventario},
+        )
+        # El de empleados trae el código postal (para documentos y sesión).
+        por_nombre = {s['nombre']: s for s in de_empleados}
+        self.assertEqual(por_nombre['Salta']['codigo_postal'], '4000')
+
+    def test_sucursal_nueva_va_al_final_del_orden(self):
+        admin = Usuario.objects.create_superuser(
+            email='admin@celtuc.ar', username='admin', password='clave-segura-123',
+        )
+        client = APIClient()
+        client.force_authenticate(admin)
+        r = client.post(
+            reverse('empleados:sucursales'),
+            {'nombre': 'Depósito', 'codigo_postal': '4000'},
+            format='json',
+        )
+        self.assertEqual(r.status_code, 201)
+        creada = Sucursal.objects.get(pk=r.data['id'])
+        self.assertEqual(creada.orden, Sucursal.todos.exclude(pk=creada.pk).order_by('-orden').first().orden + 1)
 
 
 class EmpleadoModelTests(TestCase):
