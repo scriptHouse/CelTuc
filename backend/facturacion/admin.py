@@ -46,12 +46,16 @@ class ComprobanteAdmin(ModeloBaseAdminMixin, ModelAdmin):
         'fecha', 'estado_cobro', 'borrado',
     )
     list_filter = ('tipo', 'estado_cobro', 'emisor', 'borrado')
-    search_fields = ('cliente_nombre', 'cliente_doc_numero', 'cliente_telefono', 'cae', 'numero')
+    search_fields = (
+        'cliente_nombre', 'cliente_doc_numero', 'cliente_telefono', 'cliente_email',
+        'cae', 'numero',
+    )
     inlines = (ItemComprobanteInline,)
     # Lo fiscal no se edita; solo el estado de cobro y las observaciones.
     readonly_fields = (
         'emisor', 'tipo', 'concepto', 'punto_venta', 'numero', 'cliente_nombre',
-        'cliente_doc_tipo', 'cliente_doc_numero', 'cliente_condicion', 'cliente_telefono', 'fecha',
+        'cliente_doc_tipo', 'cliente_doc_numero', 'cliente_condicion', 'cliente_telefono',
+        'cliente_email', 'fecha',
         'vencimiento', 'alicuota_iva', 'neto', 'iva', 'importe_exento',
         'importe_no_gravado', 'total', 'cae', 'cae_vencimiento', 'qr_url',
         'respuesta_afip', 'numero_formateado', 'creado', 'actualizado',
@@ -62,9 +66,12 @@ class ComprobanteAdmin(ModeloBaseAdminMixin, ModelAdmin):
 
 @admin.register(Cliente)
 class ClienteAdmin(ModeloBaseAdminMixin, ModelAdmin):
-    list_display = ('nombre', 'telefono', 'doc_tipo', 'doc_numero', 'condicion', 'borrado', 'actualizado')
+    list_display = (
+        'nombre', 'telefono', 'email', 'doc_tipo', 'doc_numero', 'condicion',
+        'borrado', 'actualizado',
+    )
     list_filter = ('condicion', 'doc_tipo', 'borrado')
-    search_fields = ('nombre', 'telefono', 'doc_numero')
+    search_fields = ('nombre', 'telefono', 'email', 'doc_numero')
     readonly_fields = (
         'creado', 'actualizado', 'creado_por', 'actualizado_por',
         'fecha_borrado', 'borrado_por',

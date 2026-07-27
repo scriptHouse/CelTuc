@@ -34,15 +34,17 @@ class StockProductoAdmin(ModeloBaseAdminMixin, ModelAdmin):
 class ItemVentaInline(TabularInline):
     model = ItemVenta
     extra = 0
-    fields = ('producto', 'cantidad', 'precio_unitario')
+    fields = ('tipo', 'producto', 'descripcion', 'cantidad', 'precio_unitario')
     autocomplete_fields = ('producto',)
+    raw_id_fields = ('item_service',)
 
 
 @admin.register(Venta)
 class VentaAdmin(ModeloBaseAdminMixin, ModelAdmin):
-    list_display = ('id', 'creado', 'sucursal', 'forma_pago', 'total', 'creado_por')
+    list_display = ('id', 'creado', 'sucursal', 'cliente', 'forma_pago', 'total', 'creado_por')
     list_filter = ('sucursal', 'forma_pago')
-    search_fields = ('nota', 'items__producto__nombre')
+    search_fields = ('nota', 'items__producto__nombre', 'cliente__nombre')
+    raw_id_fields = ('cliente', 'comprobante')
     inlines = (ItemVentaInline,)
     readonly_fields = _AUDITORIA
 

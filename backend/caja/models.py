@@ -405,7 +405,9 @@ def registrar_venta_en_caja(venta, *, caja=None, usuario=None):
             return None
 
     items = list(venta.items.select_related('producto')[:4])
-    detalle = ', '.join(f'{i.cantidad}x {i.producto.nombre}' for i in items)[:200]
+    # `detalle` del item sirve para las tres clases de renglon (mercaderia,
+    # service e item libre); los services no tienen producto asociado.
+    detalle = ', '.join(f'{i.cantidad}x {i.detalle}' for i in items)[:200]
     return registrar_movimiento(
         sesion,
         tipo=MovimientoCaja.Tipo.VENTA,

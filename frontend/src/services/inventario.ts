@@ -114,9 +114,23 @@ export type FormaPago = 'efectivo' | 'transferencia' | 'tarjeta' | 'otro'
  */
 export type { FacturacionVenta } from '@/types'
 
+/**
+ * Qué se cobra en un renglón de la venta:
+ * - `producto`: mercadería del catálogo. Es la ÚNICA que descuenta stock.
+ * - `service`: un trabajo del taller (puede venir de la lista de precios).
+ * - `otro`: texto libre (mano de obra, un accesorio suelto, un ajuste).
+ */
+export type TipoItemVenta = 'producto' | 'service' | 'otro'
+
 export interface ItemVenta {
-  producto: number
+  tipo: TipoItemVenta
+  /** Solo en los renglones de producto. */
+  producto: number | null
+  /** Fila de la lista de precios del taller, si el service salió de ahí. */
+  item_service?: number | null
+  /** Lo vendido, en texto (foto al momento de la venta). */
   nombre: string
+  descripcion?: string
   cantidad: number
   precio_unitario: number
   subtotal: number
@@ -134,6 +148,11 @@ export interface Venta {
   usuario: string | null
   items: ItemVenta[]
   creado: string // ISO
+  /** Cliente al que se le vendió (opcional: el mostrador puede no saber quién es). */
+  cliente?: number | null
+  cliente_nombre?: string | null
+  /** Factura que después se emitió por esta venta (para no contarla dos veces). */
+  comprobante?: number | null
   /** Id del movimiento de caja generado (null si no había turno abierto). */
   movimiento_caja?: number | null
   /** Nombre de la caja donde quedó anotada (el canal fiscal decide cuál). */
@@ -142,13 +161,43 @@ export interface Venta {
   aviso_caja?: string | null
 }
 
+/** Datos de un cliente nuevo cargados en la venta (lo da de alta el backend). */
+export interface ClienteVentaInput {
+  nombre?: string
+  telefono?: string
+  email?: string
+  doc_tipo?: string
+  doc_numero?: string
+  condicion?: string
+}
+
 export interface VentaInput {
   sucursal: number
   forma_pago: FormaPago
   /** Cómo se factura: decide a qué caja entra la plata (default: sin factura). */
   facturacion?: FacturacionVenta
   nota?: string
-  items: Array<{ producto: number; cantidad: number; precio_unitario: number }>
+  /**
+   * Renglones de la venta. Sin `tipo` y con `producto` se comporta como
+   * siempre (mercadería que descuenta stock); los services e ítems libres
+   * mandan `tipo` + `descripcion` y no tocan el inventario.
+   */
+  items: Array<{
+    tipo?: TipoItemVenta
+    producto?: number
+    item_service?: number
+    descripcion?: string
+    cantidad: number
+    precio_unitario: number
+  }>
+  /** Cliente ya guardado al que se le vende (opcional). */
+  cliente?: number
+  /**
+   * Cliente nuevo: sus datos se dan de alta con la misma lógica que los de una
+   * factura (se reconoce por documento, teléfono o email). Sin ninguno de esos
+   * tres datos no se registra nada y la venta se guarda igual, sin cliente.
+   */
+  cliente_datos?: ClienteVentaInput
   /** Caja donde anotar la venta si no hay cajas con canal fiscal (opcional). */
   caja?: number
   /** True = el vendedor confirmó vender con faltante: el stock queda negativo. */

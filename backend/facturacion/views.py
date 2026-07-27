@@ -185,6 +185,8 @@ class ComprobanteListCreateView(generics.ListCreateAPIView):
         # Datos de stock: se separan ANTES de emitir (ARCA no los conoce).
         sucursal_stock = datos.pop('sucursal_stock', None)
         confirmar_limite = datos.pop('confirmar_limite', False)
+        # Venta de mostrador que origina esta factura (opcional, viene de Caja).
+        venta_origen = datos.pop('venta', None)
         items_limpios, productos_stock = [], []
         for item in datos['items']:
             item = dict(item)
@@ -216,10 +218,25 @@ class ComprobanteListCreateView(generics.ListCreateAPIView):
                                         productos_stock, usuario)
         # Alimenta la base de clientes con lo cargado en la factura. Es secundario:
         # jamas puede voltear una emision ya autorizada (por eso el try/except).
+        cliente = None
         try:
-            registrar_cliente_desde_comprobante(comprobante)
+            cliente = registrar_cliente_desde_comprobante(comprobante)
         except Exception:
             logger.exception('No se pudo registrar el cliente del comprobante %s', comprobante.pk)
+        # Si la factura nacio de una venta de mostrador, la venta queda apuntada
+        # a esta factura (para no contar la misma plata dos veces en el historial
+        # del cliente) y hereda el cliente si no tenia. Tambien es secundario.
+        if venta_origen is not None:
+            try:
+                venta_origen.comprobante = comprobante
+                campos = ['comprobante']
+                if cliente is not None and venta_origen.cliente_id is None:
+                    venta_origen.cliente = cliente
+                    campos.append('cliente')
+                venta_origen.save(update_fields=campos)
+            except Exception:
+                logger.exception('No se pudo ligar la venta %s al comprobante %s',
+                                 venta_origen.pk, comprobante.pk)
         salida = ComprobanteDetailSerializer(comprobante, context=self.get_serializer_context())
         cuerpo = dict(salida.data)
         if avisos_stock:
@@ -288,9 +305,10 @@ class EnviarComprobanteEmailView(APIView):
 class ClienteListView(generics.ListAPIView):
     """Base de clientes: autocompletado del formulario y lista del gestor.
 
-    - `?buscar=` filtra por nombre, teléfono o documento.
+    - `?buscar=` filtra por nombre, teléfono, email o documento.
     - `?stats=1` agrega a cada cliente cantidad de compras, total gastado y última
-      compra (lo pide la página de Clientes; el autocompletado no, para ser liviano).
+      compra (facturas + ventas de mostrador). Lo pide la página de Clientes; el
+      autocompletado no, para ser liviano.
     """
 
     serializer_class = ClienteSerializer
@@ -300,7 +318,11 @@ class ClienteListView(generics.ListAPIView):
         qs = Cliente.objects.all()
         buscar = (self.request.query_params.get('buscar') or '').strip()
         if buscar:
-            filtro = Q(nombre__icontains=buscar) | Q(telefono__icontains=buscar)
+            filtro = (
+                Q(nombre__icontains=buscar)
+                | Q(telefono__icontains=buscar)
+                | Q(email__icontains=buscar)
+            )
             digitos = _solo_digitos(buscar)
             if digitos:
                 filtro |= Q(doc_numero__icontains=digitos) | Q(telefono__icontains=digitos)
@@ -322,8 +344,9 @@ class ClienteListView(generics.ListAPIView):
 class ClienteDetailView(generics.RetrieveUpdateDestroyAPIView):
     """Detalle del cliente con su historial de compras; permite editar y eliminar.
 
-    El borrado es lógico (lo saca de la base) y NO toca los comprobantes: son
-    documentos fiscales independientes.
+    El historial trae los dos tipos de compra: facturas y ventas de mostrador.
+    El borrado es lógico (lo saca de la base) y NO toca los comprobantes ni las
+    ventas: son documentos y movimientos independientes.
     """
 
     queryset = Cliente.objects.all()

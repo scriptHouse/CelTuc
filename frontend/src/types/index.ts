@@ -193,6 +193,8 @@ export interface Comprobante {
   cliente_condicion: CondicionFiscal
   /** Teléfono/celular del cliente (dato interno, no fiscal). */
   cliente_telefono?: string
+  /** Email del cliente (dato interno: envío del PDF y base de clientes). */
+  cliente_email?: string
   fecha: string
   vencimiento: string | null
   alicuota_iva?: number
@@ -211,7 +213,7 @@ export interface Comprobante {
   creado?: string
 }
 
-/** Cliente de la base (se arma solo con los datos cargados en las facturas). */
+/** Cliente de la base (se arma solo con lo que se carga al facturar y al vender). */
 export interface Cliente {
   id: number
   nombre: string
@@ -219,6 +221,7 @@ export interface Cliente {
   doc_numero: string
   condicion: CondicionFiscal
   telefono: string
+  email: string
   creado?: string // ISO
   actualizado?: string // ISO
   /** Estadísticas: solo vienen cuando la lista se pide con `stats` (gestor). */
@@ -227,23 +230,34 @@ export interface Cliente {
   ultima_compra?: string | null // ISO
 }
 
-/** Una compra del cliente: un comprobante con sus productos. */
+/** De dónde salió la compra: una factura con CAE o una venta de mostrador. */
+export type OrigenCompra = 'factura' | 'venta'
+
+/**
+ * Una compra del cliente, de cualquiera de los dos tipos que guarda el sistema.
+ * El backend las normaliza a esta forma común para listarlas en una sola línea
+ * de tiempo (`titulo` ya viene armado: "Factura C · 0001-00000012" / "Venta de
+ * mostrador #34"; `detalle` es la cuenta emisora o la sucursal + forma de pago).
+ */
 export interface CompraCliente {
   id: number
-  tipo: TipoComprobante
-  numero_formateado: string
+  origen: OrigenCompra
+  titulo: string
+  detalle: string
   fecha: string // ISO
   total: number
   estado_cobro: EstadoCobro
-  emisor_nombre: string
   items: ItemComprobante[]
 }
 
-/** Resumen de compras del cliente. */
+/** Resumen de compras del cliente (los dos tipos sumados). */
 export interface ResumenCliente {
   cantidad: number
   total: number
   ultima: string | null // ISO
+  /** Desglose por tipo, para mostrar de dónde viene cada operación. */
+  facturas: number
+  ventas: number
 }
 
 /** Cliente con su historial de compras (para el detalle del gestor). */

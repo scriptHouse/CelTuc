@@ -1,4 +1,4 @@
-import type { CondicionEmisor } from '@/types'
+import type { CondicionEmisor, CondicionFiscal, DocTipo } from '@/types'
 
 /**
  * Puente entre Caja y Facturación: al registrar una venta de mostrador marcada
@@ -18,6 +18,15 @@ export interface BorradorFacturaVenta {
   /** Ítems con el precio FINAL cobrado en el mostrador (IVA incluido si aplica). */
   items: Array<{ descripcion: string; cantidad: number; precioFinal: number }>
   observaciones: string
+  /** Cliente elegido en el mostrador: precarga los datos del receptor. */
+  cliente?: {
+    nombre: string
+    telefono?: string
+    email?: string
+    docTipo?: DocTipo
+    docNumero?: string
+    condicion?: CondicionFiscal
+  }
 }
 
 export function guardarBorradorFacturaVenta(borrador: BorradorFacturaVenta): void {

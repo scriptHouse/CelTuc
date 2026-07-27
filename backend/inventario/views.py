@@ -1,3 +1,5 @@
+import logging
+
 from django.core.exceptions import ValidationError
 from rest_framework import generics
 from rest_framework.response import Response
@@ -24,6 +26,8 @@ from .serializers import (
     TransferenciaStockSerializer,
     VentaSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class _BaseInventario:
@@ -133,7 +137,7 @@ class VentasView(_BaseInventario, APIView):
     permission_classes = [LecturaYEscrituraConPermiso]
 
     def get(self, request):
-        qs = Venta.objects.select_related('sucursal', 'creado_por').prefetch_related(
+        qs = Venta.objects.select_related('sucursal', 'creado_por', 'cliente').prefetch_related(
             'items__producto',
         )
         sucursal = request.query_params.get('sucursal')
@@ -149,14 +153,27 @@ class VentasView(_BaseInventario, APIView):
         entrada = CrearVentaSerializer(data=request.data)
         entrada.is_valid(raise_exception=True)
         datos = entrada.validated_data
+        usuario = request.user if request.user.is_authenticated else None
+        # A quien se le vende: uno ya guardado o los datos cargados a mano (que
+        # dan de alta el cliente con la misma logica que una factura). Nunca
+        # frena la venta: si algo falla, la venta se registra sin cliente.
+        cliente = datos.get('cliente')
+        if cliente is None and datos.get('cliente_datos'):
+            try:
+                from facturacion.clientes import registrar_cliente
+
+                cliente = registrar_cliente(usuario=usuario, **datos['cliente_datos'])
+            except Exception:
+                logger.exception('No se pudo registrar el cliente de la venta')
         try:
             venta = registrar_venta(
                 datos['sucursal'],
-                [(i['producto'], i['cantidad'], i['precio_unitario']) for i in datos['items']],
+                datos['items'],  # ya normalizados por el serializer (producto/service/otro)
                 forma_pago=datos.get('forma_pago', ''),
                 facturacion=datos.get('facturacion', ''),
                 nota=datos.get('nota', ''),
-                usuario=request.user,
+                cliente=cliente,
+                usuario=usuario,
                 permitir_faltante=datos.get('permitir_faltante', False),
             )
         except ValidationError as e:

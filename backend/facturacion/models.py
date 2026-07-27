@@ -248,6 +248,9 @@ class Comprobante(ModeloBase):
     # Telefono/celular del cliente. Dato INTERNO (no se manda a ARCA): sirve para
     # el contacto y para ir armando la base de clientes (ver `Cliente`).
     cliente_telefono = models.CharField('telefono del cliente', max_length=30, blank=True)
+    # Email del cliente. Tambien INTERNO: precarga el envio del PDF por mail y
+    # alimenta la base de clientes.
+    cliente_email = models.EmailField('email del cliente', max_length=254, blank=True)
 
     fecha = models.DateField('fecha de emision', default=timezone.localdate)
     vencimiento = models.DateField('vencimiento de pago', null=True, blank=True)
@@ -296,15 +299,18 @@ class Comprobante(ModeloBase):
 
 
 class Cliente(ModeloBase):
-    """Cliente del negocio, alimentado con los datos cargados en las facturas.
+    """Cliente del negocio, alimentado con lo que se carga al vender.
 
-    No se cargan a mano: cada vez que se emite un comprobante se crea o actualiza
-    el cliente con lo que se puso en la factura, armando una base reutilizable
-    (para autocompletar la proxima factura del mismo cliente). Se identifica por
-    numero de documento y, si no hay (Consumidor Final), por telefono; si no hay
-    ninguno de los dos, no se registra (no habria como reconocerlo despues).
+    No se cargan a mano: se crea o actualiza solo con los datos del receptor de
+    cada factura y con el cliente elegido en la venta de mostrador, armando una
+    base reutilizable (para autocompletar la proxima operacion). Se identifica
+    por numero de documento y, si no hay (Consumidor Final), por telefono y por
+    email; sin ninguno de los tres no se registra (no habria como reconocerlo
+    despues).
 
-    Los campos espejan a los del receptor del comprobante.
+    Sus compras son de los dos tipos que el sistema guarda: las facturas
+    (`Comprobante`, cruzadas por documento/telefono) y las ventas de mostrador
+    (`inventario.Venta`, que apunta al cliente con una FK). Ver `clientes.py`.
     """
 
     nombre = models.CharField('nombre / razon social', max_length=160)
@@ -319,6 +325,7 @@ class Cliente(ModeloBase):
         default=Comprobante.CondicionReceptor.CONSUMIDOR_FINAL,
     )
     telefono = models.CharField('telefono', max_length=30, blank=True)
+    email = models.EmailField('email', max_length=254, blank=True)
 
     # creado / actualizado / *_por / borrado* los aporta ModeloBase.
 

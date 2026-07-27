@@ -66,7 +66,7 @@ import {
   ultimoCierreDeCaja,
   type AbrirCajaInput,
 } from '@/services/caja'
-import { tomarBorradorFacturaVenta } from '@/lib/borradorFactura'
+import { tomarBorradorFacturaVenta, type BorradorFacturaVenta } from '@/lib/borradorFactura'
 import { AperturaModal, type AperturaValues } from '@/components/caja/AperturaModal'
 import {
   calcularTotales,
@@ -259,6 +259,7 @@ export function FacturacionPage() {
     const esRI = cuenta.condicion === 'responsable_inscripto'
     setEmisorId(cuenta.id)
     setPrefill({
+      ventaId: borrador.ventaId,
       // El precio de la venta es lo que pagó el cliente (final). En A/B el
       // ítem viaja NETO y el modal le suma el 21 %: se divide acá para que el
       // total de la factura coincida con lo cobrado en el mostrador.
@@ -271,6 +272,7 @@ export function FacturacionPage() {
       })),
       observaciones: borrador.observaciones,
       pagada: true, // la venta de mostrador ya se cobró
+      cliente: borrador.cliente,
     })
     setFacturaModal(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -811,9 +813,13 @@ export function FacturacionPage() {
 
 /** Precarga del modal de emisión cuando la factura nace de una venta de Caja. */
 interface PrefillFactura {
+  /** Venta de mostrador que se está facturando (se liga al emitir). */
+  ventaId: number
   items: Array<{ descripcion: string; cantidad: number; precioUnitario: number }>
   observaciones: string
   pagada: boolean
+  /** Cliente cargado en el mostrador (si la venta lo tenía). */
+  cliente?: BorradorFacturaVenta['cliente']
 }
 
 // ===== Detalle (con CAE y QR) =====
@@ -857,26 +863,35 @@ function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void 
   })
 
   // El modal queda montado entre aperturas: al cambiar de comprobante se
-  // precarga el WhatsApp con el teléfono guardado en ESA factura.
+  // precargan el WhatsApp y el email con lo guardado en ESA factura.
   const clienteTelefono = c?.cliente_telefono
+  const clienteEmail = c?.cliente_email
   useEffect(() => {
     setTelefono(clienteTelefono ?? '')
   }, [id, clienteTelefono])
+  useEffect(() => {
+    setEmail(clienteEmail ?? '')
+  }, [id, clienteEmail])
 
-  // Facturas emitidas sin teléfono: si el cliente igual está en la base (por
-  // su documento), se toma el de ahí. Solo rellena si el campo sigue vacío,
-  // para no pisar lo que se esté tipeando.
+  // Facturas emitidas sin teléfono o sin email: si el cliente igual está en la
+  // base (por su documento), se toman de ahí. Solo rellena si el campo sigue
+  // vacío, para no pisar lo que se esté tipeando.
   const docCliente = c?.cliente_doc_numero
   const { data: clientesBase = [] } = useQuery({
-    queryKey: ['fact-cliente-telefono', docCliente],
+    queryKey: ['fact-cliente-contacto', docCliente],
     queryFn: () => buscarClientes(docCliente as string),
-    enabled: id != null && !clienteTelefono && !!docCliente,
+    enabled: id != null && (!clienteTelefono || !clienteEmail) && !!docCliente,
   })
   useEffect(() => {
     if (clienteTelefono) return
     const enBase = clientesBase.find((cl) => cl.doc_numero === docCliente && cl.telefono)
     if (enBase) setTelefono((actual) => actual || enBase.telefono)
   }, [clienteTelefono, clientesBase, docCliente])
+  useEffect(() => {
+    if (clienteEmail) return
+    const enBase = clientesBase.find((cl) => cl.doc_numero === docCliente && cl.email)
+    if (enBase) setEmail((actual) => actual || enBase.email)
+  }, [clienteEmail, clientesBase, docCliente])
 
   async function descargar() {
     if (!c) return
@@ -964,6 +979,10 @@ function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void 
                 value={c.cliente_doc_numero || '—'}
               />
               <Dato label="Teléfono" value={c.cliente_telefono || '—'} />
+              <Dato
+                label="Email"
+                value={<span className="block truncate">{c.cliente_email || '—'}</span>}
+              />
               <Dato label="Estado" value={<FacturaEstadoBadge estado={estadoComprobante(c)} />} />
               <Dato label="Emisión" value={fecha(c.fecha)} />
               <Dato label="Vencimiento" value={c.vencimiento ? fecha(c.vencimiento) : '—'} />
@@ -1158,6 +1177,7 @@ function NuevaFacturaModal({
   const [items, setItems] = useState<BorradorItem[]>([])
   const [sucursalStock, setSucursalStock] = useState('')
   const [telefono, setTelefono] = useState('')
+  const [email, setEmail] = useState('')
 
   // Autocompletado de clientes: al escribir el nombre se busca en la base (por
   // nombre, teléfono o documento) y se puede precargar un cliente ya guardado.
@@ -1191,11 +1211,17 @@ function NuevaFacturaModal({
 
   useEffect(() => {
     if (!open) return
-    const cond = condicionesClientePara(emisor.condicion)[0]
-    setNombre('')
+    // Con una venta precargada que ya tenía cliente, se respeta esa condición
+    // fiscal si el emisor la puede facturar; si no, la primera válida.
+    const condsValidas = condicionesClientePara(emisor.condicion)
+    const condCliente = prefill?.cliente?.condicion
+    const cond = condCliente && condsValidas.includes(condCliente) ? condCliente : condsValidas[0]
+    const tipos = docTiposPara(cond)
+    const docTipoCliente = prefill?.cliente?.docTipo
+    setNombre(prefill?.cliente?.nombre ?? '')
     setCondicion(cond)
-    setDocTipo(docTiposPara(cond)[0])
-    setDocNumero('')
+    setDocTipo(docTipoCliente && tipos.includes(docTipoCliente) ? docTipoCliente : tipos[0])
+    setDocNumero(prefill?.cliente?.docNumero ?? '')
     setFormatearDoc(true)
     setFechaEmision(hoyInput())
     setVencimiento(addDaysInput(15))
@@ -1215,7 +1241,8 @@ function NuevaFacturaModal({
         : [{ key: nextKey(), descripcion: '', cantidad: 1, precioUnitario: 0 }],
     )
     setSucursalStock('')
-    setTelefono('')
+    setTelefono(prefill?.cliente?.telefono ?? '')
+    setEmail(prefill?.cliente?.email ?? '')
     setSugerenciasAbiertas(false)
   }, [open, emisor, prefill])
 
@@ -1318,12 +1345,16 @@ function NuevaFacturaModal({
       cliente_doc_numero: docNumero.replace(/\D/g, ''),
       cliente_condicion: condicion,
       cliente_telefono: telefono.trim() || undefined,
+      cliente_email: email.trim() || undefined,
       fecha: fechaEmision,
       vencimiento: vencimiento || null,
       observaciones: observaciones.trim() || undefined,
       estado_cobro: pagada ? 'pagada' : 'pendiente',
       items: validos,
       sucursal_stock: sucursalStock ? Number(sucursalStock) : undefined,
+      // Si la factura nace de una venta de mostrador, se manda su id: la venta
+      // queda ligada y esa plata no se cuenta dos veces en el cliente.
+      venta: prefill?.ventaId,
     })
   }
 
@@ -1338,6 +1369,7 @@ function NuevaFacturaModal({
     setDocTipo(tipos.includes(c.doc_tipo) ? c.doc_tipo : tipos[0])
     setDocNumero(c.doc_numero || '')
     setTelefono(c.telefono || '')
+    setEmail(c.email || '')
     setSugerenciasAbiertas(false)
   }
 
@@ -1375,7 +1407,7 @@ function NuevaFacturaModal({
             <ReceiptText className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
             <span>
               Precargada desde la <b>venta de mostrador</b>: los ítems ya están y el stock ya se
-              descontó al vender. Completá los datos del cliente y emití como siempre.
+              descontó al vender. Confirmá los datos del cliente y emití como siempre.
             </span>
           </p>
         )}
@@ -1420,6 +1452,12 @@ function NuevaFacturaModal({
                                 {c.telefono}
                               </span>
                             )}
+                            {c.email && (
+                              <span className="inline-flex min-w-0 items-center gap-1">
+                                <Mail className="h-3 w-3 shrink-0" />
+                                <span className="truncate">{c.email}</span>
+                              </span>
+                            )}
                             {c.doc_numero && (
                               <span>
                                 {DOC_LABEL[c.doc_tipo]} {c.doc_numero}
@@ -1442,6 +1480,22 @@ function NuevaFacturaModal({
                   onChange={(e) => setTelefono(e.target.value)}
                   placeholder="381 555 1234"
                   inputMode="tel"
+                  className="pl-10"
+                />
+              </div>
+            </Campo>
+            {/* Email: no viaja a ARCA. Queda en la factura (para reenviar el PDF
+                sin volver a tipearlo) y en la base de clientes. */}
+            <Campo label="Email">
+              <div className="relative">
+                <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
+                <Input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="cliente@correo.com"
+                  inputMode="email"
+                  autoComplete="off"
                   className="pl-10"
                 />
               </div>

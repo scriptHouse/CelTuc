@@ -1,8 +1,28 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Banknote, FileCheck2, Loader2, Lock, Minus, Plus, ShoppingCart, Trash2, Wallet } from 'lucide-react'
-import type { CajaRegistradora, ProductoCatalogo } from '@/types'
+import {
+  AlertTriangle,
+  Banknote,
+  FileCheck2,
+  IdCard,
+  Loader2,
+  Lock,
+  Mail,
+  Minus,
+  Phone,
+  Plus,
+  Search,
+  ShoppingCart,
+  Trash2,
+  UserRound,
+  Wallet,
+  Wrench,
+  X,
+} from 'lucide-react'
+import type { CajaRegistradora, Cliente, ProductoCatalogo, SeccionPreciosService } from '@/types'
+import { buscarClientes } from '@/services/facturacion'
+import { listarSecciones } from '@/services/preciosService'
 import { listarProductos } from '@/services/productos'
 import {
   listarStock,
@@ -11,6 +31,7 @@ import {
   registrarVenta,
   type FacturacionVenta,
   type FormaPago,
+  type TipoItemVenta,
 } from '@/services/inventario'
 import { FACTURACIONES, cajaParaFacturacion } from '@/components/caja/medios'
 import { guardarBorradorFacturaVenta } from '@/lib/borradorFactura'
@@ -34,15 +55,61 @@ import { useToast } from '@/components/ToastProvider'
  * dos cosas. El botón va en VERDE: es la puerta de entrada de la plata.
  */
 
+/**
+ * Un renglón de la venta. En el mostrador no se cobra solo mercadería: también
+ * services del taller (de la lista de precios) y cosas sueltas de texto libre.
+ * Solo los de `tipo: 'producto'` descuentan stock.
+ */
 interface Linea {
   key: string
-  producto: ProductoCatalogo
+  tipo: TipoItemVenta
+  /** Solo en mercadería: la fila del catálogo (para el stock y el precio). */
+  producto?: ProductoCatalogo
+  /** Fila de la lista de precios del taller, si el service salió de ahí. */
+  itemServiceId?: number
+  /** Lo que se cobra, en texto. Editable en los ítems libres. */
+  descripcion: string
   cantidad: number
   precio: number
 }
 
 let _clave = 0
 const claveNueva = () => `lv-${_clave++}`
+
+/** Iniciales para el avatar del cliente elegido (mismo criterio que Clientes). */
+function inicialesCliente(nombre: string): string {
+  const partes = nombre.trim().split(/\s+/).filter(Boolean)
+  const a = partes[0]?.[0] ?? ''
+  const b = partes.length > 1 ? partes[partes.length - 1][0] : ''
+  return (a + b).toUpperCase() || 'C'
+}
+
+/** Encuentra la fila (y calidad) elegida en la lista de precios del taller. */
+function ubicarService(
+  secciones: SeccionPreciosService[],
+  idItem: string,
+  idVariante: string,
+): { itemId: number; descripcion: string; lista: number | null; cash: number | null } | null {
+  for (const seccion of secciones) {
+    const item = seccion.items.find((i) => String(i.id) === idItem)
+    if (!item) continue
+    const precio = idVariante ? item.precios.find((p) => String(p.variante) === idVariante) : undefined
+    const variante = seccion.variantes.find((v) => String(v.id) === idVariante)?.nombre
+    return {
+      itemId: item.id,
+      descripcion: [seccion.nombre, item.etiqueta, variante].filter(Boolean).join(' · '),
+      lista: precio?.efectivo.lista_ars ?? null,
+      cash: precio?.efectivo.cash_ars ?? null,
+    }
+  }
+  return null
+}
+
+/** Mismo criterio que la mercadería: cash para efectivo/transferencia. */
+function precioServicePara(lista: number | null, cash: number | null, forma: FormaPago): number {
+  const preferido = forma === 'efectivo' || forma === 'transferencia' ? cash : lista
+  return Number(preferido ?? lista ?? cash ?? 0)
+}
 
 const FORMAS: Array<{ value: FormaPago; label: string }> = [
   { value: 'efectivo', label: 'Efectivo' },
@@ -179,6 +246,15 @@ function VentaModal({
     enabled: abierta,
     retry: false,
   })
+  // Lista de precios del taller. Sin permiso `ver_precios_service` responde 403
+  // y el selector de service directamente no se muestra: la venta de mercadería
+  // sigue funcionando igual (`retry: false`, mismo criterio que el resto).
+  const { data: seccionesService = [], isError: sinService } = useQuery({
+    queryKey: ['service-secciones'],
+    queryFn: listarSecciones,
+    enabled: abierta,
+    retry: false,
+  })
 
   const [sucursalId, setSucursalId] = useState<number | null>(null)
   const [formaPago, setFormaPago] = useState<FormaPago>('efectivo')
@@ -186,6 +262,45 @@ function VentaModal({
   const [lineas, setLineas] = useState<Linea[]>([])
   const [nota, setNota] = useState('')
   const [buscar, setBuscar] = useState('')
+  const [buscarService, setBuscarService] = useState('')
+
+  // ---- Cliente (opcional): la venta queda en SU historial de compras --------
+  // Se puede elegir uno ya guardado (autocompletado) o cargar los datos a mano:
+  // el backend lo da de alta con la misma lógica que un cliente de factura.
+  const [clienteSel, setClienteSel] = useState<Cliente | null>(null)
+  const [clienteNombre, setClienteNombre] = useState('')
+  const [clienteTelefono, setClienteTelefono] = useState('')
+  const [clienteEmail, setClienteEmail] = useState('')
+  const [sugerenciasAbiertas, setSugerenciasAbiertas] = useState(false)
+  const [busquedaCliente, setBusquedaCliente] = useState('')
+  useEffect(() => {
+    const id = setTimeout(() => setBusquedaCliente(clienteNombre.trim()), 250)
+    return () => clearTimeout(id)
+  }, [clienteNombre])
+  // Sin permiso de facturación la búsqueda responde 403: no se muestran
+  // sugerencias y los datos se cargan a mano igual (`retry: false`).
+  const { data: sugerenciasClientes = [] } = useQuery({
+    queryKey: ['venta-clientes', busquedaCliente],
+    queryFn: () => buscarClientes(busquedaCliente),
+    enabled: abierta && sugerenciasAbiertas && !clienteSel && busquedaCliente.length >= 2,
+    retry: false,
+  })
+
+  function elegirCliente(c: Cliente) {
+    setClienteSel(c)
+    setClienteNombre(c.nombre)
+    setClienteTelefono(c.telefono || '')
+    setClienteEmail(c.email || '')
+    setSugerenciasAbiertas(false)
+  }
+
+  function quitarCliente() {
+    setClienteSel(null)
+    setClienteNombre('')
+    setClienteTelefono('')
+    setClienteEmail('')
+    setSugerenciasAbiertas(false)
+  }
 
   useEffect(() => {
     if (!abierta) return
@@ -202,6 +317,8 @@ function VentaModal({
     setLineas([])
     setNota('')
     setBuscar('')
+    setBuscarService('')
+    quitarCliente()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [abierta])
 
@@ -240,43 +357,129 @@ function VentaModal({
     [catalogo],
   )
 
+  /**
+   * Un renglón por cada fila × calidad de la lista de precios: "Módulos ·
+   * iPhone 13 · Original — $180.000". La fila sin precios cargados igual se
+   * ofrece (el precio se escribe a mano).
+   */
+  const opcionesService = useMemo(() => {
+    const opciones = [{ value: '', label: 'Buscar service del taller…' }]
+    for (const seccion of seccionesService.filter((s) => s.activo)) {
+      const variantes = new Map(seccion.variantes.map((v) => [v.id, v.nombre]))
+      for (const item of seccion.items.filter((i) => i.activo)) {
+        if (item.precios.length === 0) {
+          opciones.push({
+            value: `${item.id}:`,
+            label: `${seccion.nombre} · ${item.etiqueta}`,
+          })
+          continue
+        }
+        for (const precio of item.precios) {
+          const variante = variantes.get(precio.variante)
+          const ars = precio.efectivo.lista_ars ?? precio.efectivo.cash_ars
+          opciones.push({
+            value: `${item.id}:${precio.variante}`,
+            label:
+              [seccion.nombre, item.etiqueta, variante].filter(Boolean).join(' · ') +
+              (ars != null ? ` — ${money0(Number(ars))}` : ''),
+          })
+        }
+      }
+    }
+    return opciones
+  }, [seccionesService])
+
+  // El selector de service solo aparece si la cuenta puede ver la lista de
+  // precios Y hay algo cargado (la primera opción es el placeholder).
+  const hayService = !sinService && opcionesService.length > 1
+
+  function agregarLinea(nueva: Omit<Linea, 'key'>) {
+    setLineas((previas) => [...previas, { key: claveNueva(), ...nueva }])
+  }
+
   function agregar(idProducto: string) {
     const producto = catalogo.find((p) => String(p.id) === idProducto)
     if (!producto) return
     setLineas((previas) => {
-      const existente = previas.find((l) => l.producto.id === producto.id)
+      const existente = previas.find((l) => l.producto?.id === producto.id)
       if (existente) {
         return previas.map((l) =>
-          l.producto.id === producto.id ? { ...l, cantidad: l.cantidad + 1 } : l,
+          l.producto?.id === producto.id ? { ...l, cantidad: l.cantidad + 1 } : l,
         )
       }
       return [
         ...previas,
-        { key: claveNueva(), producto, cantidad: 1, precio: precioSugerido(producto, formaPago) },
+        {
+          key: claveNueva(),
+          tipo: 'producto' as const,
+          producto,
+          descripcion: [producto.nombre, producto.calidad].filter(Boolean).join(' · '),
+          cantidad: 1,
+          precio: precioSugerido(producto, formaPago),
+        },
       ]
     })
     setBuscar('')
   }
 
+  /** `clave` es "idItem:idVariante" (la variante puede venir vacía). */
+  function agregarService(clave: string) {
+    if (!clave) return
+    const [idItem, idVariante] = clave.split(':')
+    const ubicado = ubicarService(seccionesService, idItem, idVariante)
+    if (!ubicado) return
+    agregarLinea({
+      tipo: 'service',
+      itemServiceId: ubicado.itemId,
+      descripcion: ubicado.descripcion,
+      cantidad: 1,
+      precio: precioServicePara(ubicado.lista, ubicado.cash, formaPago),
+    })
+    setBuscarService('')
+  }
+
+  function agregarLibre() {
+    agregarLinea({ tipo: 'otro', descripcion: '', cantidad: 1, precio: 0 })
+  }
+
   const total = lineas.reduce((a, l) => a + l.cantidad * (Number.isFinite(l.precio) ? l.precio : 0), 0)
-  const hayFaltantes = sucursalId !== null && lineas.some((l) => l.cantidad > disponibles(l.producto.id))
+  // El faltante de stock solo aplica a la mercadería: un service no tiene stock.
+  const hayFaltantes =
+    sucursalId !== null &&
+    lineas.some((l) => l.producto != null && l.cantidad > disponibles(l.producto.id))
 
   const guardar = useMutation({
     mutationFn: (permitirFaltante: boolean) => {
       if (sucursalId === null) throw new ApiError(0, 'Elegí la sucursal.', null)
-      if (lineas.length === 0) throw new ApiError(0, 'Agregá al menos un producto.', null)
+      if (lineas.length === 0) throw new ApiError(0, 'Agregá al menos un ítem.', null)
       if (lineas.some((l) => !Number.isFinite(l.precio) || l.precio < 0)) {
         throw new ApiError(0, 'Revisá los precios: tienen que ser 0 o más.', null)
       }
+      if (lineas.some((l) => l.tipo !== 'producto' && !l.descripcion.trim())) {
+        throw new ApiError(0, 'Escribí qué se cobra en los ítems libres.', null)
+      }
+      // El cliente es opcional: si es uno guardado va su id; si se cargó a mano
+      // van los datos y el backend lo da de alta (si hay con qué reconocerlo).
+      const datosCliente = {
+        nombre: clienteNombre.trim(),
+        telefono: clienteTelefono.trim(),
+        email: clienteEmail.trim(),
+      }
+      const hayDatosNuevos = !clienteSel && (datosCliente.telefono || datosCliente.email)
       return registrarVenta({
         sucursal: sucursalId,
         forma_pago: formaPago,
         facturacion,
         nota: nota.trim(),
+        cliente: clienteSel?.id,
+        cliente_datos: hayDatosNuevos ? datosCliente : undefined,
         caja: cajaId ? Number(cajaId) : undefined,
         permitir_faltante: permitirFaltante || undefined,
         items: lineas.map((l) => ({
-          producto: l.producto.id,
+          tipo: l.tipo,
+          producto: l.producto?.id,
+          item_service: l.itemServiceId,
+          descripcion: l.descripcion.trim(),
           cantidad: l.cantidad,
           precio_unitario: l.precio,
         })),
@@ -294,7 +497,8 @@ function VentaModal({
         : ''
       toast.success(
         `Venta #${venta.id} registrada`,
-        `${money0(Number(venta.total))} en ${venta.sucursal_nombre} — stock descontado${arqueo}.`,
+        `${money0(Number(venta.total))} en ${venta.sucursal_nombre} — stock descontado${arqueo}.` +
+          (venta.cliente_nombre ? ` Quedó en el historial de ${venta.cliente_nombre}.` : ''),
       )
       if (!venta.movimiento_caja) {
         toast.info('La venta no entró en ningún arqueo', venta.aviso_caja ?? 'No hay un turno de caja abierto.')
@@ -318,11 +522,22 @@ function VentaModal({
             ventaId: venta.id,
             emisorCondicion: esRI ? 'responsable_inscripto' : 'monotributista',
             items: lineas.map((l) => ({
-              descripcion: [l.producto.nombre, l.producto.calidad].filter(Boolean).join(' · '),
+              descripcion: l.descripcion.trim() || l.producto?.nombre || 'Ítem',
               cantidad: l.cantidad,
               precioFinal: Number.isFinite(l.precio) ? l.precio : 0,
             })),
             observaciones: `Venta de mostrador #${venta.id}`,
+            // El cliente del mostrador viaja a la factura: no se retipea nada.
+            cliente: clienteNombre.trim()
+              ? {
+                  nombre: clienteNombre.trim(),
+                  telefono: clienteTelefono.trim(),
+                  email: clienteEmail.trim(),
+                  docTipo: clienteSel?.doc_tipo,
+                  docNumero: clienteSel?.doc_numero,
+                  condicion: clienteSel?.condicion,
+                }
+              : undefined,
           })
           navigate('/facturacion')
         }
@@ -335,7 +550,9 @@ function VentaModal({
   /** La venta NUNCA se bloquea por stock: con faltante solo se pide confirmar. */
   async function handleRegistrar() {
     if (hayFaltantes) {
-      const faltantes = lineas.filter((l) => l.cantidad > disponibles(l.producto.id))
+      const faltantes = lineas.filter(
+        (l) => l.producto != null && l.cantidad > disponibles(l.producto.id),
+      )
       const ok = await confirm({
         title: 'Stock insuficiente según el sistema',
         tone: 'warning',
@@ -350,9 +567,9 @@ function VentaModal({
             <span className="block space-y-1 rounded-xl bg-ink-50 px-3.5 py-2.5 text-left">
               {faltantes.map((l) => (
                 <span key={l.key} className="flex items-center justify-between gap-3">
-                  <span className="min-w-0 truncate">{l.producto.nombre}</span>
+                  <span className="min-w-0 truncate">{l.producto!.nombre}</span>
                   <span className="tnum shrink-0 font-medium text-ink-900">
-                    quedan {num(disponibles(l.producto.id))} · vendés {num(l.cantidad)}
+                    quedan {num(disponibles(l.producto!.id))} · vendés {num(l.cantidad)}
                   </span>
                 </span>
               ))}
@@ -468,36 +685,214 @@ function VentaModal({
           )}
         </div>
 
+        {/* Cliente: opcional, pero si va queda toda su compra en su historial */}
+        <div className="rounded-2xl border border-line bg-canvas/40 p-3.5">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-ink-500">
+              <UserRound className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              Cliente <span className="text-ink-400">(opcional)</span>
+            </span>
+            {clienteSel && (
+              <button
+                type="button"
+                onClick={quitarCliente}
+                className="inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-xs text-ink-400 transition-colors hover:bg-ink-100 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden />
+                Quitar
+              </button>
+            )}
+          </div>
+
+          {clienteSel ? (
+            <div className="flex items-center gap-3 rounded-xl border border-line bg-surface px-3 py-2.5">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-ink-100 text-xs font-bold text-ink-900">
+                {inicialesCliente(clienteSel.nombre)}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-ink-900">{clienteSel.nombre}</p>
+                <p className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-ink-400">
+                  {clienteSel.telefono && (
+                    <span className="inline-flex items-center gap-1">
+                      <Phone className="h-3 w-3 shrink-0" aria-hidden />
+                      {clienteSel.telefono}
+                    </span>
+                  )}
+                  {clienteSel.email && (
+                    <span className="inline-flex min-w-0 items-center gap-1">
+                      <Mail className="h-3 w-3 shrink-0" aria-hidden />
+                      <span className="truncate">{clienteSel.email}</span>
+                    </span>
+                  )}
+                  {clienteSel.doc_numero && (
+                    <span className="inline-flex items-center gap-1">
+                      <IdCard className="h-3 w-3 shrink-0" aria-hidden />
+                      {clienteSel.doc_numero}
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="grid gap-2.5 sm:grid-cols-2">
+                <div className="relative sm:col-span-2">
+                  <Input
+                    value={clienteNombre}
+                    onChange={(e) => {
+                      setClienteNombre(e.target.value)
+                      setSugerenciasAbiertas(true)
+                    }}
+                    onFocus={() => setSugerenciasAbiertas(true)}
+                    onBlur={() => setSugerenciasAbiertas(false)}
+                    placeholder="Nombre del cliente…"
+                    autoComplete="off"
+                    aria-label="Nombre del cliente"
+                  />
+                  {sugerenciasAbiertas && sugerenciasClientes.length > 0 && (
+                    <div
+                      onMouseDown={(e) => e.preventDefault()}
+                      className="ct-dropdown absolute left-0 right-0 z-40 mt-2 max-h-52 overflow-y-auto rounded-xl border border-line bg-surface p-1.5 shadow-[0_18px_50px_rgba(10,10,11,0.16)]"
+                    >
+                      <p className="flex items-center gap-1.5 px-2 py-1 text-[0.7rem] font-medium uppercase tracking-[0.12em] text-ink-400">
+                        <Search className="h-3 w-3" aria-hidden /> Clientes guardados
+                      </p>
+                      {sugerenciasClientes.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => elegirCliente(c)}
+                          className="flex w-full flex-col items-start gap-0.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-ink-50"
+                        >
+                          <span className="w-full truncate text-sm font-medium text-ink-900">{c.nombre}</span>
+                          <span className="flex w-full flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-ink-400">
+                            {c.telefono && <span>{c.telefono}</span>}
+                            {c.email && <span className="truncate">{c.email}</span>}
+                            {c.doc_numero && <span>{c.doc_numero}</span>}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="relative">
+                  <Phone className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" aria-hidden />
+                  <Input
+                    value={clienteTelefono}
+                    onChange={(e) => setClienteTelefono(e.target.value)}
+                    placeholder="381 555 1234"
+                    inputMode="tel"
+                    aria-label="Teléfono del cliente"
+                    className="pl-10"
+                  />
+                </div>
+                <div className="relative">
+                  <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" aria-hidden />
+                  <Input
+                    type="email"
+                    value={clienteEmail}
+                    onChange={(e) => setClienteEmail(e.target.value)}
+                    placeholder="cliente@correo.com"
+                    inputMode="email"
+                    autoComplete="off"
+                    aria-label="Email del cliente"
+                    className="pl-10"
+                  />
+                </div>
+              </div>
+              <p className="mt-2 text-[0.7rem] leading-relaxed text-ink-400">
+                Con teléfono o email queda guardado en tu base y esta venta entra a su historial de
+                compras. Sin esos datos, la venta se registra igual pero sin cliente.
+              </p>
+            </>
+          )}
+        </div>
+
+        {/* Qué se cobra: mercadería del catálogo, service del taller o algo suelto */}
         <div>
-          <label className="mb-1.5 block text-xs font-medium text-ink-500">Productos</label>
-          <Select
-            options={opcionesProducto}
-            value={buscar}
-            onChange={agregar}
-            searchable
-            searchPlaceholder="funda 13, cargador 20w…"
-            placeholder="Buscar producto del catálogo…"
-          />
+          <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+            <label className="text-xs font-medium text-ink-500">¿Qué se cobra?</label>
+            <button
+              type="button"
+              onClick={agregarLibre}
+              className="inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-xs font-medium text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
+            >
+              <Plus className="h-3.5 w-3.5" aria-hidden />
+              Ítem libre
+            </button>
+          </div>
+          <div className={cn('grid gap-2.5', hayService && 'sm:grid-cols-2')}>
+            <Select
+              options={opcionesProducto}
+              value={buscar}
+              onChange={agregar}
+              searchable
+              searchPlaceholder="funda 13, cargador 20w…"
+              placeholder="Producto del catálogo…"
+            />
+            {hayService && (
+              <Select
+                options={opcionesService}
+                value={buscarService}
+                onChange={agregarService}
+                searchable
+                searchPlaceholder="bateria 13, modulo 11…"
+                placeholder="Service del taller…"
+              />
+            )}
+          </div>
+          <p className="mt-1 text-xs text-ink-400">
+            La mercadería descuenta stock; los services y los ítems libres se cobran sin tocar el
+            inventario.
+          </p>
         </div>
 
         {lineas.length > 0 && (
           <ul className="divide-y divide-line rounded-2xl border border-line">
             {lineas.map((linea) => {
-              const enStock = disponibles(linea.producto.id)
-              const falta = linea.cantidad > enStock
+              const esProducto = linea.producto != null
+              const enStock = esProducto ? disponibles(linea.producto!.id) : 0
+              const falta = esProducto && linea.cantidad > enStock
+              const nombreLinea = linea.descripcion || linea.producto?.nombre || 'Ítem'
               return (
                 <li key={linea.key} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5 sm:px-4">
                   <div className="min-w-0 flex-1 basis-40">
-                    <p className="truncate text-sm font-medium text-ink-900">{linea.producto.nombre}</p>
-                    <p className={cn('tnum text-xs', falta ? 'font-semibold text-ink-950' : 'text-ink-400')}>
-                      {sucursalId !== null && `quedan ${num(enStock)}`}
-                      {falta && ' — no alcanza'}
-                    </p>
+                    {linea.tipo === 'otro' ? (
+                      <Input
+                        value={linea.descripcion}
+                        onChange={(e) =>
+                          setLineas((ls) =>
+                            ls.map((l) =>
+                              l.key === linea.key ? { ...l, descripcion: e.target.value } : l,
+                            ),
+                          )
+                        }
+                        placeholder="¿Qué se cobra? Ej: mano de obra"
+                        maxLength={200}
+                        aria-label="Descripción del ítem"
+                        className="h-9 text-sm"
+                      />
+                    ) : (
+                      <>
+                        <p className="truncate text-sm font-medium text-ink-900">{nombreLinea}</p>
+                        {esProducto ? (
+                          <p className={cn('tnum text-xs', falta ? 'font-semibold text-ink-950' : 'text-ink-400')}>
+                            {sucursalId !== null && `quedan ${num(enStock)}`}
+                            {falta && ' — no alcanza'}
+                          </p>
+                        ) : (
+                          <p className="inline-flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400">
+                            <Wrench className="h-3 w-3 shrink-0" aria-hidden />
+                            Service · no descuenta stock
+                          </p>
+                        )}
+                      </>
+                    )}
                   </div>
                   <div className="inline-flex items-center rounded-xl border border-line-strong">
                     <button
                       type="button"
-                      aria-label={`Restar ${linea.producto.nombre}`}
+                      aria-label={`Restar ${nombreLinea}`}
                       onClick={() =>
                         setLineas((ls) =>
                           ls.map((l) =>
@@ -512,7 +907,7 @@ function VentaModal({
                     <span className="tnum w-8 text-center text-sm font-semibold text-ink-900">{num(linea.cantidad)}</span>
                     <button
                       type="button"
-                      aria-label={`Sumar ${linea.producto.nombre}`}
+                      aria-label={`Sumar ${nombreLinea}`}
                       onClick={() =>
                         setLineas((ls) =>
                           ls.map((l) => (l.key === linea.key ? { ...l, cantidad: l.cantidad + 1 } : l)),
@@ -537,7 +932,7 @@ function VentaModal({
                         )
                       }
                       inputMode="decimal"
-                      aria-label={`Precio de ${linea.producto.nombre}`}
+                      aria-label={`Precio de ${nombreLinea}`}
                       className="tnum h-10 pl-6 pr-2 text-sm"
                     />
                   </div>
@@ -546,7 +941,7 @@ function VentaModal({
                   </span>
                   <button
                     type="button"
-                    aria-label={`Quitar ${linea.producto.nombre}`}
+                    aria-label={`Quitar ${nombreLinea}`}
                     onClick={() => setLineas((ls) => ls.filter((l) => l.key !== linea.key))}
                     className="grid h-9 w-9 place-items-center rounded-xl text-ink-400 hover:bg-ink-100 hover:text-ink-900"
                   >

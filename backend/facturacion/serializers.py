@@ -11,10 +11,9 @@
 import re
 from decimal import Decimal
 
-from django.db.models import Count, Max, Sum
 from rest_framework import serializers
 
-from inventario.models import Sucursal
+from inventario.models import Sucursal, Venta
 from productos.models import Producto
 
 from .arca import qr
@@ -138,6 +137,7 @@ class CrearComprobanteSerializer(serializers.Serializer):
     cliente_doc_numero = serializers.CharField(max_length=11, required=False, allow_blank=True)
     cliente_condicion = serializers.ChoiceField(choices=Comprobante.CondicionReceptor.choices)
     cliente_telefono = serializers.CharField(max_length=30, required=False, allow_blank=True)
+    cliente_email = serializers.EmailField(max_length=254, required=False, allow_blank=True)
     fecha = serializers.DateField(required=False)
     vencimiento = serializers.DateField(required=False, allow_null=True)
     alicuota_iva = serializers.DecimalField(
@@ -152,6 +152,12 @@ class CrearComprobanteSerializer(serializers.Serializer):
     # despues de emitir (la emision NUNCA falla por stock: se avisa aparte).
     sucursal_stock = serializers.PrimaryKeyRelatedField(
         queryset=Sucursal.objects.filter(activa=True), required=False, allow_null=True,
+    )
+    # Venta de mostrador que se esta facturando (viene precargada desde Caja).
+    # Al emitir, la venta queda apuntada a esta factura: asi la misma plata no
+    # se cuenta dos veces en el historial de compras del cliente.
+    venta = serializers.PrimaryKeyRelatedField(
+        queryset=Venta.objects.all(), required=False, allow_null=True,
     )
     # True = el usuario ya vio el aviso de limite mensual superado y confirmo que
     # quiere emitir igual (la vista saltea el chequeo). No viaja a ARCA.
@@ -168,6 +174,9 @@ class CrearComprobanteSerializer(serializers.Serializer):
 
     def validate_cliente_telefono(self, value):
         return (value or '').strip()
+
+    def validate_cliente_email(self, value):
+        return (value or '').strip().lower()
 
     def validate_items(self, value):
         if not value:
@@ -207,7 +216,8 @@ class ComprobanteDetailSerializer(serializers.ModelSerializer):
             'id', 'emisor', 'emisor_nombre', 'emisor_cuit', 'emisor_condicion',
             'tipo', 'concepto', 'punto_venta',
             'numero', 'numero_formateado', 'cliente_nombre', 'cliente_doc_tipo',
-            'cliente_doc_numero', 'cliente_condicion', 'cliente_telefono', 'fecha', 'vencimiento',
+            'cliente_doc_numero', 'cliente_condicion', 'cliente_telefono', 'cliente_email',
+            'fecha', 'vencimiento',
             'alicuota_iva', 'neto', 'iva', 'total', 'cae', 'cae_vencimiento',
             'qr_url', 'qr', 'estado_cobro', 'observaciones', 'items', 'creado',
         )
@@ -242,6 +252,7 @@ class ClienteSerializer(serializers.ModelSerializer):
     Las estadísticas (`cantidad_compras`, `total_gastado`, `ultima_compra`) solo
     se completan si la vista pasa `stats` en el contexto (la lista del gestor lo
     pide con `?stats=1`); en el autocompletado quedan en null y no cuestan nada.
+    Suman los DOS tipos de compra: facturas y ventas de mostrador.
     """
 
     cantidad_compras = serializers.SerializerMethodField()
@@ -251,59 +262,50 @@ class ClienteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Cliente
         fields = (
-            'id', 'nombre', 'doc_tipo', 'doc_numero', 'condicion', 'telefono',
+            'id', 'nombre', 'doc_tipo', 'doc_numero', 'condicion', 'telefono', 'email',
             'creado', 'actualizado',
             'cantidad_compras', 'total_gastado', 'ultima_compra',
         )
         read_only_fields = fields
 
-    def _stat(self, obj):
-        stats = self.context.get('stats')
-        if not stats:
-            return None
+    def _filas(self, obj):
+        """Las filas de agregados que le corresponden (facturas y/o ventas)."""
+        stats = self.context.get('stats') or {}
+        filas = []
         if obj.doc_numero:
-            return stats['doc'].get(obj.doc_numero)
-        if obj.telefono:
-            return stats['tel'].get(obj.telefono)
-        return None
+            filas.append(stats.get('doc', {}).get(obj.doc_numero))
+        elif obj.telefono:
+            filas.append(stats.get('tel', {}).get(obj.telefono))
+        filas.append(stats.get('venta', {}).get(obj.pk))
+        return [fila for fila in filas if fila]
 
     def get_cantidad_compras(self, obj):
         if 'stats' not in self.context:
             return None
-        fila = self._stat(obj)
-        return fila['cantidad'] if fila else 0
+        return sum(fila['cantidad'] or 0 for fila in self._filas(obj))
 
     def get_total_gastado(self, obj):
         if 'stats' not in self.context:
             return None
-        fila = self._stat(obj)
-        return float(fila['total']) if fila and fila['total'] is not None else 0
+        return float(sum(fila['total'] or 0 for fila in self._filas(obj)))
 
     def get_ultima_compra(self, obj):
         if 'stats' not in self.context:
             return None
-        fila = self._stat(obj)
-        return fila['ultima'].isoformat() if fila and fila['ultima'] else None
+        from .clientes import fecha_local
 
-
-class CompraSerializer(serializers.ModelSerializer):
-    """Un comprobante visto como una compra del cliente (con sus productos)."""
-
-    numero_formateado = serializers.CharField(read_only=True)
-    emisor_nombre = serializers.CharField(source='emisor.nombre', read_only=True)
-    items = ItemComprobanteSerializer(many=True, read_only=True)
-    total = serializers.DecimalField(max_digits=14, decimal_places=2, coerce_to_string=False)
-
-    class Meta:
-        model = Comprobante
-        fields = (
-            'id', 'tipo', 'numero_formateado', 'fecha', 'total', 'estado_cobro',
-            'emisor_nombre', 'items',
-        )
+        # Las facturas traen date (fecha de emision) y las ventas el datetime
+        # de su alta, que hay que pasar a la hora de Argentina.
+        fechas = []
+        for fila in self._filas(obj):
+            ultima = fila['ultima']
+            if ultima:
+                fechas.append(fecha_local(ultima) if hasattr(ultima, 'tzinfo') else ultima)
+        return max(fechas).isoformat() if fechas else None
 
 
 class ClienteDetalleSerializer(serializers.ModelSerializer):
-    """Cliente con su historial de compras (comprobantes + productos + fechas)."""
+    """Cliente con su historial completo de compras (facturas + ventas)."""
 
     resumen = serializers.SerializerMethodField()
     compras = serializers.SerializerMethodField()
@@ -311,28 +313,21 @@ class ClienteDetalleSerializer(serializers.ModelSerializer):
     class Meta:
         model = Cliente
         fields = (
-            'id', 'nombre', 'doc_tipo', 'doc_numero', 'condicion', 'telefono',
+            'id', 'nombre', 'doc_tipo', 'doc_numero', 'condicion', 'telefono', 'email',
             'creado', 'actualizado', 'resumen', 'compras',
         )
 
     def get_compras(self, obj):
-        from .clientes import comprobantes_de_cliente
-        return CompraSerializer(comprobantes_de_cliente(obj), many=True).data
+        from .clientes import compras_de_cliente
+        return compras_de_cliente(obj)
 
     def get_resumen(self, obj):
-        from .clientes import comprobantes_de_cliente
-        agg = comprobantes_de_cliente(obj).aggregate(
-            cantidad=Count('id'), total=Sum('total'), ultima=Max('fecha'),
-        )
-        return {
-            'cantidad': agg['cantidad'] or 0,
-            'total': float(agg['total']) if agg['total'] is not None else 0,
-            'ultima': agg['ultima'].isoformat() if agg['ultima'] else None,
-        }
+        from .clientes import resumen_de_cliente
+        return resumen_de_cliente(obj)
 
 
 class ClienteWriteSerializer(serializers.ModelSerializer):
-    """Edición de los datos de contacto del cliente (nombre, teléfono, condición).
+    """Edición de los datos de contacto (nombre, teléfono, email, condición).
 
     No se editan el tipo/numero de documento: son la identidad con la que se
     cruzan sus compras.
@@ -340,10 +335,13 @@ class ClienteWriteSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Cliente
-        fields = ('nombre', 'telefono', 'condicion')
+        fields = ('nombre', 'telefono', 'email', 'condicion')
 
     def validate_nombre(self, value):
         value = value.strip()
         if not value:
             raise serializers.ValidationError('El nombre es obligatorio.')
         return value
+
+    def validate_email(self, value):
+        return (value or '').strip().lower()

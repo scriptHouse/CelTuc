@@ -121,6 +121,8 @@ export interface NuevoComprobante {
   cliente_condicion: string
   /** Teléfono/celular del cliente (dato interno; alimenta la base de clientes). */
   cliente_telefono?: string
+  /** Email del cliente (dato interno; alimenta la base de clientes). */
+  cliente_email?: string
   fecha?: string
   vencimiento?: string | null
   alicuota_iva?: number
@@ -134,6 +136,12 @@ export interface NuevoComprobante {
   >
   /** Sucursal de la que descontar el stock de los ítems con `producto`. */
   sucursal_stock?: number
+  /**
+   * Venta de mostrador que se está facturando (la precarga que viene de Caja).
+   * Al emitir, esa venta queda apuntada a la factura para que la misma plata no
+   * se cuente dos veces en el historial de compras del cliente.
+   */
+  venta?: number
   /** True = el usuario ya confirmó emitir aunque se pase el límite mensual. */
   confirmar_limite?: boolean
 }
@@ -174,10 +182,11 @@ export function obtenerCliente(id: number): Promise<ClienteDetalle> {
 export interface ClienteInput {
   nombre: string
   telefono?: string
+  email?: string
   condicion?: string
 }
 
-/** Edita los datos de contacto del cliente (nombre, teléfono, condición). */
+/** Edita los datos de contacto del cliente (nombre, teléfono, email, condición). */
 export function actualizarCliente(id: number, input: ClienteInput): Promise<ClienteDetalle> {
   return api.patch<ClienteDetalle>(`/facturacion/clientes/${id}/`, input, token())
 }

@@ -5,16 +5,19 @@ import {
   Contact,
   IdCard,
   Loader2,
+  type LucideIcon,
+  Mail,
   Pencil,
   Phone,
   ReceiptText,
   Search,
   ShoppingBag,
+  Store,
   Trash2,
   Wallet,
   X,
 } from 'lucide-react'
-import type { Cliente, CompraCliente } from '@/types'
+import type { Cliente, CompraCliente, OrigenCompra } from '@/types'
 import {
   actualizarCliente,
   type ClienteInput,
@@ -24,7 +27,7 @@ import {
 } from '@/services/facturacion'
 import { ApiError } from '@/lib/api'
 import { fecha, money, money0, moneyCompact } from '@/lib/format'
-import { ctStagger } from '@/lib/utils'
+import { cn, ctStagger } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatCard } from '@/components/ui/StatCard'
 import { Button } from '@/components/ui/Button'
@@ -60,11 +63,18 @@ function iniciales(nombre: string): string {
   return (a + b).toUpperCase() || 'C'
 }
 
-/** Documento o teléfono, lo que identifique al cliente (para el subtítulo). */
-function identidad(c: Cliente): string {
-  if (c.doc_numero) return `${DOC_LABEL[c.doc_tipo] ?? 'Doc'} ${c.doc_numero}`
-  if (c.telefono) return c.telefono
-  return CONDICION_LABEL[c.condicion] ?? '—'
+/** Documento, teléfono o email: lo que identifique al cliente (subtítulo). */
+function identidad(c: Cliente): { texto: string; icono: LucideIcon } {
+  if (c.doc_numero) return { texto: `${DOC_LABEL[c.doc_tipo] ?? 'Doc'} ${c.doc_numero}`, icono: IdCard }
+  if (c.telefono) return { texto: c.telefono, icono: Phone }
+  if (c.email) return { texto: c.email, icono: Mail }
+  return { texto: CONDICION_LABEL[c.condicion] ?? '—', icono: IdCard }
+}
+
+/** Cómo se muestra cada tipo de compra en el historial. */
+const ORIGEN: Record<OrigenCompra, { label: string; icono: LucideIcon }> = {
+  factura: { label: 'Factura', icono: ReceiptText },
+  venta: { label: 'Mostrador', icono: Store },
 }
 
 export function ClientesPage() {
@@ -94,6 +104,7 @@ export function ClientesPage() {
       (c) =>
         c.nombre.toLowerCase().includes(q) ||
         c.telefono.toLowerCase().includes(q) ||
+        c.email.toLowerCase().includes(q) ||
         (!!dig && (c.doc_numero.includes(dig) || c.telefono.includes(dig))),
     )
   }, [clientes, busqueda])
@@ -104,13 +115,13 @@ export function ClientesPage() {
         icon={Contact}
         eyebrow="Facturación"
         title="Clientes"
-        subtitle="Tu base de clientes y las compras que hizo cada uno."
+        subtitle="Tu base de clientes y todas sus compras: facturas y ventas de mostrador."
         className="ct-rise"
       />
 
       <div className="mb-5 grid grid-cols-3 gap-3">
         <StatCard className="ct-stagger-item" style={ctStagger(0)} label="Clientes" value={String(resumen.clientes)} icon={Contact} />
-        <StatCard className="ct-stagger-item" style={ctStagger(1)} label="Compras" value={String(resumen.compras)} icon={ReceiptText} />
+        <StatCard className="ct-stagger-item" style={ctStagger(1)} label="Compras" value={String(resumen.compras)} icon={ShoppingBag} />
         <StatCard className="ct-stagger-item" style={ctStagger(2)} label="Facturado" value={moneyCompact(resumen.total)} icon={Wallet} />
       </div>
 
@@ -119,7 +130,7 @@ export function ClientesPage() {
         <Input
           value={busqueda}
           onChange={(e) => setBusqueda(e.target.value)}
-          placeholder="Buscar por nombre, teléfono o documento"
+          placeholder="Buscar por nombre, teléfono, email o documento"
           className="pl-10"
         />
       </div>
@@ -130,40 +141,52 @@ export function ClientesPage() {
         <EmptyState
           icon={Contact}
           title="Todavía no hay clientes"
-          description="La base se arma sola: cada factura que emitas guarda a su cliente acá."
+          description="La base se arma sola: cada factura que emitís y cada venta de mostrador con cliente lo guardan acá."
         />
       ) : filtrados.length === 0 ? (
         <EmptyState icon={Search} title="Sin resultados" description="Ningún cliente coincide con la búsqueda." />
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {filtrados.map((c, i) => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => setSelId(c.id)}
-              style={ctStagger(i)}
-              className="ct-stagger-item flex flex-col rounded-2xl border border-line bg-surface p-4 text-left transition-colors hover:border-ink-300 hover:bg-ink-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
-            >
-              <div className="flex items-start gap-3">
-                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-ink-100 text-sm font-bold text-ink-900">
-                  {iniciales(c.nombre)}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-semibold text-ink-900">{c.nombre}</p>
-                  <p className="flex items-center gap-1.5 truncate text-sm text-ink-500">
-                    {c.doc_numero ? <IdCard className="h-3.5 w-3.5 shrink-0" /> : <Phone className="h-3.5 w-3.5 shrink-0" />}
-                    <span className="truncate">{identidad(c)}</span>
-                  </p>
+          {filtrados.map((c, i) => {
+            const id = identidad(c)
+            const IconoId = id.icono
+            // El email solo se repite abajo si no es ya la identidad mostrada.
+            const emailAparte = c.email && (c.doc_numero || c.telefono)
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => setSelId(c.id)}
+                style={ctStagger(i)}
+                className="ct-stagger-item flex flex-col rounded-2xl border border-line bg-surface p-4 text-left transition-colors hover:border-ink-300 hover:bg-ink-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
+              >
+                <div className="flex items-start gap-3">
+                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-ink-100 text-sm font-bold text-ink-900">
+                    {iniciales(c.nombre)}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-semibold text-ink-900">{c.nombre}</p>
+                    <p className="flex items-center gap-1.5 text-sm text-ink-500">
+                      <IconoId className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">{id.texto}</span>
+                    </p>
+                    {emailAparte && (
+                      <p className="flex items-center gap-1.5 text-xs text-ink-400">
+                        <Mail className="h-3 w-3 shrink-0" />
+                        <span className="truncate">{c.email}</span>
+                      </p>
+                    )}
+                  </div>
                 </div>
-              </div>
 
-              <div className="mt-3 grid grid-cols-3 gap-2 border-t border-line pt-3">
-                <Metrica label="Compras" valor={String(c.cantidad_compras ?? 0)} />
-                <Metrica label="Total" valor={moneyCompact(c.total_gastado ?? 0)} />
-                <Metrica label="Última" valor={c.ultima_compra ? fecha(c.ultima_compra) : '—'} />
-              </div>
-            </button>
-          ))}
+                <div className="mt-3 grid grid-cols-3 gap-2 border-t border-line pt-3">
+                  <Metrica label="Compras" valor={String(c.cantidad_compras ?? 0)} />
+                  <Metrica label="Total" valor={moneyCompact(c.total_gastado ?? 0)} />
+                  <Metrica label="Última" valor={c.ultima_compra ? fecha(c.ultima_compra) : '—'} />
+                </div>
+              </button>
+            )
+          })}
         </div>
       )}
 
@@ -248,7 +271,9 @@ function ClienteDetalleModal({ id, onClose }: { id: number | null; onClose: () =
             <h2 className="truncate text-lg font-semibold leading-tight text-ink-950">
               {cliente ? cliente.nombre : 'Cliente'}
             </h2>
-            <p className="text-xs text-ink-400">Datos del cliente y su historial de compras.</p>
+            <p className="text-xs text-ink-400">
+              Datos del cliente y todo su historial: facturas y ventas de mostrador.
+            </p>
           </div>
         </div>
         <button
@@ -279,8 +304,11 @@ function ClienteDetalleModal({ id, onClose }: { id: number | null; onClose: () =
               />
             ) : (
               <div className="rounded-2xl border border-line bg-canvas/40 p-4">
-                <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-5">
                   <Dato label="Teléfono" valor={cliente.telefono || '—'} />
+                  <div className="col-span-2 min-w-0 sm:col-span-1">
+                    <Dato label="Email" valor={cliente.email || '—'} />
+                  </div>
                   <Dato
                     label={cliente.doc_numero ? DOC_LABEL[cliente.doc_tipo] ?? 'Documento' : 'Documento'}
                     valor={cliente.doc_numero || '—'}
@@ -288,9 +316,10 @@ function ClienteDetalleModal({ id, onClose }: { id: number | null; onClose: () =
                   <Dato label="Condición" valor={CONDICION_LABEL[cliente.condicion] ?? cliente.condicion} />
                   <Dato label="Total gastado" valor={money0(cliente.resumen.total)} />
                 </div>
-                <div className="mt-3.5 flex items-center justify-between gap-2 border-t border-line pt-3">
+                <div className="mt-3.5 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
                   <p className="text-xs text-ink-400">
                     {cliente.resumen.cantidad} compra{cliente.resumen.cantidad === 1 ? '' : 's'}
+                    {desgloseCompras(cliente.resumen)}
                     {cliente.resumen.ultima ? ` · última el ${fecha(cliente.resumen.ultima)}` : ''}
                   </p>
                   <div className="flex items-center gap-2">
@@ -305,7 +334,7 @@ function ClienteDetalleModal({ id, onClose }: { id: number | null; onClose: () =
               </div>
             )}
 
-            {/* Historial de compras */}
+            {/* Historial de compras: facturas y ventas de mostrador, juntas */}
             <div>
               <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-ink-400">
                 Compras {cliente.compras.length > 0 && `(${cliente.compras.length})`}
@@ -330,41 +359,65 @@ function ClienteDetalleModal({ id, onClose }: { id: number | null; onClose: () =
 }
 
 function CompraCard({ compra }: { compra: CompraCliente }) {
+  const origen = ORIGEN[compra.origen] ?? ORIGEN.factura
+  const IconoOrigen = origen.icono
   return (
     <div className="rounded-2xl border border-line bg-surface p-3.5">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="flex items-center gap-1.5 text-sm font-semibold text-ink-900">
-            <ShoppingBag className="h-3.5 w-3.5 shrink-0 text-ink-400" />
-            Factura {compra.tipo} · {compra.numero_formateado}
-          </p>
-          <p className="mt-0.5 flex items-center gap-1.5 text-xs text-ink-400">
-            <CalendarClock className="h-3.5 w-3.5 shrink-0" />
-            {fecha(compra.fecha)} · {compra.emisor_nombre}
-          </p>
+      <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
+        <div className="flex min-w-0 flex-1 items-start gap-2.5">
+          <span
+            className={cn(
+              'mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl',
+              compra.origen === 'factura'
+                ? 'bg-ink-950 text-on-ink'
+                : 'bg-emerald-600/10 text-emerald-700 ring-1 ring-emerald-600/20 dark:text-emerald-400',
+            )}
+          >
+            <IconoOrigen className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-ink-900">{compra.titulo}</p>
+            <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-ink-400">
+              <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+              <span>{fecha(compra.fecha)}</span>
+              {compra.detalle && <span className="truncate">· {compra.detalle}</span>}
+            </p>
+          </div>
         </div>
-        <div className="text-right">
+        <div className="ml-auto shrink-0 text-right">
           <p className="text-sm font-semibold tabular-nums text-ink-900">{money(compra.total)}</p>
-          <Badge tone={compra.estado_cobro === 'pagada' ? 'solid' : 'outline'}>
-            {ESTADO_LABEL[compra.estado_cobro] ?? compra.estado_cobro}
-          </Badge>
+          <div className="mt-0.5 flex items-center justify-end gap-1.5">
+            <Badge tone="outline">{origen.label}</Badge>
+            <Badge tone={compra.estado_cobro === 'pagada' ? 'solid' : 'outline'}>
+              {ESTADO_LABEL[compra.estado_cobro] ?? compra.estado_cobro}
+            </Badge>
+          </div>
         </div>
       </div>
 
-      <ul className="mt-2.5 space-y-1 border-t border-line pt-2.5">
-        {compra.items.map((it, idx) => (
-          <li key={it.id ?? idx} className="flex items-baseline justify-between gap-3 text-xs">
-            <span className="min-w-0 truncate text-ink-600">
-              <span className="tabular-nums text-ink-400">{it.cantidad}×</span> {it.descripcion}
-            </span>
-            <span className="shrink-0 tabular-nums text-ink-500">
-              {money(it.subtotal ?? it.cantidad * it.precio_unitario)}
-            </span>
-          </li>
-        ))}
-      </ul>
+      {compra.items.length > 0 && (
+        <ul className="mt-2.5 space-y-1 border-t border-line pt-2.5">
+          {compra.items.map((it, idx) => (
+            <li key={it.id ?? idx} className="flex items-baseline justify-between gap-3 text-xs">
+              <span className="min-w-0 truncate text-ink-600">
+                <span className="tabular-nums text-ink-400">{it.cantidad}×</span> {it.descripcion}
+              </span>
+              <span className="shrink-0 tabular-nums text-ink-500">
+                {money(it.subtotal ?? it.cantidad * it.precio_unitario)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
+}
+
+/** " · 3 facturas · 2 de mostrador", solo cuando hay de los dos tipos. */
+function desgloseCompras(resumen: { facturas: number; ventas: number }): string {
+  if (!resumen.facturas || !resumen.ventas) return ''
+  const facturas = `${resumen.facturas} factura${resumen.facturas === 1 ? '' : 's'}`
+  return ` (${facturas} · ${resumen.ventas} de mostrador)`
 }
 
 function EditarCliente({
@@ -380,12 +433,13 @@ function EditarCliente({
 }) {
   const [nombre, setNombre] = useState(cliente.nombre)
   const [telefono, setTelefono] = useState(cliente.telefono)
+  const [email, setEmail] = useState(cliente.email)
   const [condicion, setCondicion] = useState<string>(cliente.condicion)
 
   return (
     <div className="rounded-2xl border border-line bg-canvas/40 p-4">
       <div className="grid gap-3 sm:grid-cols-2">
-        <div>
+        <div className="sm:col-span-2">
           <label className="mb-1.5 block text-xs font-medium text-ink-500">Nombre / razón social</label>
           <Input value={nombre} onChange={(e) => setNombre(e.target.value)} autoFocus />
         </div>
@@ -396,17 +450,38 @@ function EditarCliente({
             <Input value={telefono} onChange={(e) => setTelefono(e.target.value)} inputMode="tel" className="pl-10" />
           </div>
         </div>
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-ink-500">Email</label>
+          <div className="relative">
+            <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
+            <Input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="cliente@correo.com"
+              inputMode="email"
+              className="pl-10"
+            />
+          </div>
+        </div>
         <div className="sm:col-span-2">
           <Select label="Condición fiscal" options={CONDICION_OPTIONS} value={condicion} onChange={setCondicion} />
         </div>
       </div>
-      <div className="mt-3.5 flex items-center justify-end gap-2 border-t border-line pt-3">
+      <div className="mt-3.5 flex flex-col-reverse gap-2 border-t border-line pt-3 sm:flex-row sm:items-center sm:justify-end">
         <Button variant="outline" size="sm" onClick={onCancelar} disabled={saving}>
           Cancelar
         </Button>
         <Button
           size="sm"
-          onClick={() => onGuardar({ nombre: nombre.trim(), telefono: telefono.trim(), condicion })}
+          onClick={() =>
+            onGuardar({
+              nombre: nombre.trim(),
+              telefono: telefono.trim(),
+              email: email.trim(),
+              condicion,
+            })
+          }
           disabled={saving || !nombre.trim()}
         >
           {saving ? (

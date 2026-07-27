@@ -198,6 +198,100 @@ class VentasTests(TestCase):
         self.assertEqual(cliente.get('/api/inventario/ventas/').status_code, 403)
 
 
+class VentaServiciosTests(TestCase):
+    """El mostrador no vende solo mercaderia: services e items libres.
+
+    Lo importante: esos renglones se cobran igual pero NO tocan el stock, y la
+    venta de solo productos sigue funcionando exactamente como siempre.
+    """
+
+    def setUp(self):
+        from precios_service.models import ItemService, SeccionService
+
+        self.fuente = _producto('Fuente service test')
+        self.solar = Sucursal.objects.create(nombre='Solar service test', orden=1)
+        aplicar_ajuste(self.fuente, self.solar, delta=10)
+        seccion = SeccionService.objects.create(nombre='Baterias test')
+        self.item_service = ItemService.objects.create(seccion=seccion, etiqueta='iPhone 13')
+
+        from usuarios.models import Permiso, Rol, Usuario
+        rol = Rol.objects.create(nombre='Mostrador service test')
+        rol.permisos.set(Permiso.objects.filter(codigo='ver_inventario'))
+        self.empleado = Usuario.objects.create_user(
+            email='svc@celtuc.test', username='svc.inv', password='x', rol=rol,
+        )
+        self.api = APIClient()
+        self.api.force_authenticate(self.empleado)
+
+    def test_service_cobra_sin_tocar_stock(self):
+        venta = registrar_venta(self.solar, [{
+            'tipo': 'service',
+            'descripcion': 'Baterias · iPhone 13 · Original',
+            'item_service': self.item_service,
+            'cantidad': 1,
+            'precio_unitario': Decimal('45000'),
+        }], usuario=self.empleado)
+        self.assertEqual(venta.total, Decimal('45000'))
+        self.assertEqual(MovimientoStock.objects.filter(tipo=MovimientoStock.Tipo.VENTA).count(), 0)
+        item = venta.items.get()
+        self.assertIsNone(item.producto_id)
+        self.assertEqual(item.item_service_id, self.item_service.pk)
+        self.assertEqual(item.detalle, 'Baterias · iPhone 13 · Original')
+
+    def test_venta_mixta_descuenta_solo_la_mercaderia(self):
+        r = self.api.post('/api/inventario/ventas/', {
+            'sucursal': self.solar.id,
+            'items': [
+                {'producto': self.fuente.id, 'cantidad': 2, 'precio_unitario': 10000},
+                {'tipo': 'service', 'item_service': self.item_service.id,
+                 'descripcion': 'Cambio de bateria', 'cantidad': 1, 'precio_unitario': 45000},
+                {'tipo': 'otro', 'descripcion': 'Mano de obra', 'cantidad': 1,
+                 'precio_unitario': 5000},
+            ],
+        }, format='json')
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(float(r.data['total']), 70000)
+        self.assertEqual(
+            StockProducto.objects.get(producto=self.fuente, sucursal=self.solar).cantidad, 8,
+        )
+        self.assertEqual(MovimientoStock.objects.filter(tipo=MovimientoStock.Tipo.VENTA).count(), 1)
+        nombres = [i['nombre'] for i in r.data['items']]
+        self.assertEqual(nombres, ['Fuente service test', 'Cambio de bateria', 'Mano de obra'])
+
+    def test_service_sin_descripcion_es_400(self):
+        r = self.api.post('/api/inventario/ventas/', {
+            'sucursal': self.solar.id,
+            'items': [{'tipo': 'service', 'cantidad': 1, 'precio_unitario': 45000}],
+        }, format='json')
+        self.assertEqual(r.status_code, 400)
+
+    def test_producto_sin_producto_es_400(self):
+        r = self.api.post('/api/inventario/ventas/', {
+            'sucursal': self.solar.id,
+            'items': [{'tipo': 'producto', 'descripcion': 'algo', 'cantidad': 1,
+                       'precio_unitario': 100}],
+        }, format='json')
+        self.assertEqual(r.status_code, 400)
+
+    def test_la_venta_de_un_service_entra_al_arqueo(self):
+        """El detalle del movimiento de caja no puede romper sin producto."""
+        from caja.models import Caja, abrir_caja, registrar_venta_en_caja
+
+        # Sin cajas con canal fiscal la venta va a la unica sesion abierta (el
+        # enrutamiento por canal se prueba en caja/tests.py).
+        caja = Caja.objects.create(nombre='Caja service test')
+        Caja.todos.exclude(pk=caja.pk).delete()
+        abrir_caja(caja, fondo_inicial=0)
+        venta = registrar_venta(self.solar, [{
+            'tipo': 'service', 'descripcion': 'Cambio de modulo', 'cantidad': 1,
+            'precio_unitario': Decimal('120000'),
+        }])
+        movimiento = registrar_venta_en_caja(venta, caja=caja)
+        self.assertIsNotNone(movimiento)
+        self.assertEqual(movimiento.monto, Decimal('120000'))
+        self.assertIn('Cambio de modulo', movimiento.detalle)
+
+
 class ApiInventarioTests(TestCase):
     """Permisos y contratos de la API."""
 

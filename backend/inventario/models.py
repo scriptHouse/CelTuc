@@ -146,6 +146,11 @@ class Venta(ModeloBase):
     con nota "Venta #N"). Es la version minima que hace mover el stock solo;
     la caja diaria (arqueo) sigue siendo el modulo Caja, y la factura fiscal
     sigue siendo Facturacion (que tambien puede descontar stock por su lado).
+
+    Puede anotar a QUIEN se le vendio (`cliente`, opcional): asi la venta entra
+    al historial de compras del cliente junto con sus facturas. Si despues esa
+    misma venta se factura, queda apuntada en `comprobante` para no contarla
+    dos veces (la factura la representa).
     """
 
     class FormaPago(models.TextChoices):
@@ -176,6 +181,27 @@ class Venta(ModeloBase):
         'facturacion', max_length=20, choices=Facturacion.choices,
         default=Facturacion.SIN_FACTURA,
     )
+    # A quien se le vendio. Opcional (la venta de mostrador nunca se frena por
+    # no saber quien es): si esta, la venta aparece en el historial del cliente.
+    # SET_NULL para que borrar un cliente jamas toque una venta ya registrada.
+    cliente = models.ForeignKey(
+        'facturacion.Cliente',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='ventas',
+        verbose_name='cliente',
+    )
+    # Si la venta se termino facturando, la factura que la representa. Evita
+    # contar dos veces la misma plata en el historial del cliente.
+    comprobante = models.ForeignKey(
+        'facturacion.Comprobante',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='ventas',
+        verbose_name='factura de esta venta',
+    )
     nota = models.CharField('nota', max_length=200, blank=True)
     total = models.DecimalField('total ($)', max_digits=14, decimal_places=2, default=0)
 
@@ -190,7 +216,27 @@ class Venta(ModeloBase):
 
 
 class ItemVenta(models.Model):
-    """Un renglon de la venta, con el precio al momento de vender."""
+    """Un renglon de la venta, con el precio al momento de vender.
+
+    En el mostrador no se vende solo mercaderia: tambien services del taller y
+    cosas sueltas que no estan en ningun catalogo. Por eso el renglon tiene
+    `tipo`:
+
+    - ``producto``: una fila del catalogo (`productos.Producto`). Es la unica
+      que mueve stock.
+    - ``service``: un trabajo del taller. Puede apuntar a la fila de la lista de
+      precios (`item_service`) para poder reportarlo despues; el stock no se
+      toca (el repuesto se descuenta aparte, si corresponde).
+    - ``otro``: texto libre (mano de obra, un accesorio suelto, un ajuste).
+
+    `descripcion` es una FOTO de lo vendido: sobrevive a que despues renombren
+    el producto o cambien la lista de precios.
+    """
+
+    class Tipo(models.TextChoices):
+        PRODUCTO = 'producto', 'Producto del catalogo'
+        SERVICE = 'service', 'Service / reparacion'
+        OTRO = 'otro', 'Otro'
 
     venta = models.ForeignKey(
         Venta,
@@ -198,12 +244,27 @@ class ItemVenta(models.Model):
         related_name='items',
         verbose_name='venta',
     )
+    tipo = models.CharField('tipo', max_length=12, choices=Tipo.choices, default=Tipo.PRODUCTO)
+    # Solo para `tipo=producto`. Nulo en services y en items libres.
     producto = models.ForeignKey(
         'productos.Producto',
         on_delete=models.PROTECT,
         related_name='items_venta',
         verbose_name='producto',
+        null=True,
+        blank=True,
     )
+    # Fila de la lista de precios del taller (opcional, para trazabilidad).
+    # SET_NULL: reordenar la lista de precios jamas toca una venta ya hecha.
+    item_service = models.ForeignKey(
+        'precios_service.ItemService',
+        on_delete=models.SET_NULL,
+        related_name='items_venta',
+        verbose_name='item de la lista de service',
+        null=True,
+        blank=True,
+    )
+    descripcion = models.CharField('descripcion', max_length=200, blank=True)
     cantidad = models.PositiveIntegerField('cantidad', default=1)
     precio_unitario = models.DecimalField('precio unitario ($)', max_digits=14, decimal_places=2)
 
@@ -214,7 +275,20 @@ class ItemVenta(models.Model):
         ordering = ('id',)
 
     def __str__(self):
-        return f'{self.producto} x{self.cantidad}'
+        return f'{self.detalle} x{self.cantidad}'
+
+    @property
+    def detalle(self) -> str:
+        """Lo vendido, en texto: la foto guardada o el nombre del producto.
+
+        Las ventas viejas no tienen `descripcion` (son todas de producto): para
+        esas sigue valiendo el nombre del catalogo, como siempre.
+        """
+        if self.descripcion:
+            return self.descripcion
+        if self.producto_id:
+            return self.producto.nombre
+        return 'Item'
 
     @property
     def subtotal(self):
@@ -277,41 +351,83 @@ def aplicar_ajuste(producto, sucursal, *, delta=None, cantidad=None, tipo='',
         return fila, movimiento
 
 
+def _normalizar_item_venta(item):
+    """Deja cualquier renglon de venta con la misma forma de diccionario.
+
+    Acepta el formato historico ``(producto, cantidad, precio_unitario)`` —una
+    venta de mercaderia— y el completo, que ademas puede traer `tipo`,
+    `descripcion` e `item_service` (services y items libres).
+    """
+    if not isinstance(item, dict):
+        producto, cantidad, precio_unitario = item
+        item = {'producto': producto, 'cantidad': cantidad, 'precio_unitario': precio_unitario}
+
+    producto = item.get('producto')
+    # Sin `tipo` explicito, manda lo que vino: con producto es mercaderia.
+    tipo = item.get('tipo') or (ItemVenta.Tipo.PRODUCTO if producto else ItemVenta.Tipo.OTRO)
+    descripcion = (item.get('descripcion') or '').strip()
+    if tipo != ItemVenta.Tipo.PRODUCTO:
+        producto = None  # solo la mercaderia del catalogo mueve stock
+    elif producto is None:
+        raise ValidationError('Un renglon de producto necesita el producto del catalogo.')
+    if not descripcion:
+        if producto is not None:
+            descripcion = producto.nombre
+        else:
+            raise ValidationError('Un renglon de service u otro necesita una descripcion.')
+
+    cantidad = int(item.get('cantidad') or 0)
+    if cantidad <= 0:
+        raise ValidationError(f'Cantidad invalida para "{descripcion}".')
+    return {
+        'tipo': tipo,
+        'producto': producto,
+        'item_service': item.get('item_service') if tipo == ItemVenta.Tipo.SERVICE else None,
+        'descripcion': descripcion[:200],
+        'cantidad': cantidad,
+        'precio_unitario': Decimal(str(item.get('precio_unitario') or 0)),
+    }
+
+
 def registrar_venta(sucursal, items, *, forma_pago='', facturacion='', nota='',
-                    usuario=None, permitir_faltante=False):
+                    cliente=None, usuario=None, permitir_faltante=False):
     """Crea la venta y descuenta el stock, todo o nada.
 
-    `items` es una lista de (producto, cantidad, precio_unitario). Si algun
-    producto no tiene stock suficiente en la sucursal, NO se registra nada
-    (ValidationError legible con el nombre del producto) — salvo que venga
+    `items` es una lista de renglones: ``(producto, cantidad, precio_unitario)``
+    o un diccionario con `tipo` (producto / service / otro), `descripcion` y,
+    para los services, `item_service`. SOLO los renglones de producto mueven
+    stock: un service o un item libre se cobran igual sin tocar el inventario.
+
+    Si algun producto no tiene stock suficiente en la sucursal, NO se registra
+    nada (ValidationError legible con el nombre del producto) — salvo que venga
     `permitir_faltante` (el vendedor ya confirmo la advertencia): la venta
     NUNCA se pierde por un conteo atrasado y el stock queda en negativo para
     corregirlo despues en Inventario.
+
+    `cliente` es opcional: si viene, la venta queda en su historial de compras.
     """
     if not items:
         raise ValidationError('La venta no tiene items.')
+    renglones = [_normalizar_item_venta(item) for item in items]
     with transaction.atomic():
         venta = Venta.objects.create(
             sucursal=sucursal,
             forma_pago=forma_pago or Venta.FormaPago.EFECTIVO,
             facturacion=facturacion or Venta.Facturacion.SIN_FACTURA,
             nota=nota,
+            cliente=cliente,
             creado_por=usuario,
             actualizado_por=usuario,
         )
         total = Decimal('0')
-        for producto, cantidad, precio_unitario in items:
-            cantidad = int(cantidad)
-            if cantidad <= 0:
-                raise ValidationError(f'Cantidad invalida para "{producto.nombre}".')
-            precio = Decimal(str(precio_unitario))
-            ItemVenta.objects.create(
-                venta=venta, producto=producto, cantidad=cantidad, precio_unitario=precio,
-            )
-            total += cantidad * precio
+        for renglon in renglones:
+            ItemVenta.objects.create(venta=venta, **renglon)
+            total += renglon['cantidad'] * renglon['precio_unitario']
+            if renglon['producto'] is None:
+                continue  # service o item libre: no hay stock que mover
             aplicar_ajuste(
-                producto, sucursal,
-                delta=-cantidad,
+                renglon['producto'], sucursal,
+                delta=-renglon['cantidad'],
                 tipo=MovimientoStock.Tipo.VENTA,
                 nota=f'Venta #{venta.pk}',
                 usuario=usuario,

@@ -511,3 +511,174 @@ class EmisorSerializerTests(TestCase):
         emisor.refresh_from_db()
         self.assertEqual(emisor.certificado, 'CERT')
         self.assertEqual(emisor.clave_privada, 'KEY')
+
+
+class BaseClientesTests(TestCase):
+    """La base de clientes: identidad, email e historial completo de compras.
+
+    Las compras del cliente son de los dos tipos que el sistema guarda: las
+    facturas (cruzadas por documento/telefono) y las ventas de mostrador (que
+    apuntan al cliente con una FK). Una venta que despues se facturo NO se
+    cuenta dos veces.
+    """
+
+    def setUp(self):
+        from inventario.models import Sucursal, aplicar_ajuste
+        from productos.models import CategoriaProducto, Producto
+
+        rol = Rol.objects.create(nombre='CajeroClientes')
+        rol.permisos.set(Permiso.objects.filter(codigo__in=('ver_facturacion', 'ver_inventario')))
+        self.usuario = Usuario.objects.create_user(
+            email='cl@celtuc.ar', username='faccli', password='x', rol=rol,
+        )
+        self.emisor = Emisor.objects.create(
+            nombre='Emisor Clientes', condicion='monotributista', cuit='20111111112', punto_venta=1,
+        )
+        categoria, _ = CategoriaProducto.objects.get_or_create(nombre='Categoria clientes test')
+        self.producto = Producto.objects.create(categoria=categoria, nombre='Funda clientes test')
+        self.sucursal = Sucursal.objects.create(nombre='Solar clientes test', orden=91)
+        aplicar_ajuste(self.producto, self.sucursal, delta=10)
+
+        self.api = APIClient()
+        self.api.force_authenticate(self.usuario)
+
+    def _factura(self, *, doc='20304050607', telefono='', email='', total=1000, numero=1):
+        return Comprobante.objects.create(
+            emisor=self.emisor, tipo='C', punto_venta=1, numero=numero,
+            cliente_nombre='Ana Perez', cliente_doc_tipo='CUIT', cliente_doc_numero=doc,
+            cliente_condicion='consumidor_final', cliente_telefono=telefono, cliente_email=email,
+            fecha=datetime.date(2026, 7, 10), neto=total, iva=0, total=Decimal(str(total)), cae='999',
+        )
+
+    def _venta(self, *, cliente=None, cantidad=1, precio=500):
+        from inventario.models import registrar_venta
+
+        return registrar_venta(
+            self.sucursal, [(self.producto, cantidad, Decimal(str(precio)))],
+            forma_pago='efectivo', cliente=cliente, usuario=self.usuario,
+        )
+
+    def test_la_factura_guarda_el_email_en_la_base(self):
+        from .clientes import registrar_cliente_desde_comprobante
+
+        cliente = registrar_cliente_desde_comprobante(self._factura(email='Ana@Mail.com'))
+        self.assertEqual(cliente.email, 'ana@mail.com')  # normalizado a minusculas
+        r = self.api.get(reverse('facturacion:cliente-detail', args=[cliente.id]))
+        self.assertEqual(r.data['email'], 'ana@mail.com')
+
+    def test_solo_con_email_se_registra_e_identifica(self):
+        from .clientes import registrar_cliente
+
+        primero = registrar_cliente(nombre='Sin Doc', email='solo@mail.com')
+        self.assertIsNotNone(primero)
+        segundo = registrar_cliente(nombre='Sin Doc', email='solo@mail.com', telefono='3815550000')
+        self.assertEqual(primero.pk, segundo.pk)  # es el mismo, no duplica
+        self.assertEqual(segundo.telefono, '3815550000')
+
+    def test_no_pisa_con_vacio_un_dato_guardado(self):
+        from .clientes import registrar_cliente
+
+        cliente = registrar_cliente(nombre='Ana', doc_numero='20304050607', email='ana@mail.com')
+        de_nuevo = registrar_cliente(nombre='Ana', doc_numero='20304050607', email='')
+        self.assertEqual(de_nuevo.email, 'ana@mail.com')
+        self.assertEqual(cliente.pk, de_nuevo.pk)
+
+    def test_historial_trae_facturas_y_ventas(self):
+        from .clientes import registrar_cliente_desde_comprobante
+
+        cliente = registrar_cliente_desde_comprobante(self._factura(total=1000))
+        self._venta(cliente=cliente, precio=500)
+        r = self.api.get(reverse('facturacion:cliente-detail', args=[cliente.id]))
+        self.assertEqual(r.status_code, 200)
+        origenes = sorted(compra['origen'] for compra in r.data['compras'])
+        self.assertEqual(origenes, ['factura', 'venta'])
+        self.assertEqual(r.data['resumen']['cantidad'], 2)
+        self.assertEqual(r.data['resumen']['total'], 1500.0)
+        self.assertEqual(r.data['resumen']['facturas'], 1)
+        self.assertEqual(r.data['resumen']['ventas'], 1)
+
+    def test_venta_facturada_no_se_cuenta_dos_veces(self):
+        from .clientes import registrar_cliente_desde_comprobante
+
+        comprobante = self._factura(total=1000)
+        cliente = registrar_cliente_desde_comprobante(comprobante)
+        venta = self._venta(cliente=cliente, precio=1000)
+        venta.comprobante = comprobante  # se facturo esa misma venta
+        venta.save(update_fields=['comprobante'])
+        r = self.api.get(reverse('facturacion:cliente-detail', args=[cliente.id]))
+        self.assertEqual(r.data['resumen']['cantidad'], 1)
+        self.assertEqual(r.data['resumen']['total'], 1000.0)
+        self.assertEqual([c['origen'] for c in r.data['compras']], ['factura'])
+
+    def test_la_fecha_de_la_venta_es_la_de_argentina(self):
+        """Una venta de las 23:30 no puede figurar al dia siguiente.
+
+        `creado` se guarda en UTC: sin convertir a la hora local, las ventas de
+        la noche caerian en la fecha equivocada.
+        """
+        from django.utils import timezone
+
+        from .clientes import registrar_cliente
+
+        cliente = registrar_cliente(nombre='Nocturno', telefono='3815557777')
+        venta = self._venta(cliente=cliente)
+        # 2026-07-10 02:30 UTC == 2026-07-09 23:30 en Argentina.
+        venta.creado = datetime.datetime(2026, 7, 10, 2, 30, tzinfo=datetime.timezone.utc)
+        venta.save(update_fields=['creado'])
+        self.assertEqual(timezone.localtime(venta.creado).date(), datetime.date(2026, 7, 9))
+        r = self.api.get(reverse('facturacion:cliente-detail', args=[cliente.id]))
+        self.assertEqual(r.data['compras'][0]['fecha'], '2026-07-09')
+        self.assertEqual(r.data['resumen']['ultima'], '2026-07-09')
+
+    def test_lista_con_stats_suma_los_dos_tipos(self):
+        from .clientes import registrar_cliente_desde_comprobante
+
+        cliente = registrar_cliente_desde_comprobante(self._factura(total=1000))
+        self._venta(cliente=cliente, precio=500)
+        r = self.api.get(reverse('facturacion:cliente-list'), {'stats': '1'})
+        fila = next(c for c in r.data if c['id'] == cliente.id)
+        self.assertEqual(fila['cantidad_compras'], 2)
+        self.assertEqual(fila['total_gastado'], 1500.0)
+
+    def test_venta_de_mostrador_da_de_alta_el_cliente(self):
+        from inventario.models import Venta
+
+        r = self.api.post(reverse('inv-ventas'), {
+            'sucursal': self.sucursal.id,
+            'cliente_datos': {
+                'nombre': 'Nuevo Cliente',
+                'telefono': '3815551234',
+                'email': 'nuevo@mail.com',
+            },
+            'items': [{'producto': self.producto.id, 'cantidad': 1, 'precio_unitario': 700}],
+        }, format='json')
+        self.assertEqual(r.status_code, 201)
+        venta = Venta.objects.get(pk=r.data['id'])
+        self.assertIsNotNone(venta.cliente)
+        self.assertEqual(venta.cliente.email, 'nuevo@mail.com')
+        self.assertEqual(r.data['cliente_nombre'], 'Nuevo Cliente')
+
+    def test_venta_sin_datos_de_cliente_se_registra_igual(self):
+        from inventario.models import Venta
+
+        r = self.api.post(reverse('inv-ventas'), {
+            'sucursal': self.sucursal.id,
+            'items': [{'producto': self.producto.id, 'cantidad': 1, 'precio_unitario': 700}],
+        }, format='json')
+        self.assertEqual(r.status_code, 201)
+        self.assertIsNone(Venta.objects.get(pk=r.data['id']).cliente)
+
+    def test_borrar_el_cliente_no_toca_sus_ventas(self):
+        from inventario.models import Venta
+
+        from .clientes import registrar_cliente
+
+        cliente = registrar_cliente(nombre='Ana', telefono='3815559999')
+        venta = self._venta(cliente=cliente)
+        r = self.api.delete(reverse('facturacion:cliente-detail', args=[cliente.id]))
+        self.assertEqual(r.status_code, 204)
+        venta.refresh_from_db()
+        # El borrado del cliente es logico: la venta queda intacta y sigue
+        # apuntandolo (si se restaura, su historial vuelve completo).
+        self.assertTrue(Venta.objects.filter(pk=venta.pk).exists())
+        self.assertEqual(venta.cliente_id, cliente.pk)

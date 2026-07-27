@@ -20,8 +20,10 @@ def emitir(emisor, datos: dict, usuario=None):
     """Emite un comprobante para ``emisor`` y lo devuelve ya guardado (con CAE).
 
     ``datos`` (ya validado por el serializer) trae: cliente_nombre,
-    cliente_doc_tipo, cliente_doc_numero, cliente_condicion, concepto, fecha,
-    vencimiento, alicuota_iva, observaciones, estado_cobro e items.
+    cliente_doc_tipo, cliente_doc_numero, cliente_condicion, cliente_telefono,
+    cliente_email, concepto, fecha, vencimiento, alicuota_iva, observaciones,
+    estado_cobro e items. Los datos de contacto del cliente son internos: no
+    viajan a ARCA, alimentan la base de clientes.
     """
     from ..models import Comprobante, Emisor, ItemComprobante
 
@@ -93,6 +95,7 @@ def emitir(emisor, datos: dict, usuario=None):
             cliente_doc_numero=doc_numero,
             cliente_condicion=datos['cliente_condicion'],
             cliente_telefono=(datos.get('cliente_telefono') or '').strip(),
+            cliente_email=(datos.get('cliente_email') or '').strip().lower(),
             fecha=fecha,
             vencimiento=datos.get('vencimiento'),
             alicuota_iva=alicuota,
