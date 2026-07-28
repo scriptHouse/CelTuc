@@ -129,6 +129,22 @@ function docTiposPara(condicion: CondicionFiscal): DocTipo[] {
   return ['CUIT'] // Responsable Inscripto / Monotributo / Exento -> CUIT
 }
 
+/**
+ * Etiqueta de la condición de un emisor. Para los Responsables Inscriptos agrega
+ * la distinción de sucursal Yerba Buena / Centro (marca interna `responsable_yb`,
+ * NO fiscal). `corta` para chips angostos. Los monotributistas no cambian.
+ */
+function condicionEmisor(
+  e: Pick<Emisor, 'condicion' | 'responsable_yb'>,
+  corta = false,
+): string {
+  if (e.condicion === 'responsable_inscripto') {
+    const zona = e.responsable_yb ? 'Yerba Buena' : 'Centro'
+    return corta ? `Resp. Inscripto · ${zona}` : `Responsable Inscripto ${zona}`
+  }
+  return corta ? CONDICION_CORTA[e.condicion] : CONDICION_LABEL[e.condicion]
+}
+
 /** Formatea un monto con separador de miles (1234567 → 1.234.567) al escribir. */
 function formatMiles(value: string): string {
   const d = value.replace(/\D/g, '')
@@ -565,7 +581,7 @@ export function FacturacionPage() {
                       )}
                     </span>
                     <span className={cn('tnum block truncate text-xs', activa ? 'text-on-ink/70' : 'text-ink-400')}>
-                      {CONDICION_CORTA[e.condicion]} · PV {pad(e.punto_venta, 4)}
+                      {condicionEmisor(e, true)} · PV {pad(e.punto_venta, 4)}
                       {!e.activo && ' · Inactivo'}
                     </span>
                   </span>
@@ -582,6 +598,9 @@ export function FacturacionPage() {
                   <Badge tone={emisor.produccion ? 'solid' : 'outline'}>
                     {emisor.produccion ? 'Producción' : 'Homologación'}
                   </Badge>
+                  {emisor.condicion === 'responsable_inscripto' && (
+                    <Badge tone="outline">{emisor.responsable_yb ? 'Yerba Buena' : 'Centro'}</Badge>
+                  )}
                   {!emisor.activo && <Badge tone="outline">Inactivo</Badge>}
                   {emisor.tiene_credenciales ? (
                     <span className="inline-flex items-center gap-1.5 font-medium text-ink-600">
@@ -1392,7 +1411,7 @@ function NuevaFacturaModal({
         <div>
           <h2 className="text-lg font-semibold text-ink-950">Nueva factura</h2>
           <p className="text-xs text-ink-400">
-            {emisor.nombre} · {CONDICION_CORTA[emisor.condicion]} · PV {pad(emisor.punto_venta, 4)}
+            {emisor.nombre} · {condicionEmisor(emisor)} · PV {pad(emisor.punto_venta, 4)}
             {!emisor.produccion && ' · Homologación'}
           </p>
         </div>
@@ -1721,6 +1740,7 @@ function EmisorModal({
   const [puntoVenta, setPuntoVenta] = useState(1)
   const [produccion, setProduccion] = useState(false)
   const [activo, setActivo] = useState(true)
+  const [responsableYb, setResponsableYb] = useState(false)
   const [certificado, setCertificado] = useState('')
   const [clavePrivada, setClavePrivada] = useState('')
   const toast = useToast()
@@ -1733,6 +1753,7 @@ function EmisorModal({
     setPuntoVenta(emisor?.punto_venta ?? 1)
     setProduccion(emisor?.produccion ?? false)
     setActivo(emisor?.activo ?? true)
+    setResponsableYb(emisor?.responsable_yb ?? false)
     setCertificado('')
     setClavePrivada('')
   }, [open, emisor])
@@ -1753,6 +1774,7 @@ function EmisorModal({
       punto_venta: Number(puntoVenta) || 1,
       produccion,
       activo,
+      responsable_yb: responsableYb,
     }
     // Solo enviamos credenciales si se pegaron (en edición, vacío = no cambiar).
     if (certificado.trim()) input.certificado = certificado.trim()
@@ -1816,6 +1838,15 @@ function EmisorModal({
               </label>
             </div>
           </div>
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-700">
+            <input
+              type="checkbox"
+              checked={responsableYb}
+              onChange={(e) => setResponsableYb(e.target.checked)}
+              className="h-4 w-4 rounded border-line-strong accent-ink-950"
+            />
+            Responsable YB <span className="text-ink-400">(la cuenta pertenece a Yerba Buena)</span>
+          </label>
           <p className="rounded-xl bg-ink-50 px-4 py-3 text-xs text-ink-500">
             {condicion === 'responsable_inscripto'
               ? 'Emitirá Factura A (a Responsables Inscriptos) o B (al resto).'

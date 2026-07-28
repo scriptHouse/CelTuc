@@ -22,6 +22,8 @@ export interface EmisorInput {
   punto_venta: number
   produccion: boolean
   activo?: boolean
+  /** Marca interna: true = cuenta de Yerba Buena; false = Centro. */
+  responsable_yb?: boolean
   /** Contenido PEM del certificado (.crt). Vacío = no cambiar (en edición). */
   certificado?: string
   /** Contenido PEM de la clave privada (.key). Vacío = no cambiar (en edición). */

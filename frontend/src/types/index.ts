@@ -156,6 +156,8 @@ export interface Emisor {
   punto_venta: number
   produccion: boolean
   activo: boolean
+  /** Marca interna (no fiscal): true = cuenta de Yerba Buena; false = Centro. */
+  responsable_yb: boolean
   /** True si tiene certificado + clave cargados (puede autenticar). */
   tiene_credenciales: boolean
   creado: string

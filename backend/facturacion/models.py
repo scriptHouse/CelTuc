@@ -80,6 +80,10 @@ class Emisor(ModeloBase):
                   'Encendido = produccion (CAE con valor fiscal).',
     )
     activo = models.BooleanField('activo', default=True)
+    # Marca INTERNA (no fiscal): distingue las cuentas de la sucursal Yerba Buena
+    # de las del Centro. Solo cambia la etiqueta que muestra la app; NO afecta la
+    # emision ni el tipo de comprobante (eso sale siempre de `condicion`).
+    responsable_yb = models.BooleanField('responsable Yerba Buena', default=False)
 
     # creado / actualizado / *_por / borrado* los aporta ModeloBase.
 

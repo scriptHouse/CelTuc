@@ -44,8 +44,8 @@ class EmisorSerializer(serializers.ModelSerializer):
         model = Emisor
         fields = (
             'id', 'nombre', 'condicion', 'cuit', 'punto_venta', 'produccion',
-            'activo', 'certificado', 'clave_privada', 'tiene_credenciales',
-            'creado', 'actualizado',
+            'activo', 'responsable_yb', 'certificado', 'clave_privada',
+            'tiene_credenciales', 'creado', 'actualizado',
         )
         read_only_fields = ('creado', 'actualizado')
 
