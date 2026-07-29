@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
   Banknote,
+  Building2,
   FileCheck2,
   IdCard,
   Loader2,
@@ -20,8 +21,14 @@ import {
   Wrench,
   X,
 } from 'lucide-react'
-import type { CajaRegistradora, Cliente, ProductoCatalogo, SeccionPreciosService } from '@/types'
-import { buscarClientes } from '@/services/facturacion'
+import type {
+  CajaRegistradora,
+  Cliente,
+  CondicionEmisor,
+  ProductoCatalogo,
+  SeccionPreciosService,
+} from '@/types'
+import { buscarClientes, listarEmisores, obtenerLimites } from '@/services/facturacion'
 import { listarSecciones } from '@/services/preciosService'
 import { listarProductos } from '@/services/productos'
 import {
@@ -34,6 +41,8 @@ import {
   type TipoItemVenta,
 } from '@/services/inventario'
 import { FACTURACIONES, cajaParaFacturacion } from '@/components/caja/medios'
+import { CuentaCard } from '@/components/facturacion/CuentaCard'
+import { LimiteUsoBar } from '@/components/facturacion/LimiteUsoBar'
 import { guardarBorradorFacturaVenta } from '@/lib/borradorFactura'
 import { puedeVer } from '@/lib/permisos'
 import { useAuth } from '@/store/auth'
@@ -109,6 +118,21 @@ function ubicarService(
 function precioServicePara(lista: number | null, cash: number | null, forma: FormaPago): number {
   const preferido = forma === 'efectivo' || forma === 'transferencia' ? cash : lista
   return Number(preferido ?? lista ?? cash ?? 0)
+}
+
+const MESES = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+] as const
+
+/**
+ * Hoy (aaaa-mm-dd) en la zona horaria de Argentina — mismo criterio que
+ * Facturación, para que el mes del límite sea el que ve el usuario.
+ */
+function hoyArgentina(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+  }).format(new Date())
 }
 
 const FORMAS: Array<{ value: FormaPago; label: string }> = [
@@ -326,6 +350,56 @@ function VentaModal({
   const cajaDestino = cajaParaFacturacion(cajas, facturacion)
   const destinoAbierto = cajaDestino !== null && cajasAbiertas.includes(cajaDestino.id)
 
+  // ---- Cuenta que va a emitir la factura ------------------------------------
+  // Las MISMAS cuentas (y los mismos límites mensuales) del módulo Facturación:
+  // Factura A/B la emite un Responsable Inscripto y la C un Monotributista. Acá
+  // solo se elige y se muestra cómo queda; emitir sigue siendo cosa de ese
+  // módulo. Sin permiso `ver_facturacion` la API responde 403 y no se muestra.
+  const puedeFacturar = puedeVer(usuario, 'ver_facturacion')
+  const condicionCuenta: CondicionEmisor | null =
+    facturacion === 'factura_ri'
+      ? 'responsable_inscripto'
+      : facturacion === 'factura_c'
+        ? 'monotributista'
+        : null
+
+  const { data: emisores = [], isLoading: cargandoEmisores } = useQuery({
+    queryKey: ['emisores'],
+    queryFn: listarEmisores,
+    enabled: abierta && puedeFacturar && condicionCuenta != null,
+    retry: false,
+  })
+  const cuentas = useMemo(
+    () =>
+      condicionCuenta
+        ? emisores.filter((e) => e.activo && e.condicion === condicionCuenta)
+        : [],
+    [emisores, condicionCuenta],
+  )
+
+  const [emisorId, setEmisorId] = useState<number | null>(null)
+  useEffect(() => {
+    if (cuentas.length === 0) {
+      setEmisorId(null)
+      return
+    }
+    if (!cuentas.some((c) => c.id === emisorId)) setEmisorId(cuentas[0].id)
+  }, [cuentas, emisorId])
+  const cuentaSel = cuentas.find((c) => c.id === emisorId) ?? null
+
+  // Tope mensual de la cuenta (control interno, no fiscal): se muestra cómo
+  // queda el mes sumándole esta venta. Nunca bloquea nada.
+  const hoyAR = hoyArgentina()
+  const anioActual = Number(hoyAR.slice(0, 4))
+  const mesActual = Number(hoyAR.slice(5, 7))
+  const { data: limitesAnio } = useQuery({
+    queryKey: ['fact-limites', emisorId, anioActual],
+    queryFn: () => obtenerLimites(emisorId as number, anioActual),
+    enabled: abierta && puedeFacturar && emisorId != null,
+    retry: false,
+  })
+  const limiteMes = limitesAnio?.limites.find((l) => l.mes === mesActual)
+
   const stockDe = useMemo(() => {
     const mapa = new Map<string, number>()
     for (const fila of stock) mapa.set(`${fila.producto}-${fila.sucursal}`, fila.cantidad)
@@ -515,12 +589,14 @@ function VentaModal({
           icon: FileCheck2,
           confirmLabel: 'Facturar ahora',
           cancelLabel: 'Después',
-          description: `La venta #${venta.id} ya quedó registrada. Te llevo a Facturación con los ítems precargados para emitir la ${esRI ? 'Factura A/B (Responsable Inscripto)' : 'Factura C (Monotributo)'} con CAE, como siempre.`,
+          description: `La venta #${venta.id} ya quedó registrada. Te llevo a Facturación con los ítems precargados para emitir la ${esRI ? 'Factura A/B (Responsable Inscripto)' : 'Factura C (Monotributo)'}${cuentaSel ? ` con la cuenta «${cuentaSel.nombre}»` : ''} con CAE, como siempre.`,
         })
         if (ok) {
           guardarBorradorFacturaVenta({
             ventaId: venta.id,
             emisorCondicion: esRI ? 'responsable_inscripto' : 'monotributista',
+            // La cuenta elegida acá es la que va a quedar seleccionada allá.
+            emisorId: cuentaSel?.id,
             items: lineas.map((l) => ({
               descripcion: l.descripcion.trim() || l.producto?.nombre || 'Ítem',
               cantidad: l.cantidad,
@@ -684,6 +760,108 @@ function VentaModal({
             </p>
           )}
         </div>
+
+        {/* Cuenta que emite: las mismas cuentas y topes del módulo Facturación */}
+        {puedeFacturar && condicionCuenta && (
+          <div className="rounded-2xl border border-line bg-canvas/40 p-3.5">
+            <div className="mb-2.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-ink-500">
+                <Building2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                ¿Con qué cuenta se factura?
+              </span>
+              {cuentas.length > 0 && (
+                <span className="text-[0.68rem] text-ink-400">
+                  {condicionCuenta === 'responsable_inscripto'
+                    ? 'Responsables Inscriptos'
+                    : 'Monotributistas'}{' '}
+                  · {num(cuentas.length)}
+                </span>
+              )}
+            </div>
+
+            {cuentas.length === 0 ? (
+              <p
+                className={cn(
+                  'flex items-start gap-2 rounded-xl px-3 py-2 text-xs leading-relaxed',
+                  cargandoEmisores
+                    ? 'bg-ink-50 text-ink-500'
+                    : 'bg-amber-500/10 text-amber-800 ring-1 ring-amber-500/25 dark:text-amber-300',
+                )}
+              >
+                {cargandoEmisores ? (
+                  <>
+                    <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+                    <span>Buscando las cuentas disponibles…</span>
+                  </>
+                ) : (
+                  <>
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                    <span>
+                      No hay cuentas{' '}
+                      {condicionCuenta === 'responsable_inscripto'
+                        ? 'Responsable Inscripto'
+                        : 'Monotributista'}{' '}
+                      activas. <b>La venta se registra igual</b>; la factura se emite después
+                      desde Facturación.
+                    </span>
+                  </>
+                )}
+              </p>
+            ) : (
+              <>
+                <div
+                  className="grid gap-2.5 sm:grid-cols-2"
+                  role="group"
+                  aria-label="Cuenta que factura"
+                >
+                  {cuentas.map((e) => (
+                    <CuentaCard
+                      key={e.id}
+                      emisor={e}
+                      activa={e.id === emisorId}
+                      onSelect={() => setEmisorId(e.id)}
+                    />
+                  ))}
+                </div>
+
+                {cuentaSel && (
+                  <div className="mt-3 space-y-2.5">
+                    {/* Lo que esta venta le suma a la cuenta elegida */}
+                    <p className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-xs">
+                      <span className="min-w-0 text-ink-500">
+                        Esta venta suma a{' '}
+                        <b className="text-ink-900">{cuentaSel.nombre}</b>
+                      </span>
+                      <span className="tnum shrink-0 text-sm font-bold text-ink-950">
+                        + {money(total)}
+                      </span>
+                    </p>
+
+                    {limiteMes?.monto != null && (
+                      <LimiteUsoBar
+                        mesNombre={MESES[mesActual - 1]}
+                        limite={limiteMes.monto}
+                        facturado={limiteMes.facturado}
+                        adicional={total}
+                      />
+                    )}
+
+                    {!cuentaSel.tiene_credenciales && (
+                      <p className="flex items-start gap-2 rounded-xl bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-800 ring-1 ring-amber-500/25 dark:text-amber-300">
+                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                        <span>
+                          Esta cuenta todavía no tiene cargados el certificado y la clave de
+                          ARCA: la venta se registra igual, pero para emitir el CAE hay que
+                          completarlos en Facturación.
+                        </span>
+                      </p>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
 
         {/* Cliente: opcional, pero si va queda toda su compra en su historial */}
         <div className="rounded-2xl border border-line bg-canvas/40 p-3.5">

@@ -15,6 +15,8 @@ export interface BorradorFacturaVenta {
   ventaId: number
   /** Cuenta que corresponde: RI para Factura A/B, Monotributo para Factura C. */
   emisorCondicion: CondicionEmisor
+  /** Cuenta puntual elegida en el mostrador (si no está, se usa la primera). */
+  emisorId?: number
   /** Ítems con el precio FINAL cobrado en el mostrador (IVA incluido si aplica). */
   items: Array<{ descripcion: string; cantidad: number; precioFinal: number }>
   observaciones: string
