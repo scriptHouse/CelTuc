@@ -48,7 +48,7 @@ import { puedeVer } from '@/lib/permisos'
 import { useAuth } from '@/store/auth'
 import { useConfirm } from '@/components/ConfirmProvider'
 import { ApiError } from '@/lib/api'
-import { money, money0, num, tiempoRelativo } from '@/lib/format'
+import { formatCuit, money, money0, num, pad, tiempoRelativo } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -386,6 +386,19 @@ function VentaModal({
     if (!cuentas.some((c) => c.id === emisorId)) setEmisorId(cuentas[0].id)
   }, [cuentas, emisorId])
   const cuentaSel = cuentas.find((c) => c.id === emisorId) ?? null
+
+  // Los monotributistas son MUCHAS personas: se eligen con buscador (por nombre
+  // o CUIT). Los Responsables Inscriptos son pocos y fijos: van como tarjetas,
+  // que además muestran la zona (Yerba Buena / Centro) de un vistazo.
+  const usaBuscadorCuentas = condicionCuenta === 'monotributista'
+  const opcionesCuentas = useMemo(
+    () =>
+      cuentas.map((e) => ({
+        value: String(e.id),
+        label: `${e.nombre} · CUIT ${formatCuit(e.cuit)}`,
+      })),
+    [cuentas],
+  )
 
   // Tope mensual de la cuenta (control interno, no fiscal): se muestra cómo
   // queda el mes sumándole esta venta. Nunca bloquea nada.
@@ -809,33 +822,50 @@ function VentaModal({
               </p>
             ) : (
               <>
-                <div
-                  className="grid gap-2.5 sm:grid-cols-2"
-                  role="group"
-                  aria-label="Cuenta que factura"
-                >
-                  {cuentas.map((e) => (
-                    <CuentaCard
-                      key={e.id}
-                      emisor={e}
-                      activa={e.id === emisorId}
-                      onSelect={() => setEmisorId(e.id)}
-                    />
-                  ))}
-                </div>
+                {usaBuscadorCuentas ? (
+                  <Select
+                    options={opcionesCuentas}
+                    value={emisorId != null ? String(emisorId) : ''}
+                    onChange={(v) => setEmisorId(v ? Number(v) : null)}
+                    searchable
+                    searchPlaceholder="Nombre o CUIT…"
+                    placeholder="Elegí a quién factura…"
+                  />
+                ) : (
+                  <div
+                    className="grid gap-2.5 sm:grid-cols-2"
+                    role="group"
+                    aria-label="Cuenta que factura"
+                  >
+                    {cuentas.map((e) => (
+                      <CuentaCard
+                        key={e.id}
+                        emisor={e}
+                        activa={e.id === emisorId}
+                        onSelect={() => setEmisorId(e.id)}
+                      />
+                    ))}
+                  </div>
+                )}
 
                 {cuentaSel && (
                   <div className="mt-3 space-y-2.5">
                     {/* Lo que esta venta le suma a la cuenta elegida */}
-                    <p className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-xs">
-                      <span className="min-w-0 text-ink-500">
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                      <span className="min-w-0 text-xs text-ink-500">
                         Esta venta suma a{' '}
                         <b className="text-ink-900">{cuentaSel.nombre}</b>
+                        {usaBuscadorCuentas && (
+                          <span className="tnum mt-0.5 block truncate text-[0.68rem] text-ink-400">
+                            Monotributo · CUIT {formatCuit(cuentaSel.cuit)} · PV{' '}
+                            {pad(cuentaSel.punto_venta, 4)}
+                          </span>
+                        )}
                       </span>
                       <span className="tnum shrink-0 text-sm font-bold text-ink-950">
                         + {money(total)}
                       </span>
-                    </p>
+                    </div>
 
                     {limiteMes?.monto != null && (
                       <LimiteUsoBar

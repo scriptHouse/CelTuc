@@ -127,6 +127,14 @@ export function pad(value: number, length: number): string {
   return String(value).padStart(length, '0')
 }
 
+/** Formatea un CUIT/CUIL como 20-14343433-6 (sirve al escribir y al mostrar). */
+export function formatCuit(value: string): string {
+  const d = value.replace(/\D/g, '').slice(0, 11)
+  if (d.length <= 2) return d
+  if (d.length <= 10) return `${d.slice(0, 2)}-${d.slice(2)}`
+  return `${d.slice(0, 2)}-${d.slice(2, 10)}-${d.slice(10)}`
+}
+
 /** Período "aaaa-mm" de una fecha (por defecto, hoy). */
 export function periodoDe(date = new Date()): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1, 2)}`

@@ -78,7 +78,7 @@ import {
   IVA_RATE,
   tipoComprobante,
 } from '@/lib/afip'
-import { fecha, money, money0, num, pad } from '@/lib/format'
+import { fecha, formatCuit, money, money0, num, pad } from '@/lib/format'
 import { waLink, waNumeroArgentino } from '@/lib/whatsapp'
 import {
   CLAVE_MENSAJE_FACTURA,
@@ -152,14 +152,6 @@ function condicionEmisor(
 function formatMiles(value: string): string {
   const d = value.replace(/\D/g, '')
   return d ? Number(d).toLocaleString('es-AR') : ''
-}
-
-/** Formatea un CUIT/CUIL como 20-14343433-6 a medida que se escribe. */
-function formatCuit(value: string): string {
-  const d = value.replace(/\D/g, '').slice(0, 11)
-  if (d.length <= 2) return d
-  if (d.length <= 10) return `${d.slice(0, 2)}-${d.slice(2)}`
-  return `${d.slice(0, 2)}-${d.slice(2, 10)}-${d.slice(10)}`
 }
 
 /** Estado visible de un comprobante: pagada, vencida o pendiente. */
