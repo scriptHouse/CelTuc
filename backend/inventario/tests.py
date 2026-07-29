@@ -137,6 +137,81 @@ class VentasTests(TestCase):
         self.assertEqual(StockProducto.objects.get(producto=self.fuente, sucursal=self.solar).cantidad, 10)
         self.assertEqual(MovimientoStock.objects.filter(tipo=MovimientoStock.Tipo.VENTA).count(), 0)
 
+    def test_venta_con_un_solo_medio_deja_su_fila_de_pago(self):
+        """Toda venta queda con al menos un pago: el dato es uniforme."""
+        venta = registrar_venta(
+            self.solar, [(self.fuente, 1, Decimal('38800'))], forma_pago='tarjeta',
+        )
+        pagos = list(venta.pagos.all())
+        self.assertEqual(len(pagos), 1)
+        self.assertEqual((pagos[0].medio, pagos[0].monto), ('tarjeta', Decimal('38800')))
+
+    def test_venta_con_pagos_divididos(self):
+        venta = registrar_venta(
+            self.solar,
+            [(self.fuente, 1, Decimal('38800')), (self.cable, 1, Decimal('11600'))],  # 50400
+            pagos=[
+                {'medio': 'efectivo', 'monto': Decimal('20400')},
+                {'medio': 'transferencia', 'monto': Decimal('30000')},
+            ],
+        )
+        self.assertEqual(venta.total, Decimal('50400'))
+        self.assertEqual(
+            {p.medio: p.monto for p in venta.pagos.all()},
+            {'efectivo': Decimal('20400'), 'transferencia': Decimal('30000')},
+        )
+        # El medio principal (el de mayor monto) es el que ven los reportes.
+        self.assertEqual(venta.forma_pago, 'transferencia')
+
+    def test_pagos_repetidos_se_suman_en_una_sola_parte(self):
+        venta = registrar_venta(
+            self.solar,
+            [(self.fuente, 1, Decimal('38800'))],
+            pagos=[
+                {'medio': 'efectivo', 'monto': Decimal('8800')},
+                {'medio': 'efectivo', 'monto': Decimal('30000')},
+            ],
+        )
+        pagos = list(venta.pagos.all())
+        self.assertEqual(len(pagos), 1)
+        self.assertEqual(pagos[0].monto, Decimal('38800'))
+
+    def test_pagos_que_no_suman_el_total_no_registran_nada(self):
+        from django.core.exceptions import ValidationError
+        with self.assertRaises(ValidationError):
+            registrar_venta(
+                self.solar,
+                [(self.fuente, 1, Decimal('38800'))],
+                pagos=[{'medio': 'efectivo', 'monto': Decimal('1000')}],
+            )
+        # Atomica: ni venta, ni pagos, ni descuento de stock.
+        self.assertEqual(Venta.objects.count(), 0)
+        self.assertEqual(
+            StockProducto.objects.get(producto=self.fuente, sucursal=self.solar).cantidad, 10,
+        )
+
+    def test_api_venta_con_pagos_divididos(self):
+        r = self.cliente.post('/api/inventario/ventas/', {
+            'sucursal': self.solar.id,
+            'items': [{'producto': self.fuente.id, 'cantidad': 1, 'precio_unitario': 38800}],
+            'pagos': [
+                {'medio': 'efectivo', 'monto': 18800},
+                {'medio': 'tarjeta', 'monto': 20000},
+            ],
+        }, format='json')
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(len(r.data['pagos']), 2)
+        self.assertEqual(sum(float(p['monto']) for p in r.data['pagos']), 38800)
+
+    def test_api_pagos_que_no_cierran_dan_400_legible(self):
+        r = self.cliente.post('/api/inventario/ventas/', {
+            'sucursal': self.solar.id,
+            'items': [{'producto': self.fuente.id, 'cantidad': 1, 'precio_unitario': 38800}],
+            'pagos': [{'medio': 'efectivo', 'monto': 100}],
+        }, format='json')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('coincidir', r.data['detail'])
+
     def test_venta_confirmada_con_faltante_registra_y_deja_negativo(self):
         """La venta NUNCA se pierde: confirmado el faltante, el stock queda en rojo."""
         venta = registrar_venta(
@@ -286,10 +361,10 @@ class VentaServiciosTests(TestCase):
             'tipo': 'service', 'descripcion': 'Cambio de modulo', 'cantidad': 1,
             'precio_unitario': Decimal('120000'),
         }])
-        movimiento = registrar_venta_en_caja(venta, caja=caja)
-        self.assertIsNotNone(movimiento)
-        self.assertEqual(movimiento.monto, Decimal('120000'))
-        self.assertIn('Cambio de modulo', movimiento.detalle)
+        movimientos = registrar_venta_en_caja(venta, caja=caja)
+        self.assertEqual(len(movimientos), 1)
+        self.assertEqual(movimientos[0].monto, Decimal('120000'))
+        self.assertIn('Cambio de modulo', movimientos[0].detalle)
 
 
 class ApiInventarioTests(TestCase):

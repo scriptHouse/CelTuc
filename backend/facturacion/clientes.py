@@ -59,7 +59,7 @@ def ventas_de_cliente(cliente):
     return (
         Venta.objects.filter(cliente=cliente, comprobante__isnull=True)
         .select_related('sucursal')
-        .prefetch_related('items__producto')
+        .prefetch_related('items__producto', 'pagos')
         .order_by('-creado', '-id')
     )
 
@@ -86,9 +86,12 @@ def _compra_de_comprobante(comprobante):
 
 
 def _compra_de_venta(venta):
+    # Cobrada con varios medios, se muestran todos ("Efectivo + Transferencia");
+    # las ventas viejas (sin filas de pago) siguen mostrando su `forma_pago`.
+    medios = [pago.get_medio_display() for pago in venta.pagos.all()]
     partes = (
         venta.sucursal.nombre if venta.sucursal_id else '',
-        venta.get_forma_pago_display(),
+        ' + '.join(dict.fromkeys(medios)) if medios else venta.get_forma_pago_display(),
     )
     return {
         'id': venta.pk,

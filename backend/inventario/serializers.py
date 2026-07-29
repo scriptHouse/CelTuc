@@ -1,10 +1,12 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from facturacion.models import Cliente
 from precios_service.models import ItemService
 from productos.models import Producto
 
-from .models import ItemVenta, MovimientoStock, StockProducto, Sucursal, Venta
+from .models import ItemVenta, MovimientoStock, PagoVenta, StockProducto, Sucursal, Venta
 
 
 class SucursalSerializer(serializers.ModelSerializer):
@@ -105,12 +107,23 @@ class ItemVentaSerializer(serializers.ModelSerializer):
         )
 
 
+class PagoVentaSerializer(serializers.ModelSerializer):
+    """Una parte del cobro (medio + monto) de una venta ya registrada."""
+
+    monto = serializers.DecimalField(max_digits=14, decimal_places=2, coerce_to_string=False)
+
+    class Meta:
+        model = PagoVenta
+        fields = ('medio', 'monto')
+
+
 class VentaSerializer(serializers.ModelSerializer):
     sucursal = serializers.PrimaryKeyRelatedField(read_only=True)
     sucursal_nombre = serializers.CharField(source='sucursal.nombre', read_only=True)
     total = serializers.DecimalField(max_digits=14, decimal_places=2, coerce_to_string=False)
     usuario = serializers.SerializerMethodField()
     items = ItemVentaSerializer(many=True, read_only=True)
+    pagos = PagoVentaSerializer(many=True, read_only=True)
     cliente = serializers.PrimaryKeyRelatedField(read_only=True)
     cliente_nombre = serializers.CharField(source='cliente.nombre', read_only=True, default=None)
     comprobante = serializers.PrimaryKeyRelatedField(read_only=True)
@@ -118,7 +131,7 @@ class VentaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Venta
         fields = (
-            'id', 'sucursal', 'sucursal_nombre', 'forma_pago', 'facturacion', 'nota',
+            'id', 'sucursal', 'sucursal_nombre', 'forma_pago', 'pagos', 'facturacion', 'nota',
             'total', 'usuario', 'items', 'cliente', 'cliente_nombre', 'comprobante', 'creado',
         )
 
@@ -156,6 +169,13 @@ class ItemVentaInputSerializer(serializers.Serializer):
         return data
 
 
+class PagoVentaInputSerializer(serializers.Serializer):
+    """Una parte del cobro al registrar la venta: medio + monto."""
+
+    medio = serializers.ChoiceField(choices=Venta.FormaPago.choices)
+    monto = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal('0'))
+
+
 class ClienteVentaSerializer(serializers.Serializer):
     """Datos del cliente cargados a mano en la venta (cliente nuevo o sin elegir).
 
@@ -185,6 +205,9 @@ class CrearVentaSerializer(serializers.Serializer):
     forma_pago = serializers.ChoiceField(
         choices=Venta.FormaPago.choices, default=Venta.FormaPago.EFECTIVO,
     )
+    # Cobro con varios medios a la vez (opcional). Si viene, tiene que sumar el
+    # total exacto de la venta; si no viene, la venta entera va en `forma_pago`.
+    pagos = PagoVentaInputSerializer(many=True, required=False)
     facturacion = serializers.ChoiceField(
         choices=Venta.Facturacion.choices, default=Venta.Facturacion.SIN_FACTURA,
     )

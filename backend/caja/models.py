@@ -371,15 +371,20 @@ def caja_para_venta(venta):
 def registrar_venta_en_caja(venta, *, caja=None, usuario=None):
     """Engancha una venta de mostrador al turno abierto que corresponde.
 
+    Devuelve la LISTA de movimientos creados: una venta cobrada con varios
+    medios (parte efectivo, parte transferencia) genera un movimiento POR
+    MEDIO, todos apuntando a la misma venta, para que el conteo por medio del
+    arqueo siga cerrando. Sin turno donde anotarla devuelve la lista vacia.
+
     Si existe una caja del canal fiscal de la venta (facturado RI a su caja;
     monotributo y sin factura a la general), la venta va SOLO a esa caja: con
     su turno cerrado se avisa (ValidationError) en vez de mezclar la plata en
     otro cajon. Sin cajas con canal vale el comportamiento historico: la
-    `caja` indicada o la unica sesion abierta; sin turno devuelve None. La
-    venta vale igual en todos los casos (el stock ya se desconto).
+    `caja` indicada o la unica sesion abierta. La venta vale igual en todos los
+    casos (el stock ya se desconto).
     """
     if venta.total is None or venta.total <= 0:
-        return None
+        return []
 
     caja_canal = caja_para_venta(venta)
     if caja_canal is not None:
@@ -402,22 +407,35 @@ def registrar_venta_en_caja(venta, *, caja=None, usuario=None):
             if len(abiertas) == 1:
                 sesion = abiertas[0]
         if sesion is None:
-            return None
+            return []
 
     items = list(venta.items.select_related('producto')[:4])
     # `detalle` del item sirve para las tres clases de renglon (mercaderia,
     # service e item libre); los services no tienen producto asociado.
-    detalle = ', '.join(f'{i.cantidad}x {i.detalle}' for i in items)[:200]
-    return registrar_movimiento(
-        sesion,
-        tipo=MovimientoCaja.Tipo.VENTA,
-        medio=venta.forma_pago,
-        monto=venta.total,
-        motivo=f'Venta #{venta.pk}',
-        detalle=detalle,
-        usuario=usuario,
-        venta=venta,
-    )
+    detalle = ', '.join(f'{i.cantidad}x {i.detalle}' for i in items)
+
+    # Un movimiento por medio cobrado. Las ventas viejas (sin filas de pago) se
+    # anotan enteras en su `forma_pago`, exactamente como antes.
+    partes = [(pago.medio, pago.monto) for pago in venta.pagos.all() if pago.monto > 0]
+    if not partes:
+        partes = [(venta.forma_pago, venta.total)]
+
+    movimientos = []
+    for indice, (medio, monto) in enumerate(partes, start=1):
+        prefijo = f'Pago {indice} de {len(partes)} · ' if len(partes) > 1 else ''
+        movimientos.append(
+            registrar_movimiento(
+                sesion,
+                tipo=MovimientoCaja.Tipo.VENTA,
+                medio=medio,
+                monto=monto,
+                motivo=f'Venta #{venta.pk}',
+                detalle=(prefijo + detalle)[:200],
+                usuario=usuario,
+                venta=venta,
+            )
+        )
+    return movimientos
 
 
 def eliminar_movimiento(movimiento, *, usuario=None):

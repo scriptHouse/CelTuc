@@ -5,7 +5,7 @@ from comun.admin import ModeloBaseAdminMixin
 
 from unfold.admin import TabularInline
 
-from .models import ItemVenta, MovimientoStock, StockProducto, Sucursal, Venta
+from .models import ItemVenta, MovimientoStock, PagoVenta, StockProducto, Sucursal, Venta
 
 _AUDITORIA = (
     'creado', 'actualizado', 'creado_por', 'actualizado_por',
@@ -39,13 +39,21 @@ class ItemVentaInline(TabularInline):
     raw_id_fields = ('item_service',)
 
 
+class PagoVentaInline(TabularInline):
+    """Las partes del cobro: con un solo medio hay una sola fila."""
+
+    model = PagoVenta
+    extra = 0
+    fields = ('medio', 'monto')
+
+
 @admin.register(Venta)
 class VentaAdmin(ModeloBaseAdminMixin, ModelAdmin):
     list_display = ('id', 'creado', 'sucursal', 'cliente', 'forma_pago', 'total', 'creado_por')
     list_filter = ('sucursal', 'forma_pago')
     search_fields = ('nota', 'items__producto__nombre', 'cliente__nombre')
     raw_id_fields = ('cliente', 'comprobante')
-    inlines = (ItemVentaInline,)
+    inlines = (ItemVentaInline, PagoVentaInline)
     readonly_fields = _AUDITORIA
 
 

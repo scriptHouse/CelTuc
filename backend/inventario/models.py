@@ -295,6 +295,39 @@ class ItemVenta(models.Model):
         return self.cantidad * self.precio_unitario
 
 
+class PagoVenta(models.Model):
+    """Una parte del cobro de la venta: un medio de pago y su monto.
+
+    En el mostrador es normal cobrar una venta con VARIOS medios a la vez (una
+    parte en efectivo, el resto por transferencia). Cada parte es una fila y la
+    suma de las partes es exactamente el total de la venta; cuando se cobra con
+    un solo medio hay una sola fila, asi el dato es siempre uniforme.
+
+    En el arqueo, CADA parte entra como su propio movimiento de caja con su
+    medio (todos apuntando a la misma venta): es lo que hace que el conteo por
+    medio de pago siga cerrando. `Venta.forma_pago` queda como el medio
+    PRINCIPAL (el de mayor monto), para los reportes y filtros de siempre.
+    """
+
+    venta = models.ForeignKey(
+        Venta,
+        on_delete=models.CASCADE,
+        related_name='pagos',
+        verbose_name='venta',
+    )
+    medio = models.CharField('medio de pago', max_length=20, choices=Venta.FormaPago.choices)
+    monto = models.DecimalField('monto ($)', max_digits=14, decimal_places=2)
+
+    class Meta:
+        db_table = 'inventario_ventas_pagos'
+        verbose_name = 'pago de la venta'
+        verbose_name_plural = 'pagos de la venta'
+        ordering = ('id',)
+
+    def __str__(self):
+        return f'{self.get_medio_display()} ${self.monto}'
+
+
 # ===== Operaciones =====
 
 def aplicar_ajuste(producto, sucursal, *, delta=None, cantidad=None, tipo='',
@@ -389,8 +422,41 @@ def _normalizar_item_venta(item):
     }
 
 
+def _normalizar_pagos(pagos, *, forma_pago, total):
+    """Valida el cobro y lo devuelve como [(medio, monto)] que suma `total`.
+
+    Sin `pagos` (el caso comun: un solo medio) devuelve la venta entera en
+    `forma_pago`. Con varios, las partes en cero se descartan, las repetidas se
+    suman en una sola (un medio = un movimiento de caja) y el total tiene que
+    coincidir con el de la venta: si no, no se registra nada, porque una venta
+    cuyos pagos no cierran romperia el arqueo.
+    """
+    medios_validos = set(Venta.FormaPago.values)
+    partes = {}
+    for pago in pagos or []:
+        medio = (pago.get('medio') or '').strip()
+        if medio not in medios_validos:
+            raise ValidationError(f'Medio de pago desconocido: "{medio}".')
+        monto = Decimal(str(pago.get('monto') or 0))
+        if monto < 0:
+            raise ValidationError('Los montos de los pagos no pueden ser negativos.')
+        if monto == 0:
+            continue
+        partes[medio] = partes.get(medio, Decimal('0')) + monto
+
+    if not partes:
+        return [(forma_pago or Venta.FormaPago.EFECTIVO, total)]
+
+    suma = sum(partes.values(), Decimal('0'))
+    if suma != total:
+        raise ValidationError(
+            f'Los pagos suman ${suma} y la venta es de ${total}: tienen que coincidir.'
+        )
+    return list(partes.items())
+
+
 def registrar_venta(sucursal, items, *, forma_pago='', facturacion='', nota='',
-                    cliente=None, usuario=None, permitir_faltante=False):
+                    cliente=None, usuario=None, permitir_faltante=False, pagos=None):
     """Crea la venta y descuenta el stock, todo o nada.
 
     `items` es una lista de renglones: ``(producto, cantidad, precio_unitario)``
@@ -405,6 +471,11 @@ def registrar_venta(sucursal, items, *, forma_pago='', facturacion='', nota='',
     corregirlo despues en Inventario.
 
     `cliente` es opcional: si viene, la venta queda en su historial de compras.
+
+    `pagos` permite cobrar con VARIOS medios a la vez (``[{'medio', 'monto'}]``):
+    tiene que sumar el total exacto. Sin `pagos`, la venta entera va en
+    `forma_pago`, como siempre. En los dos casos queda al menos una fila en
+    `PagoVenta` y `forma_pago` termina siendo el medio de mayor monto.
     """
     if not items:
         raise ValidationError('La venta no tiene items.')
@@ -434,7 +505,15 @@ def registrar_venta(sucursal, items, *, forma_pago='', facturacion='', nota='',
                 permitir_negativo=permitir_faltante,
             )
         venta.total = total
-        venta.save(update_fields=['total'])
+        # El cobro se resuelve al final, cuando ya se sabe el total de la venta.
+        partes = _normalizar_pagos(pagos, forma_pago=venta.forma_pago, total=total)
+        PagoVenta.objects.bulk_create(
+            [PagoVenta(venta=venta, medio=medio, monto=monto) for medio, monto in partes],
+        )
+        # El medio principal (el de mayor monto) es el que sigue viendo todo lo
+        # que ya leia `forma_pago`: reportes, filtros del admin e historiales.
+        venta.forma_pago = max(partes, key=lambda parte: parte[1])[0]
+        venta.save(update_fields=['total', 'forma_pago'])
     return venta
 
 

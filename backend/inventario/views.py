@@ -138,7 +138,7 @@ class VentasView(_BaseInventario, APIView):
 
     def get(self, request):
         qs = Venta.objects.select_related('sucursal', 'creado_por', 'cliente').prefetch_related(
-            'items__producto',
+            'items__producto', 'pagos',
         )
         sucursal = request.query_params.get('sucursal')
         if sucursal:
@@ -175,30 +175,37 @@ class VentasView(_BaseInventario, APIView):
                 cliente=cliente,
                 usuario=usuario,
                 permitir_faltante=datos.get('permitir_faltante', False),
+                pagos=datos.get('pagos'),
             )
         except ValidationError as e:
             return Response({'detail': ' '.join(e.messages)}, status=400)
 
         # La venta tambien entra al arqueo: se anota como movimiento en el turno
-        # abierto de la caja indicada (o de la unica abierta). Si no hay turno,
-        # la venta vale igual y se devuelve el aviso para que el front lo muestre.
-        movimiento_caja = None
+        # abierto de la caja indicada (o de la unica abierta). Cobrada con varios
+        # medios genera un movimiento por medio. Si no hay turno, la venta vale
+        # igual y se devuelve el aviso para que el front lo muestre.
+        movimientos_caja = []
         aviso_caja = None
         try:
             from caja.models import Caja, registrar_venta_en_caja
 
             caja_obj = Caja.objects.filter(pk=datos['caja']).first() if datos.get('caja') else None
-            movimiento_caja = registrar_venta_en_caja(venta, caja=caja_obj, usuario=request.user)
+            movimientos_caja = registrar_venta_en_caja(venta, caja=caja_obj, usuario=request.user)
         except ValidationError as e:
             aviso_caja = ' '.join(e.messages)
-        if movimiento_caja is None and aviso_caja is None:
+        if not movimientos_caja and aviso_caja is None:
             aviso_caja = 'No hay un turno de caja abierto: la venta no entro en ningun arqueo.'
 
         data = VentaSerializer(venta).data
-        data['movimiento_caja'] = movimiento_caja.pk if movimiento_caja else None
+        # `movimiento_caja` (singular) se mantiene por compatibilidad: es el
+        # primero. `movimientos_caja` trae todos (uno por medio cobrado).
+        data['movimiento_caja'] = movimientos_caja[0].pk if movimientos_caja else None
+        data['movimientos_caja'] = [m.pk for m in movimientos_caja]
         # Nombre de la caja donde quedo anotada (el enrutamiento por canal
         # fiscal puede mandarla a otra caja que la seleccionada en pantalla).
-        data['caja_arqueo'] = movimiento_caja.sesion.caja.nombre if movimiento_caja else None
+        data['caja_arqueo'] = (
+            movimientos_caja[0].sesion.caja.nombre if movimientos_caja else None
+        )
         data['aviso_caja'] = aviso_caja
         return Response(data, status=201)
 

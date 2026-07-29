@@ -191,8 +191,9 @@ class VentaEnCajaTests(TestCase):
     def test_venta_entra_al_turno_abierto(self):
         sesion = abrir_caja(self.caja, fondo_inicial=10000)
         venta = self._venta(forma_pago='transferencia')
-        mov = registrar_venta_en_caja(venta, caja=self.caja)
-        self.assertIsNotNone(mov)
+        movs = registrar_venta_en_caja(venta, caja=self.caja)
+        self.assertEqual(len(movs), 1)  # un solo medio -> un solo movimiento
+        mov = movs[0]
         self.assertEqual(mov.sesion_id, sesion.pk)
         self.assertEqual(mov.tipo, MovimientoCaja.Tipo.VENTA)
         self.assertEqual(mov.medio, 'transferencia')
@@ -200,22 +201,49 @@ class VentaEnCajaTests(TestCase):
         self.assertEqual(mov.venta_id, venta.pk)
         self.assertIn('Fuente caja test', mov.detalle)
 
-    def test_sin_turno_abierto_devuelve_none(self):
+    def test_sin_turno_abierto_no_crea_movimientos(self):
         venta = self._venta()
-        self.assertIsNone(registrar_venta_en_caja(venta, caja=self.caja))
+        self.assertEqual(registrar_venta_en_caja(venta, caja=self.caja), [])
 
     def test_sin_caja_usa_la_unica_sesion_abierta(self):
         sesion = abrir_caja(self.caja, fondo_inicial=0)
         venta = self._venta()
-        mov = registrar_venta_en_caja(venta)
-        self.assertEqual(mov.sesion_id, sesion.pk)
+        movs = registrar_venta_en_caja(venta)
+        self.assertEqual(movs[0].sesion_id, sesion.pk)
 
     def test_movimiento_de_venta_no_se_elimina_desde_caja(self):
         abrir_caja(self.caja, fondo_inicial=0)
         venta = self._venta()
-        mov = registrar_venta_en_caja(venta)
+        movs = registrar_venta_en_caja(venta)
         with self.assertRaises(ValidationError):
-            eliminar_movimiento(mov)
+            eliminar_movimiento(movs[0])
+
+    def test_venta_con_varios_medios_genera_un_movimiento_por_medio(self):
+        """Cobro dividido: una venta, varias partes, todas del mismo turno."""
+        sesion = abrir_caja(self.caja, fondo_inicial=0)
+        venta = registrar_venta(
+            self.sucursal,
+            [(self.producto, 2, Decimal('5000'))],  # total 10000
+            pagos=[
+                {'medio': 'efectivo', 'monto': Decimal('6000')},
+                {'medio': 'transferencia', 'monto': Decimal('4000')},
+            ],
+        )
+        movs = registrar_venta_en_caja(venta, caja=self.caja)
+        self.assertEqual(len(movs), 2)
+        self.assertTrue(all(m.venta_id == venta.pk for m in movs))
+        self.assertTrue(all(m.sesion_id == sesion.pk for m in movs))
+        self.assertEqual({m.medio: m.monto for m in movs}, {
+            'efectivo': Decimal('6000'), 'transferencia': Decimal('4000'),
+        })
+        # Cada parte se identifica en el detalle, y el arqueo por medio cierra.
+        self.assertIn('Pago 1 de 2', movs[0].detalle)
+        resumen = resumen_sesion(sesion)
+        self.assertEqual(resumen['esperado_por_medio']['efectivo'], Decimal('6000'))
+        self.assertEqual(resumen['esperado_por_medio']['transferencia'], Decimal('4000'))
+        self.assertEqual(
+            sum(resumen['ventas_por_medio'].values(), Decimal('0')), venta.total,
+        )
 
 
 class ApiCajaTests(TestCase):
@@ -385,16 +413,16 @@ class CajasFiscalesTests(TestCase):
         abrir_caja(self.caja_general, fondo_inicial=0)
         venta = self._venta('factura_ri')
         # Aunque en pantalla este seleccionada la general, el canal manda.
-        mov = registrar_venta_en_caja(venta, caja=self.caja_general)
-        self.assertEqual(mov.sesion_id, sesion_ri.pk)
+        movs = registrar_venta_en_caja(venta, caja=self.caja_general)
+        self.assertEqual(movs[0].sesion_id, sesion_ri.pk)
 
     def test_monotributo_y_sin_factura_van_a_la_general(self):
         abrir_caja(self.caja_ri, fondo_inicial=0)
         sesion_general = abrir_caja(self.caja_general, fondo_inicial=0)
-        mov_c = registrar_venta_en_caja(self._venta('factura_c'), caja=self.caja_ri)
-        mov_sf = registrar_venta_en_caja(self._venta('sin_factura'))
-        self.assertEqual(mov_c.sesion_id, sesion_general.pk)
-        self.assertEqual(mov_sf.sesion_id, sesion_general.pk)
+        movs_c = registrar_venta_en_caja(self._venta('factura_c'), caja=self.caja_ri)
+        movs_sf = registrar_venta_en_caja(self._venta('sin_factura'))
+        self.assertEqual(movs_c[0].sesion_id, sesion_general.pk)
+        self.assertEqual(movs_sf[0].sesion_id, sesion_general.pk)
 
     def test_caja_del_canal_cerrada_avisa_y_no_mezcla_la_plata(self):
         abrir_caja(self.caja_general, fondo_inicial=0)  # la RI queda cerrada
@@ -412,8 +440,8 @@ class CajasFiscalesTests(TestCase):
         self.caja_general.save(update_fields=['activa'])
         comun = Caja.objects.create(nombre='Comun test')
         sesion = abrir_caja(comun, fondo_inicial=0)
-        mov = registrar_venta_en_caja(self._venta('factura_ri'))
-        self.assertEqual(mov.sesion_id, sesion.pk)
+        movs = registrar_venta_en_caja(self._venta('factura_ri'))
+        self.assertEqual(movs[0].sesion_id, sesion.pk)
 
     def test_api_venta_ri_entra_a_su_caja_y_avisa_si_esta_cerrada(self):
         rol = Rol.objects.create(nombre='Cajero fiscal test')

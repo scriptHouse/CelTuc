@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Banknote,
   Building2,
+  Coins,
   FileCheck2,
   IdCard,
   Loader2,
@@ -282,6 +283,10 @@ function VentaModal({
 
   const [sucursalId, setSucursalId] = useState<number | null>(null)
   const [formaPago, setFormaPago] = useState<FormaPago>('efectivo')
+  // Cobro dividido: la misma venta pagada con varios medios (parte en efectivo,
+  // parte por transferencia). Apagado se comporta igual que siempre.
+  const [dividido, setDividido] = useState(false)
+  const [pagos, setPagos] = useState<Array<{ key: string; medio: FormaPago; monto: number }>>([])
   const [facturacion, setFacturacion] = useState<FacturacionVenta>('sin_factura')
   const [lineas, setLineas] = useState<Linea[]>([])
   const [nota, setNota] = useState('')
@@ -337,6 +342,8 @@ function VentaModal({
         : (activas[0]?.id ?? null),
     )
     setFormaPago('efectivo')
+    setDividido(false)
+    setPagos([])
     setFacturacion('sin_factura')
     setLineas([])
     setNota('')
@@ -530,6 +537,50 @@ function VentaModal({
   }
 
   const total = lineas.reduce((a, l) => a + l.cantidad * (Number.isFinite(l.precio) ? l.precio : 0), 0)
+
+  // ---- Cobro dividido -------------------------------------------------------
+  // Se trabaja en centavos: comparar pesos con decimales en coma flotante deja
+  // diferencias de un centavo que harian rebotar la venta en el backend.
+  const centavos = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100)
+  const totalCent = centavos(total)
+  const asignadoCent = pagos.reduce((a, p) => a + centavos(p.monto), 0)
+  const restanteCent = totalCent - asignadoCent
+  const pagosCierran =
+    !dividido || (restanteCent === 0 && pagos.length > 0 && pagos.every((p) => centavos(p.monto) > 0))
+
+  function alternarDivision() {
+    if (dividido) {
+      setDividido(false)
+      setPagos([])
+      return
+    }
+    // Arranca con el medio elegido llevandose todo: el vendedor baja ese monto
+    // y agrega el segundo medio con el resto.
+    setPagos([{ key: claveNueva(), medio: formaPago, monto: total }])
+    setDividido(true)
+  }
+
+  function agregarPago() {
+    const usados = new Set(pagos.map((p) => p.medio))
+    const libre = FORMAS.find((f) => !usados.has(f.value))?.value ?? 'otro'
+    setPagos((ps) => [
+      ...ps,
+      { key: claveNueva(), medio: libre, monto: Math.max(0, restanteCent) / 100 },
+    ])
+  }
+
+  function asignarResto() {
+    setPagos((ps) => {
+      if (!ps.length) return ps
+      const copia = [...ps]
+      const ultimo = copia.length - 1
+      copia[ultimo] = {
+        ...copia[ultimo],
+        monto: Math.max(0, centavos(copia[ultimo].monto) + restanteCent) / 100,
+      }
+      return copia
+    })
+  }
   // El faltante de stock solo aplica a la mercadería: un service no tiene stock.
   const hayFaltantes =
     sucursalId !== null &&
@@ -545,6 +596,13 @@ function VentaModal({
       if (lineas.some((l) => l.tipo !== 'producto' && !l.descripcion.trim())) {
         throw new ApiError(0, 'Escribí qué se cobra en los ítems libres.', null)
       }
+      if (dividido && !pagosCierran) {
+        throw new ApiError(
+          0,
+          'Los pagos tienen que sumar exactamente el total de la venta.',
+          null,
+        )
+      }
       // El cliente es opcional: si es uno guardado va su id; si se cargó a mano
       // van los datos y el backend lo da de alta (si hay con qué reconocerlo).
       const datosCliente = {
@@ -556,6 +614,11 @@ function VentaModal({
       return registrarVenta({
         sucursal: sucursalId,
         forma_pago: formaPago,
+        // Con cobro dividido viaja el detalle por medio (el backend crea un
+        // movimiento de arqueo por cada parte, todos de esta misma venta).
+        pagos: dividido
+          ? pagos.map((p) => ({ medio: p.medio, monto: centavos(p.monto) / 100 }))
+          : undefined,
         facturacion,
         nota: nota.trim(),
         cliente: clienteSel?.id,
@@ -710,17 +773,130 @@ function VentaModal({
             </div>
           </div>
           <div>
-            <label className="mb-1.5 block text-xs font-medium text-ink-500">Forma de pago</label>
+            <label className="mb-1.5 block text-xs font-medium text-ink-500">
+              {dividido ? 'Medio principal' : 'Forma de pago'}
+            </label>
             <Select
               options={FORMAS}
               value={formaPago}
-              onChange={(v) => setFormaPago(v as FormaPago)}
+              onChange={(v) => {
+                const medio = v as FormaPago
+                setFormaPago(medio)
+                // Con cobro dividido, este selector es la primera parte.
+                setPagos((ps) => (ps.length ? [{ ...ps[0], medio }, ...ps.slice(1)] : ps))
+              }}
             />
-            <p className="mt-1 text-xs text-ink-400">
-              Con efectivo/transferencia se sugiere el precio cash; con tarjeta, el de lista.
-            </p>
+            <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+              <p className="min-w-0 text-xs text-ink-400">
+                Con efectivo/transferencia se sugiere el precio cash; con tarjeta, el de lista.
+              </p>
+              <button
+                type="button"
+                onClick={alternarDivision}
+                className="shrink-0 rounded-lg text-xs font-semibold text-ink-700 underline decoration-ink-300 underline-offset-2 transition-colors hover:text-ink-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
+              >
+                {dividido ? 'Cobrar con un solo medio' : 'Dividir el pago'}
+              </button>
+            </div>
           </div>
         </div>
+
+        {/* Cobro dividido: una misma venta cobrada con varios medios */}
+        {dividido && (
+          <div className="rounded-2xl border border-line bg-canvas/40 p-3.5">
+            <div className="mb-2.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-ink-500">
+                <Coins className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                Cobro dividido
+              </span>
+              <span
+                className={cn(
+                  'tnum text-xs font-semibold',
+                  restanteCent === 0
+                    ? 'text-emerald-700 dark:text-emerald-400'
+                    : 'text-amber-700 dark:text-amber-400',
+                )}
+                aria-live="polite"
+              >
+                {restanteCent === 0
+                  ? 'Todo asignado ✓'
+                  : restanteCent > 0
+                    ? `Falta asignar ${money(restanteCent / 100)}`
+                    : `Te pasaste por ${money(-restanteCent / 100)}`}
+              </span>
+            </div>
+
+            <ul className="space-y-2">
+              {pagos.map((p, i) => (
+                <li key={p.key} className="flex flex-wrap items-center gap-2">
+                  <div className="min-w-0 basis-full sm:basis-0 sm:flex-1">
+                    <Select
+                      options={FORMAS}
+                      value={p.medio}
+                      onChange={(v) => {
+                        const medio = v as FormaPago
+                        setPagos((ps) =>
+                          ps.map((x) => (x.key === p.key ? { ...x, medio } : x)),
+                        )
+                        if (i === 0) setFormaPago(medio)
+                      }}
+                    />
+                  </div>
+                  <div className="relative w-32 shrink-0">
+                    <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-ink-400">
+                      $
+                    </span>
+                    <Input
+                      value={String(p.monto)}
+                      onChange={(e) =>
+                        setPagos((ps) =>
+                          ps.map((x) =>
+                            x.key === p.key
+                              ? { ...x, monto: Number(e.target.value.replace(',', '.')) }
+                              : x,
+                          ),
+                        )
+                      }
+                      inputMode="decimal"
+                      aria-label={`Monto del pago ${i + 1}`}
+                      className="tnum h-11 pl-6 pr-2 text-sm"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPagos((ps) => ps.filter((x) => x.key !== p.key))}
+                    disabled={pagos.length <= 1}
+                    aria-label={`Quitar el pago ${i + 1}`}
+                    className="grid h-11 w-10 shrink-0 place-items-center rounded-xl text-ink-400 transition-colors hover:bg-ink-100 hover:text-ink-900 disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+
+            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={agregarPago}
+                disabled={pagos.length >= FORMAS.length}
+              >
+                <Plus className="h-4 w-4" />
+                Agregar medio
+              </Button>
+              {restanteCent !== 0 && pagos.length > 0 && (
+                <Button type="button" size="sm" variant="outline" onClick={asignarResto}>
+                  Poner el resto en el último
+                </Button>
+              )}
+              <span className="tnum ml-auto text-xs text-ink-400">
+                {money(asignadoCent / 100)} de {money(total)}
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Cómo se factura: decide sola a qué caja entra la plata. */}
         <div>
@@ -1187,6 +1363,19 @@ function VentaModal({
           </p>
         )}
 
+        {dividido && !pagosCierran && (
+          <p className="flex items-start gap-2 rounded-xl bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-800 ring-1 ring-amber-500/25 dark:text-amber-300">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span>
+              {restanteCent > 0
+                ? `Falta repartir ${money(restanteCent / 100)} entre los medios de pago.`
+                : restanteCent < 0
+                  ? `Los pagos se pasan del total por ${money(-restanteCent / 100)}.`
+                  : 'Cada medio de pago tiene que tener un monto mayor a cero.'}
+            </span>
+          </p>
+        )}
+
         <div className="flex flex-col-reverse gap-2.5 sm:flex-row sm:justify-end">
           <Button type="button" variant="outline" onClick={onCerrar}>
             Cancelar
@@ -1194,7 +1383,9 @@ function VentaModal({
           <Button
             type="button"
             onClick={handleRegistrar}
-            disabled={guardar.isPending || lineas.length === 0 || sucursalId === null}
+            disabled={
+              guardar.isPending || lineas.length === 0 || sucursalId === null || !pagosCierran
+            }
             className="bg-emerald-600 text-white hover:bg-emerald-700 active:bg-emerald-700 focus-visible:ring-emerald-600"
           >
             {guardar.isPending ? (

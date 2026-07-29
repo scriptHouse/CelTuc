@@ -136,12 +136,25 @@ export interface ItemVenta {
   subtotal: number
 }
 
+/**
+ * Una parte del cobro: medio + monto. Una venta puede cobrarse con varios
+ * medios a la vez (parte efectivo, parte transferencia); con un solo medio hay
+ * una sola parte. La suma de las partes es siempre el total de la venta.
+ */
+export interface PagoVenta {
+  medio: FormaPago
+  monto: number
+}
+
 /** Venta de mostrador: registrarla descuenta el stock (backend REAL). */
 export interface Venta {
   id: number
   sucursal: number
   sucursal_nombre: string
+  /** Medio PRINCIPAL (el de mayor monto). El detalle completo va en `pagos`. */
   forma_pago: FormaPago
+  /** Cómo se cobró, parte por parte. */
+  pagos: PagoVenta[]
   facturacion: FacturacionVenta
   nota: string
   total: number
@@ -153,8 +166,10 @@ export interface Venta {
   cliente_nombre?: string | null
   /** Factura que después se emitió por esta venta (para no contarla dos veces). */
   comprobante?: number | null
-  /** Id del movimiento de caja generado (null si no había turno abierto). */
+  /** Id del primer movimiento de caja generado (null si no había turno abierto). */
   movimiento_caja?: number | null
+  /** Todos los movimientos de arqueo creados: uno por medio cobrado. */
+  movimientos_caja?: number[]
   /** Nombre de la caja donde quedó anotada (el canal fiscal decide cuál). */
   caja_arqueo?: string | null
   /** Aviso del backend cuando la venta no entró en ningún arqueo. */
@@ -174,6 +189,11 @@ export interface ClienteVentaInput {
 export interface VentaInput {
   sucursal: number
   forma_pago: FormaPago
+  /**
+   * Cobro dividido en varios medios (opcional). Tiene que sumar EXACTO el total
+   * de la venta; sin esto, la venta entera va en `forma_pago`, como siempre.
+   */
+  pagos?: PagoVenta[]
   /** Cómo se factura: decide a qué caja entra la plata (default: sin factura). */
   facturacion?: FacturacionVenta
   nota?: string
