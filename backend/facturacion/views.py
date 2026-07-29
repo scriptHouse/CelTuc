@@ -17,7 +17,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from comun.mixins import AuditoriaMixin
-from usuarios.permissions import LecturaConPermisoEscrituraSuperadmin
+from usuarios.permissions import (
+    LecturaConPermisoEscrituraAdmin,
+    LecturaConPermisoEscrituraSuperadmin,
+)
 
 from .arca import servicio
 from .arca.errores import ErrorARCA
@@ -126,11 +129,13 @@ class EmisorLimitesView(APIView):
     - GET ``?anio=2026``: los 12 meses del año con su tope (o null) y lo ya
       facturado en cada uno. Lo puede ver quien factura (para la barra de uso).
     - PUT ``{anio, limites: [{mes, monto|null}]}``: aplica los topes de los meses
-      recibidos de una vez (uno solo o varios); monto null quita el limite. Igual
-      que editar el emisor, es solo del superadministrador.
+      recibidos de una vez (uno solo o varios); monto null quita el limite. Lo
+      puede hacer cualquier administrador (a diferencia de editar el emisor, que
+      toca credenciales y sigue siendo solo del superadministrador): el tope es
+      un control interno de gestion y no afecta la emision en ARCA.
     """
 
-    permission_classes = [LecturaConPermisoEscrituraSuperadmin]
+    permission_classes = [LecturaConPermisoEscrituraAdmin]
     permiso_requerido = 'ver_facturacion'
 
     def _anio(self, crudo):

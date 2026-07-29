@@ -92,6 +92,7 @@ import { MensajeWhatsappModal } from '@/components/MensajeWhatsappModal'
 import { ApiError } from '@/lib/api'
 import { cn, ctStagger } from '@/lib/utils'
 import { useAuth } from '@/store/auth'
+import { esAdmin } from '@/lib/permisos'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatCard } from '@/components/ui/StatCard'
 import { Card } from '@/components/ui/Card'
@@ -292,6 +293,8 @@ export function FacturacionPage() {
   const usuario = useAuth((s) => s.usuario)
   // Gestionar cuentas/credenciales de facturación es SOLO del superadministrador.
   const soySuper = Boolean(usuario?.is_superuser)
+  // Los topes mensuales son control interno de gestión: los edita cualquier admin.
+  const soyAdmin = esAdmin(usuario)
 
   const { data: emisores = [], isLoading: loadingEmisores } = useQuery({
     queryKey: ['emisores'],
@@ -691,7 +694,7 @@ export function FacturacionPage() {
                     <PlugZap className="h-4 w-4" />
                     {probarMut.isPending ? 'Probando…' : 'Probar conexión'}
                   </Button>
-                  {soySuper && (
+                  {soyAdmin && (
                     <Button variant="outline" size="sm" onClick={() => setLimitesModal(true)}>
                       <Gauge className="h-4 w-4" />
                       Límites

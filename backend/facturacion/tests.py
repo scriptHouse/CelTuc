@@ -359,6 +359,10 @@ class LimiteMensualTests(TestCase):
         self.super = Usuario.objects.create_superuser(
             email='sl@celtuc.ar', username='suplim', password='x',
         )
+        rol_admin = Rol.objects.create(nombre='AdminLimite', es_admin=True)
+        self.admin = Usuario.objects.create_user(
+            email='al@celtuc.ar', username='admlim', password='x', rol=rol_admin,
+        )
         self.emisor = Emisor.objects.create(
             nombre='Emisor Limite', condicion='monotributista', cuit='20111111112', punto_venta=1,
         )
@@ -448,6 +452,17 @@ class LimiteMensualTests(TestCase):
         self.assertEqual(julio['facturado'], 800000.0)
         r = self.cliente.put(url, {'anio': 2026, 'limites': []}, format='json')
         self.assertEqual(r.status_code, 403)
+
+    def test_administrador_tambien_edita_los_limites(self):
+        """El tope es control interno de gestion: no hace falta ser el dueño."""
+        c = APIClient()
+        c.force_authenticate(self.admin)
+        url = reverse('facturacion:emisor-limites', args=[self.emisor.id])
+        r = c.put(url, {'anio': 2026, 'limites': [{'mes': 7, 'monto': '1500000'}]}, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(
+            next(fila for fila in r.data['limites'] if fila['mes'] == 7)['monto'], 1500000.0,
+        )
 
     def test_superadmin_aplica_varios_meses_y_quita_con_null(self):
         c = APIClient()
