@@ -97,7 +97,14 @@ class MovimientoCajaSerializer(serializers.ModelSerializer):
         )
 
     def get_facturacion(self, obj):
-        """Como se facturo la venta que origino el movimiento (None si es manual)."""
+        """Como se facturo ESTA parte del cobro (None si el movimiento es manual).
+
+        Se lee del pago exacto: una venta cobrada mitad facturada y mitad no
+        tiene un movimiento por parte, y cada uno informa la suya. Las ventas
+        viejas (sin pago vinculado) caen en la facturacion de la venta.
+        """
+        if obj.pago_id:
+            return obj.pago.facturacion
         return obj.venta.facturacion if obj.venta_id else None
 
     def get_usuario(self, obj):

@@ -361,7 +361,7 @@ class VentaServiciosTests(TestCase):
             'tipo': 'service', 'descripcion': 'Cambio de modulo', 'cantidad': 1,
             'precio_unitario': Decimal('120000'),
         }])
-        movimientos = registrar_venta_en_caja(venta, caja=caja)
+        movimientos, _ = registrar_venta_en_caja(venta, caja=caja)
         self.assertEqual(len(movimientos), 1)
         self.assertEqual(movimientos[0].monto, Decimal('120000'))
         self.assertIn('Cambio de modulo', movimientos[0].detalle)

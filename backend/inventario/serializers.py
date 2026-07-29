@@ -108,13 +108,13 @@ class ItemVentaSerializer(serializers.ModelSerializer):
 
 
 class PagoVentaSerializer(serializers.ModelSerializer):
-    """Una parte del cobro (medio + monto) de una venta ya registrada."""
+    """Una parte del cobro (medio + facturacion + monto) de una venta."""
 
     monto = serializers.DecimalField(max_digits=14, decimal_places=2, coerce_to_string=False)
 
     class Meta:
         model = PagoVenta
-        fields = ('medio', 'monto')
+        fields = ('medio', 'facturacion', 'monto')
 
 
 class VentaSerializer(serializers.ModelSerializer):
@@ -170,9 +170,14 @@ class ItemVentaInputSerializer(serializers.Serializer):
 
 
 class PagoVentaInputSerializer(serializers.Serializer):
-    """Una parte del cobro al registrar la venta: medio + monto."""
+    """Una parte del cobro al registrar la venta: medio + facturacion + monto.
+
+    Sin `facturacion` la parte hereda la de la venta (el caso comun: todo se
+    factura igual y solo se divide el medio de pago).
+    """
 
     medio = serializers.ChoiceField(choices=Venta.FormaPago.choices)
+    facturacion = serializers.ChoiceField(choices=Venta.Facturacion.choices, required=False)
     monto = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal('0'))
 
 

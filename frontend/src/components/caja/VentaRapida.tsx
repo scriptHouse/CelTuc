@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -26,6 +26,8 @@ import type {
   CajaRegistradora,
   Cliente,
   CondicionEmisor,
+  Emisor,
+  FacturacionVenta,
   ProductoCatalogo,
   SeccionPreciosService,
 } from '@/types'
@@ -37,7 +39,6 @@ import {
   listarSucursales,
   listarVentas,
   registrarVenta,
-  type FacturacionVenta,
   type FormaPago,
   type TipoItemVenta,
 } from '@/services/inventario'
@@ -135,6 +136,192 @@ function hoyArgentina(): string {
     timeZone: 'America/Argentina/Buenos_Aires',
   }).format(new Date())
 }
+
+/**
+ * Elegí con QUÉ cuenta se emite una parte facturada de la venta. Reutiliza las
+ * mismas piezas del módulo Facturación: las tarjetas de cuenta (`CuentaCard`,
+ * con la zona Yerba Buena / Centro de los RI), el buscador por nombre o CUIT
+ * para los monotributistas (que son muchas personas) y la barra del tope
+ * mensual, proyectando lo que esta venta le suma. Nunca bloquea la venta.
+ */
+function SelectorCuentaFactura({
+  facturacion,
+  condicion,
+  monto,
+  parcial,
+  emisores,
+  cargando,
+  emisorId,
+  onSelect,
+}: {
+  facturacion: FacturacionVenta
+  condicion: CondicionEmisor
+  /** Lo que se factura con esta cuenta (puede ser solo una parte de la venta). */
+  monto: number
+  parcial: boolean
+  emisores: Emisor[]
+  cargando: boolean
+  emisorId: number | null
+  onSelect: (condicion: CondicionEmisor, id: number | null) => void
+}) {
+  const esRI = condicion === 'responsable_inscripto'
+  const cuentas = useMemo(
+    () => emisores.filter((e) => e.activo && e.condicion === condicion),
+    [emisores, condicion],
+  )
+  const cuentaSel = cuentas.find((c) => c.id === emisorId) ?? null
+
+  // Los monotributistas se eligen con buscador; los RI son pocos y van en
+  // tarjetas, que muestran la zona de un vistazo.
+  const usaBuscador = !esRI
+  const opciones = useMemo(
+    () =>
+      cuentas.map((e) => ({
+        value: String(e.id),
+        label: `${e.nombre} · CUIT ${formatCuit(e.cuit)}`,
+      })),
+    [cuentas],
+  )
+
+  useEffect(() => {
+    if (cuentas.length === 0) {
+      onSelect(condicion, null)
+      return
+    }
+    if (!cuentas.some((c) => c.id === emisorId)) onSelect(condicion, cuentas[0].id)
+  }, [cuentas, emisorId, condicion, onSelect])
+
+  const hoyAR = hoyArgentina()
+  const anioActual = Number(hoyAR.slice(0, 4))
+  const mesActual = Number(hoyAR.slice(5, 7))
+  const { data: limitesAnio } = useQuery({
+    queryKey: ['fact-limites', emisorId, anioActual],
+    queryFn: () => obtenerLimites(emisorId as number, anioActual),
+    enabled: emisorId != null,
+    retry: false,
+  })
+  const limiteMes = limitesAnio?.limites.find((l) => l.mes === mesActual)
+
+  const etiqueta = facturacion === 'factura_ri' ? 'Factura A/B' : 'Factura C'
+
+  return (
+    <div className="rounded-2xl border border-line bg-canvas/40 p-3.5">
+      <div className="mb-2.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <span className="inline-flex min-w-0 items-center gap-1.5 text-xs font-medium text-ink-500">
+          <Building2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span className="min-w-0">
+            ¿Con qué cuenta se emite la <b className="text-ink-900">{etiqueta}</b>?
+          </span>
+        </span>
+        <span className="tnum shrink-0 text-xs font-semibold text-ink-950">
+          {money(monto)}
+          {parcial && (
+            <span className="ml-1 font-normal text-ink-400">(parte de la venta)</span>
+          )}
+        </span>
+      </div>
+
+      {cuentas.length === 0 ? (
+        <p
+          className={cn(
+            'flex items-start gap-2 rounded-xl px-3 py-2 text-xs leading-relaxed',
+            cargando
+              ? 'bg-ink-50 text-ink-500'
+              : 'bg-amber-500/10 text-amber-800 ring-1 ring-amber-500/25 dark:text-amber-300',
+          )}
+        >
+          {cargando ? (
+            <>
+              <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+              <span>Buscando las cuentas disponibles…</span>
+            </>
+          ) : (
+            <>
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span>
+                No hay cuentas {esRI ? 'Responsable Inscripto' : 'Monotributista'} activas.{' '}
+                <b>La venta se registra igual</b>; la factura se emite después desde Facturación.
+              </span>
+            </>
+          )}
+        </p>
+      ) : (
+        <>
+          {usaBuscador ? (
+            <Select
+              options={opciones}
+              value={emisorId != null ? String(emisorId) : ''}
+              onChange={(v) => onSelect(condicion, v ? Number(v) : null)}
+              searchable
+              searchPlaceholder="Nombre o CUIT…"
+              placeholder="Elegí a quién factura…"
+            />
+          ) : (
+            <div className="grid gap-2.5 sm:grid-cols-2" role="group" aria-label="Cuenta que factura">
+              {cuentas.map((e) => (
+                <CuentaCard
+                  key={e.id}
+                  emisor={e}
+                  activa={e.id === emisorId}
+                  onSelect={() => onSelect(condicion, e.id)}
+                />
+              ))}
+            </div>
+          )}
+
+          {cuentaSel ? (
+            <div className="mt-3 space-y-2.5">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                <span className="min-w-0 text-xs text-ink-500">
+                  {parcial ? 'Se factura con' : 'Esta venta suma a'}{' '}
+                  <b className="text-ink-900">{cuentaSel.nombre}</b>
+                  <span className="tnum mt-0.5 block truncate text-[0.68rem] text-ink-400">
+                    {esRI ? 'Resp. Inscripto' : 'Monotributo'} · CUIT{' '}
+                    {formatCuit(cuentaSel.cuit)} · PV {pad(cuentaSel.punto_venta, 4)}
+                  </span>
+                </span>
+                <span className="tnum shrink-0 text-sm font-bold text-ink-950">
+                  + {money(monto)}
+                </span>
+              </div>
+
+              {limiteMes?.monto != null && (
+                <LimiteUsoBar
+                  mesNombre={MESES[mesActual - 1]}
+                  limite={limiteMes.monto}
+                  facturado={limiteMes.facturado}
+                  adicional={monto}
+                />
+              )}
+
+              {!cuentaSel.tiene_credenciales && (
+                <p className="flex items-start gap-2 rounded-xl bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-800 ring-1 ring-amber-500/25 dark:text-amber-300">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                  <span>
+                    Esta cuenta todavía no tiene cargados el certificado y la clave de ARCA: la
+                    venta se registra igual, pero para emitir el CAE hay que completarlos en
+                    Facturación.
+                  </span>
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="mt-2 flex items-start gap-2 rounded-xl bg-amber-500/10 px-3 py-2 text-xs font-medium leading-relaxed text-amber-800 ring-1 ring-amber-500/25 dark:text-amber-300">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span>Elegí la cuenta con la que se va a emitir esta factura.</span>
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+/** Opciones de facturación de cada parte del cobro (mismo orden que los pills). */
+const OPCIONES_FACTURACION = FACTURACIONES.map((f) => ({
+  value: f.value,
+  label: `${f.label} · ${f.hint}`,
+}))
 
 const FORMAS: Array<{ value: FormaPago; label: string }> = [
   { value: 'efectivo', label: 'Efectivo' },
@@ -286,7 +473,9 @@ function VentaModal({
   // Cobro dividido: la misma venta pagada con varios medios (parte en efectivo,
   // parte por transferencia). Apagado se comporta igual que siempre.
   const [dividido, setDividido] = useState(false)
-  const [pagos, setPagos] = useState<Array<{ key: string; medio: FormaPago; monto: number }>>([])
+  const [pagos, setPagos] = useState<
+    Array<{ key: string; medio: FormaPago; facturacion: FacturacionVenta; monto: number }>
+  >([])
   const [facturacion, setFacturacion] = useState<FacturacionVenta>('sin_factura')
   const [lineas, setLineas] = useState<Linea[]>([])
   const [nota, setNota] = useState('')
@@ -353,9 +542,34 @@ function VentaModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [abierta])
 
-  // La caja que recibe la plata según cómo se factura (si hay cajas con canal).
-  const cajaDestino = cajaParaFacturacion(cajas, facturacion)
-  const destinoAbierto = cajaDestino !== null && cajasAbiertas.includes(cajaDestino.id)
+  const total = lineas.reduce(
+    (a, l) => a + l.cantidad * (Number.isFinite(l.precio) ? l.precio : 0),
+    0,
+  )
+
+  // A qué caja va cada parte de la plata. Con partes facturadas y no facturadas
+  // la MISMA venta se reparte entre las dos cajas (cada canal a la suya).
+  const destinos = useMemo(() => {
+    const acumulado = new Map<string, { caja: CajaRegistradora; monto: number; facturacion: string }>()
+    const partes: Array<[FacturacionVenta, number]> = dividido
+      ? pagos.map((p) => [p.facturacion, Number.isFinite(p.monto) ? p.monto : 0])
+      : [[facturacion, total]]
+    for (const [fact, monto] of partes) {
+      if (monto <= 0) continue
+      const caja = cajaParaFacturacion(cajas, fact)
+      if (!caja) continue
+      const previo = acumulado.get(caja.id)
+      acumulado.set(caja.id, {
+        caja,
+        monto: (previo?.monto ?? 0) + monto,
+        facturacion: previo?.facturacion ?? fact,
+      })
+    }
+    return [...acumulado.values()].map((d) => ({
+      ...d,
+      abierta: cajasAbiertas.includes(d.caja.id),
+    }))
+  }, [dividido, pagos, facturacion, total, cajas, cajasAbiertas])
 
   // ---- Cuenta que va a emitir la factura ------------------------------------
   // Las MISMAS cuentas (y los mismos límites mensuales) del módulo Facturación:
@@ -363,62 +577,52 @@ function VentaModal({
   // solo se elige y se muestra cómo queda; emitir sigue siendo cosa de ese
   // módulo. Sin permiso `ver_facturacion` la API responde 403 y no se muestra.
   const puedeFacturar = puedeVer(usuario, 'ver_facturacion')
-  const condicionCuenta: CondicionEmisor | null =
-    facturacion === 'factura_ri'
-      ? 'responsable_inscripto'
-      : facturacion === 'factura_c'
-        ? 'monotributista'
-        : null
 
   const { data: emisores = [], isLoading: cargandoEmisores } = useQuery({
     queryKey: ['emisores'],
     queryFn: listarEmisores,
-    enabled: abierta && puedeFacturar && condicionCuenta != null,
+    enabled: abierta && puedeFacturar,
     retry: false,
   })
-  const cuentas = useMemo(
-    () =>
-      condicionCuenta
-        ? emisores.filter((e) => e.activo && e.condicion === condicionCuenta)
-        : [],
-    [emisores, condicionCuenta],
-  )
 
-  const [emisorId, setEmisorId] = useState<number | null>(null)
-  useEffect(() => {
-    if (cuentas.length === 0) {
-      setEmisorId(null)
-      return
+  // Cuánto se cobra con cada facturación: con cobro dividido cada parte tiene la
+  // suya (se puede facturar una parte y el resto no); si no, todo va junto.
+  const montoPorFacturacion = useMemo(() => {
+    const acumulado = {} as Record<FacturacionVenta, number>
+    if (dividido) {
+      for (const p of pagos) {
+        const cent = Math.round((Number.isFinite(p.monto) ? p.monto : 0) * 100)
+        if (cent <= 0) continue
+        acumulado[p.facturacion] = (acumulado[p.facturacion] ?? 0) + cent / 100
+      }
+    } else if (total > 0) {
+      acumulado[facturacion] = total
     }
-    if (!cuentas.some((c) => c.id === emisorId)) setEmisorId(cuentas[0].id)
-  }, [cuentas, emisorId])
-  const cuentaSel = cuentas.find((c) => c.id === emisorId) ?? null
+    return acumulado
+  }, [dividido, pagos, facturacion, total])
 
-  // Los monotributistas son MUCHAS personas: se eligen con buscador (por nombre
-  // o CUIT). Los Responsables Inscriptos son pocos y fijos: van como tarjetas,
-  // que además muestran la zona (Yerba Buena / Centro) de un vistazo.
-  const usaBuscadorCuentas = condicionCuenta === 'monotributista'
-  const opcionesCuentas = useMemo(
+  /** Las partes que SÍ se facturan, con la cuenta que las tiene que emitir. */
+  const tramosFacturables = useMemo(
     () =>
-      cuentas.map((e) => ({
-        value: String(e.id),
-        label: `${e.nombre} · CUIT ${formatCuit(e.cuit)}`,
-      })),
-    [cuentas],
+      (['factura_ri', 'factura_c'] as const)
+        .filter((f) => (montoPorFacturacion[f] ?? 0) > 0)
+        .map((f) => ({
+          facturacion: f as FacturacionVenta,
+          condicion: (f === 'factura_ri'
+            ? 'responsable_inscripto'
+            : 'monotributista') as CondicionEmisor,
+          monto: montoPorFacturacion[f] as number,
+        })),
+    [montoPorFacturacion],
   )
 
-  // Tope mensual de la cuenta (control interno, no fiscal): se muestra cómo
-  // queda el mes sumándole esta venta. Nunca bloquea nada.
-  const hoyAR = hoyArgentina()
-  const anioActual = Number(hoyAR.slice(0, 4))
-  const mesActual = Number(hoyAR.slice(5, 7))
-  const { data: limitesAnio } = useQuery({
-    queryKey: ['fact-limites', emisorId, anioActual],
-    queryFn: () => obtenerLimites(emisorId as number, anioActual),
-    enabled: abierta && puedeFacturar && emisorId != null,
-    retry: false,
-  })
-  const limiteMes = limitesAnio?.limites.find((l) => l.mes === mesActual)
+  // Una cuenta elegida por condición (una venta puede tener parte A/B y parte C).
+  const [cuentaPorCondicion, setCuentaPorCondicion] = useState<
+    Partial<Record<CondicionEmisor, number | null>>
+  >({})
+  const elegirCuenta = useCallback((condicion: CondicionEmisor, id: number | null) => {
+    setCuentaPorCondicion((prev) => (prev[condicion] === id ? prev : { ...prev, [condicion]: id }))
+  }, [])
 
   const stockDe = useMemo(() => {
     const mapa = new Map<string, number>()
@@ -536,8 +740,6 @@ function VentaModal({
     agregarLinea({ tipo: 'otro', descripcion: '', cantidad: 1, precio: 0 })
   }
 
-  const total = lineas.reduce((a, l) => a + l.cantidad * (Number.isFinite(l.precio) ? l.precio : 0), 0)
-
   // ---- Cobro dividido -------------------------------------------------------
   // Se trabaja en centavos: comparar pesos con decimales en coma flotante deja
   // diferencias de un centavo que harian rebotar la venta en el backend.
@@ -554,9 +756,9 @@ function VentaModal({
       setPagos([])
       return
     }
-    // Arranca con el medio elegido llevandose todo: el vendedor baja ese monto
-    // y agrega el segundo medio con el resto.
-    setPagos([{ key: claveNueva(), medio: formaPago, monto: total }])
+    // Arranca con el medio elegido llevandose todo (y la facturacion elegida
+    // arriba): el vendedor baja ese monto y agrega la otra parte con el resto.
+    setPagos([{ key: claveNueva(), medio: formaPago, facturacion, monto: total }])
     setDividido(true)
   }
 
@@ -565,7 +767,14 @@ function VentaModal({
     const libre = FORMAS.find((f) => !usados.has(f.value))?.value ?? 'otro'
     setPagos((ps) => [
       ...ps,
-      { key: claveNueva(), medio: libre, monto: Math.max(0, restanteCent) / 100 },
+      {
+        key: claveNueva(),
+        medio: libre,
+        // La parte nueva arranca SIN factura: el caso típico es "una parte se
+        // factura y el resto no". Se cambia con su propio selector.
+        facturacion: 'sin_factura',
+        monto: Math.max(0, restanteCent) / 100,
+      },
     ])
   }
 
@@ -617,7 +826,11 @@ function VentaModal({
         // Con cobro dividido viaja el detalle por medio (el backend crea un
         // movimiento de arqueo por cada parte, todos de esta misma venta).
         pagos: dividido
-          ? pagos.map((p) => ({ medio: p.medio, monto: centavos(p.monto) / 100 }))
+          ? pagos.map((p) => ({
+              medio: p.medio,
+              facturacion: p.facturacion,
+              monto: centavos(p.monto) / 100,
+            }))
           : undefined,
         facturacion,
         nota: nota.trim(),
@@ -655,29 +868,48 @@ function VentaModal({
       }
       onCerrar()
 
-      // Venta marcada como facturable: ofrecemos emitir la factura YA, en el
+      // Venta con parte facturable: ofrecemos emitir la factura YA, en el
       // módulo Facturación de siempre (mismo modal, mismas validaciones, mismo
-      // ARCA) con los ítems precargados. Solo si la cuenta puede facturar.
-      if (venta.facturacion !== 'sin_factura' && puedeVer(usuario, 'ver_facturacion')) {
-        const esRI = venta.facturacion === 'factura_ri'
+      // ARCA). Solo si la cuenta puede facturar.
+      // El tramo más grande es el que se ofrece emitir; si solo se factura una
+      // PARTE de la venta, la factura va por ese importe (no por el total).
+      const tramo = [...tramosFacturables].sort((a, b) => b.monto - a.monto)[0]
+      if (tramo && puedeVer(usuario, 'ver_facturacion')) {
+        const esRI = tramo.condicion === 'responsable_inscripto'
+        const cuenta = emisores.find((e) => e.id === cuentaPorCondicion[tramo.condicion])
+        const parcial = centavos(tramo.monto) < centavos(total)
+        const otros = tramosFacturables.filter((t) => t.facturacion !== tramo.facturacion)
         const ok = await confirm({
           title: '¿Emitir la factura ahora?',
           icon: FileCheck2,
           confirmLabel: 'Facturar ahora',
           cancelLabel: 'Después',
-          description: `La venta #${venta.id} ya quedó registrada. Te llevo a Facturación con los ítems precargados para emitir la ${esRI ? 'Factura A/B (Responsable Inscripto)' : 'Factura C (Monotributo)'}${cuentaSel ? ` con la cuenta «${cuentaSel.nombre}»` : ''} con CAE, como siempre.`,
+          description:
+            `La venta #${venta.id} ya quedó registrada. Te llevo a Facturación para emitir la ` +
+            `${esRI ? 'Factura A/B (Responsable Inscripto)' : 'Factura C (Monotributo)'} por ` +
+            `${money0(tramo.monto)}${parcial ? ' (la parte facturada de la venta)' : ''}` +
+            `${cuenta ? ` con la cuenta «${cuenta.nombre}»` : ''}, con CAE, como siempre.` +
+            (otros.length ? ' La otra parte facturada se emite después, por separado.' : ''),
         })
         if (ok) {
           guardarBorradorFacturaVenta({
             ventaId: venta.id,
-            emisorCondicion: esRI ? 'responsable_inscripto' : 'monotributista',
+            emisorCondicion: tramo.condicion,
             // La cuenta elegida acá es la que va a quedar seleccionada allá.
-            emisorId: cuentaSel?.id,
-            items: lineas.map((l) => ({
-              descripcion: l.descripcion.trim() || l.producto?.nombre || 'Ítem',
-              cantidad: l.cantidad,
-              precioFinal: Number.isFinite(l.precio) ? l.precio : 0,
-            })),
+            emisorId: cuenta?.id,
+            items: parcial
+              ? [
+                  {
+                    descripcion: `Venta de mostrador #${venta.id} — parte facturada`,
+                    cantidad: 1,
+                    precioFinal: tramo.monto,
+                  },
+                ]
+              : lineas.map((l) => ({
+                  descripcion: l.descripcion.trim() || l.producto?.nombre || 'Ítem',
+                  cantidad: l.cantidad,
+                  precioFinal: Number.isFinite(l.precio) ? l.precio : 0,
+                })),
             observaciones: `Venta de mostrador #${venta.id}`,
             // El cliente del mostrador viaja a la factura: no se retipea nada.
             cliente: clienteNombre.trim()
@@ -828,49 +1060,69 @@ function VentaModal({
 
             <ul className="space-y-2">
               {pagos.map((p, i) => (
-                <li key={p.key} className="flex flex-wrap items-center gap-2">
-                  <div className="min-w-0 basis-full sm:basis-0 sm:flex-1">
-                    <Select
-                      options={FORMAS}
-                      value={p.medio}
-                      onChange={(v) => {
-                        const medio = v as FormaPago
-                        setPagos((ps) =>
-                          ps.map((x) => (x.key === p.key ? { ...x, medio } : x)),
-                        )
-                        if (i === 0) setFormaPago(medio)
-                      }}
-                    />
+                <li key={p.key} className="rounded-xl border border-line bg-surface p-2 sm:p-2.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="min-w-0 basis-full sm:basis-0 sm:flex-1">
+                      <Select
+                        options={FORMAS}
+                        value={p.medio}
+                        onChange={(v) => {
+                          const medio = v as FormaPago
+                          setPagos((ps) =>
+                            ps.map((x) => (x.key === p.key ? { ...x, medio } : x)),
+                          )
+                          if (i === 0) setFormaPago(medio)
+                        }}
+                      />
+                    </div>
+                    <div className="relative w-28 shrink-0 sm:w-32">
+                      <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-ink-400">
+                        $
+                      </span>
+                      <Input
+                        value={String(p.monto)}
+                        onChange={(e) =>
+                          setPagos((ps) =>
+                            ps.map((x) =>
+                              x.key === p.key
+                                ? { ...x, monto: Number(e.target.value.replace(',', '.')) }
+                                : x,
+                            ),
+                          )
+                        }
+                        inputMode="decimal"
+                        aria-label={`Monto del pago ${i + 1}`}
+                        className="tnum h-11 pl-6 pr-2 text-sm"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPagos((ps) => ps.filter((x) => x.key !== p.key))}
+                      disabled={pagos.length <= 1}
+                      aria-label={`Quitar el pago ${i + 1}`}
+                      className="grid h-11 w-10 shrink-0 place-items-center rounded-xl text-ink-400 transition-colors hover:bg-ink-100 hover:text-ink-900 disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                   </div>
-                  <div className="relative w-32 shrink-0">
-                    <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-ink-400">
-                      $
-                    </span>
-                    <Input
-                      value={String(p.monto)}
-                      onChange={(e) =>
-                        setPagos((ps) =>
-                          ps.map((x) =>
-                            x.key === p.key
-                              ? { ...x, monto: Number(e.target.value.replace(',', '.')) }
-                              : x,
-                          ),
-                        )
-                      }
-                      inputMode="decimal"
-                      aria-label={`Monto del pago ${i + 1}`}
-                      className="tnum h-11 pl-6 pr-2 text-sm"
-                    />
+                  {/* Cada parte se factura como quiera: se puede facturar una y
+                     cobrar el resto sin factura (van a cajas distintas). */}
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="shrink-0 text-[0.68rem] text-ink-400">Se factura:</span>
+                    <div className="min-w-0 flex-1">
+                      <Select
+                        options={OPCIONES_FACTURACION}
+                        value={p.facturacion}
+                        onChange={(v) =>
+                          setPagos((ps) =>
+                            ps.map((x) =>
+                              x.key === p.key ? { ...x, facturacion: v as FacturacionVenta } : x,
+                            ),
+                          )
+                        }
+                      />
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setPagos((ps) => ps.filter((x) => x.key !== p.key))}
-                    disabled={pagos.length <= 1}
-                    aria-label={`Quitar el pago ${i + 1}`}
-                    className="grid h-11 w-10 shrink-0 place-items-center rounded-xl text-ink-400 transition-colors hover:bg-ink-100 hover:text-ink-900 disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
                 </li>
               ))}
             </ul>
@@ -911,7 +1163,12 @@ function VentaModal({
                   type="button"
                   role="radio"
                   aria-checked={activa}
-                  onClick={() => setFacturacion(f.value)}
+                  onClick={() => {
+                    setFacturacion(f.value)
+                    // Con cobro dividido, elegir acá aplica a TODAS las partes;
+                    // después cada una se puede cambiar por separado.
+                    setPagos((ps) => ps.map((p) => ({ ...p, facturacion: f.value })))
+                  }}
                   className={cn(
                     'flex flex-col items-start gap-0.5 rounded-2xl border px-3 py-2.5 text-left transition-all duration-150',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900',
@@ -931,143 +1188,63 @@ function VentaModal({
               )
             })}
           </div>
-          {cajaDestino && (
-            <p
-              className={cn(
-                'mt-2 inline-flex items-center gap-1.5 text-xs',
-                destinoAbierto ? 'text-ink-500' : 'font-medium text-amber-700 dark:text-amber-400',
-              )}
-            >
-              {destinoAbierto ? (
-                <Wallet className="h-3.5 w-3.5 shrink-0" aria-hidden />
-              ) : (
-                <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden />
-              )}
-              {destinoAbierto
-                ? <>La plata entra al arqueo de <b>«{cajaDestino.nombre}»</b>.</>
-                : <>La caja <b>«{cajaDestino.nombre}»</b> está cerrada: abrila para que la venta entre a su arqueo.</>}
+          {dividido && (
+            <p className="mt-1.5 text-[0.68rem] text-ink-400">
+              Se aplica a todas las partes del cobro; abajo podés cambiar cada una.
             </p>
+          )}
+          {/* A qué caja(s) va la plata: con partes facturadas y no facturadas,
+             una misma venta se reparte entre las dos cajas. */}
+          {destinos.length > 0 && (
+            <div className="mt-2 space-y-1">
+              {destinos.map((d) => (
+                <p
+                  key={d.facturacion}
+                  className={cn(
+                    'flex items-start gap-1.5 text-xs',
+                    d.abierta ? 'text-ink-500' : 'font-medium text-amber-700 dark:text-amber-400',
+                  )}
+                >
+                  {d.abierta ? (
+                    <Wallet className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                  ) : (
+                    <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                  )}
+                  <span>
+                    {d.abierta ? (
+                      <>
+                        <b className="tnum">{money(d.monto)}</b> entra al arqueo de{' '}
+                        <b>«{d.caja.nombre}»</b>.
+                      </>
+                    ) : (
+                      <>
+                        <b>«{d.caja.nombre}»</b> está cerrada: abrila para que{' '}
+                        <b className="tnum">{money(d.monto)}</b> entre a su arqueo.
+                      </>
+                    )}
+                  </span>
+                </p>
+              ))}
+            </div>
           )}
         </div>
 
-        {/* Cuenta que emite: las mismas cuentas y topes del módulo Facturación */}
-        {puedeFacturar && condicionCuenta && (
-          <div className="rounded-2xl border border-line bg-canvas/40 p-3.5">
-            <div className="mb-2.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-ink-500">
-                <Building2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                ¿Con qué cuenta se factura?
-              </span>
-              {cuentas.length > 0 && (
-                <span className="text-[0.68rem] text-ink-400">
-                  {condicionCuenta === 'responsable_inscripto'
-                    ? 'Responsables Inscriptos'
-                    : 'Monotributistas'}{' '}
-                  · {num(cuentas.length)}
-                </span>
-              )}
-            </div>
-
-            {cuentas.length === 0 ? (
-              <p
-                className={cn(
-                  'flex items-start gap-2 rounded-xl px-3 py-2 text-xs leading-relaxed',
-                  cargandoEmisores
-                    ? 'bg-ink-50 text-ink-500'
-                    : 'bg-amber-500/10 text-amber-800 ring-1 ring-amber-500/25 dark:text-amber-300',
-                )}
-              >
-                {cargandoEmisores ? (
-                  <>
-                    <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
-                    <span>Buscando las cuentas disponibles…</span>
-                  </>
-                ) : (
-                  <>
-                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-                    <span>
-                      No hay cuentas{' '}
-                      {condicionCuenta === 'responsable_inscripto'
-                        ? 'Responsable Inscripto'
-                        : 'Monotributista'}{' '}
-                      activas. <b>La venta se registra igual</b>; la factura se emite después
-                      desde Facturación.
-                    </span>
-                  </>
-                )}
-              </p>
-            ) : (
-              <>
-                {usaBuscadorCuentas ? (
-                  <Select
-                    options={opcionesCuentas}
-                    value={emisorId != null ? String(emisorId) : ''}
-                    onChange={(v) => setEmisorId(v ? Number(v) : null)}
-                    searchable
-                    searchPlaceholder="Nombre o CUIT…"
-                    placeholder="Elegí a quién factura…"
-                  />
-                ) : (
-                  <div
-                    className="grid gap-2.5 sm:grid-cols-2"
-                    role="group"
-                    aria-label="Cuenta que factura"
-                  >
-                    {cuentas.map((e) => (
-                      <CuentaCard
-                        key={e.id}
-                        emisor={e}
-                        activa={e.id === emisorId}
-                        onSelect={() => setEmisorId(e.id)}
-                      />
-                    ))}
-                  </div>
-                )}
-
-                {cuentaSel && (
-                  <div className="mt-3 space-y-2.5">
-                    {/* Lo que esta venta le suma a la cuenta elegida */}
-                    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-                      <span className="min-w-0 text-xs text-ink-500">
-                        Esta venta suma a{' '}
-                        <b className="text-ink-900">{cuentaSel.nombre}</b>
-                        {usaBuscadorCuentas && (
-                          <span className="tnum mt-0.5 block truncate text-[0.68rem] text-ink-400">
-                            Monotributo · CUIT {formatCuit(cuentaSel.cuit)} · PV{' '}
-                            {pad(cuentaSel.punto_venta, 4)}
-                          </span>
-                        )}
-                      </span>
-                      <span className="tnum shrink-0 text-sm font-bold text-ink-950">
-                        + {money(total)}
-                      </span>
-                    </div>
-
-                    {limiteMes?.monto != null && (
-                      <LimiteUsoBar
-                        mesNombre={MESES[mesActual - 1]}
-                        limite={limiteMes.monto}
-                        facturado={limiteMes.facturado}
-                        adicional={total}
-                      />
-                    )}
-
-                    {!cuentaSel.tiene_credenciales && (
-                      <p className="flex items-start gap-2 rounded-xl bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-800 ring-1 ring-amber-500/25 dark:text-amber-300">
-                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-                        <span>
-                          Esta cuenta todavía no tiene cargados el certificado y la clave de
-                          ARCA: la venta se registra igual, pero para emitir el CAE hay que
-                          completarlos en Facturación.
-                        </span>
-                      </p>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
+        {/* Cuenta que emite CADA parte facturada: mismas cuentas y topes del
+           módulo Facturación. Con una parte A/B y otra C aparecen las dos. */}
+        {puedeFacturar &&
+          tramosFacturables.map((tramo) => (
+            <SelectorCuentaFactura
+              key={tramo.facturacion}
+              facturacion={tramo.facturacion}
+              condicion={tramo.condicion}
+              monto={tramo.monto}
+              parcial={tramo.monto < total}
+              emisores={emisores}
+              cargando={cargandoEmisores}
+              emisorId={cuentaPorCondicion[tramo.condicion] ?? null}
+              onSelect={elegirCuenta}
+            />
+          ))}
 
         {/* Cliente: opcional, pero si va queda toda su compra en su historial */}
         <div className="rounded-2xl border border-line bg-canvas/40 p-3.5">

@@ -190,7 +190,11 @@ class VentasView(_BaseInventario, APIView):
             from caja.models import Caja, registrar_venta_en_caja
 
             caja_obj = Caja.objects.filter(pk=datos['caja']).first() if datos.get('caja') else None
-            movimientos_caja = registrar_venta_en_caja(venta, caja=caja_obj, usuario=request.user)
+            movimientos_caja, avisos = registrar_venta_en_caja(
+                venta, caja=caja_obj, usuario=request.user,
+            )
+            # Puede haber entrado una parte y otra no (cajas de distinto canal).
+            aviso_caja = ' '.join(avisos) if avisos else None
         except ValidationError as e:
             aviso_caja = ' '.join(e.messages)
         if not movimientos_caja and aviso_caja is None:

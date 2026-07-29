@@ -303,10 +303,16 @@ class PagoVenta(models.Model):
     suma de las partes es exactamente el total de la venta; cuando se cobra con
     un solo medio hay una sola fila, asi el dato es siempre uniforme.
 
+    Cada parte tambien lleva SU facturacion: es normal facturar una parte de la
+    venta y cobrar el resto sin factura. Como el canal fiscal decide a que caja
+    entra la plata, una venta puede repartirse entre las dos cajas (lo facturado
+    con el RI a la suya, lo demas a la general) sin dejar de ser UNA venta.
+
     En el arqueo, CADA parte entra como su propio movimiento de caja con su
-    medio (todos apuntando a la misma venta): es lo que hace que el conteo por
-    medio de pago siga cerrando. `Venta.forma_pago` queda como el medio
-    PRINCIPAL (el de mayor monto), para los reportes y filtros de siempre.
+    medio y en la caja de su facturacion (todos apuntando a la misma venta): es
+    lo que hace que el conteo por medio siga cerrando. `Venta.forma_pago` y
+    `Venta.facturacion` quedan con los valores PRINCIPALES (los de la parte de
+    mayor monto), para los reportes y filtros de siempre.
     """
 
     venta = models.ForeignKey(
@@ -316,6 +322,11 @@ class PagoVenta(models.Model):
         verbose_name='venta',
     )
     medio = models.CharField('medio de pago', max_length=20, choices=Venta.FormaPago.choices)
+    facturacion = models.CharField(
+        'facturacion', max_length=20, choices=Venta.Facturacion.choices,
+        default=Venta.Facturacion.SIN_FACTURA,
+        help_text='Como se factura ESTA parte: decide a que caja entra.',
+    )
     monto = models.DecimalField('monto ($)', max_digits=14, decimal_places=2)
 
     class Meta:
@@ -422,37 +433,44 @@ def _normalizar_item_venta(item):
     }
 
 
-def _normalizar_pagos(pagos, *, forma_pago, total):
-    """Valida el cobro y lo devuelve como [(medio, monto)] que suma `total`.
+def _normalizar_pagos(pagos, *, forma_pago, facturacion, total):
+    """Valida el cobro y lo devuelve como [(medio, facturacion, monto)].
 
-    Sin `pagos` (el caso comun: un solo medio) devuelve la venta entera en
-    `forma_pago`. Con varios, las partes en cero se descartan, las repetidas se
-    suman en una sola (un medio = un movimiento de caja) y el total tiene que
-    coincidir con el de la venta: si no, no se registra nada, porque una venta
-    cuyos pagos no cierran romperia el arqueo.
+    Sin `pagos` (el caso comun) devuelve la venta entera en `forma_pago` con la
+    facturacion de la venta. Con varias partes: las de monto cero se descartan,
+    las que repiten medio Y facturacion se suman en una sola (cada combinacion
+    es un movimiento de caja) y el total tiene que coincidir con el de la venta
+    — si no, no se registra nada, porque una venta cuyos pagos no cierran
+    romperia el arqueo.
     """
     medios_validos = set(Venta.FormaPago.values)
+    facturaciones_validas = set(Venta.Facturacion.values)
+    por_defecto = facturacion or Venta.Facturacion.SIN_FACTURA
     partes = {}
     for pago in pagos or []:
         medio = (pago.get('medio') or '').strip()
         if medio not in medios_validos:
             raise ValidationError(f'Medio de pago desconocido: "{medio}".')
+        fact = (pago.get('facturacion') or por_defecto).strip()
+        if fact not in facturaciones_validas:
+            raise ValidationError(f'Facturacion desconocida: "{fact}".')
         monto = Decimal(str(pago.get('monto') or 0))
         if monto < 0:
             raise ValidationError('Los montos de los pagos no pueden ser negativos.')
         if monto == 0:
             continue
-        partes[medio] = partes.get(medio, Decimal('0')) + monto
+        clave = (medio, fact)
+        partes[clave] = partes.get(clave, Decimal('0')) + monto
 
     if not partes:
-        return [(forma_pago or Venta.FormaPago.EFECTIVO, total)]
+        return [(forma_pago or Venta.FormaPago.EFECTIVO, por_defecto, total)]
 
     suma = sum(partes.values(), Decimal('0'))
     if suma != total:
         raise ValidationError(
             f'Los pagos suman ${suma} y la venta es de ${total}: tienen que coincidir.'
         )
-    return list(partes.items())
+    return [(medio, fact, monto) for (medio, fact), monto in partes.items()]
 
 
 def registrar_venta(sucursal, items, *, forma_pago='', facturacion='', nota='',
@@ -506,14 +524,20 @@ def registrar_venta(sucursal, items, *, forma_pago='', facturacion='', nota='',
             )
         venta.total = total
         # El cobro se resuelve al final, cuando ya se sabe el total de la venta.
-        partes = _normalizar_pagos(pagos, forma_pago=venta.forma_pago, total=total)
-        PagoVenta.objects.bulk_create(
-            [PagoVenta(venta=venta, medio=medio, monto=monto) for medio, monto in partes],
+        partes = _normalizar_pagos(
+            pagos, forma_pago=venta.forma_pago, facturacion=venta.facturacion, total=total,
         )
-        # El medio principal (el de mayor monto) es el que sigue viendo todo lo
-        # que ya leia `forma_pago`: reportes, filtros del admin e historiales.
-        venta.forma_pago = max(partes, key=lambda parte: parte[1])[0]
-        venta.save(update_fields=['total', 'forma_pago'])
+        PagoVenta.objects.bulk_create([
+            PagoVenta(venta=venta, medio=medio, facturacion=fact, monto=monto)
+            for medio, fact, monto in partes
+        ])
+        # Los valores principales (los de la parte de mayor monto) son los que
+        # sigue viendo todo lo que ya leia `forma_pago` / `facturacion`:
+        # reportes, filtros del admin e historiales.
+        principal = max(partes, key=lambda parte: parte[2])
+        venta.forma_pago = principal[0]
+        venta.facturacion = principal[1]
+        venta.save(update_fields=['total', 'forma_pago', 'facturacion'])
     return venta
 
 

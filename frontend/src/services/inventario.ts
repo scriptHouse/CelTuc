@@ -143,6 +143,11 @@ export interface ItemVenta {
  */
 export interface PagoVenta {
   medio: FormaPago
+  /**
+   * Cómo se factura ESTA parte: decide a qué caja entra. Permite facturar una
+   * parte de la venta y cobrar el resto sin factura.
+   */
+  facturacion: FacturacionVenta
   monto: number
 }
 

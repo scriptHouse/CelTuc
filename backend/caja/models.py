@@ -186,6 +186,14 @@ class MovimientoCaja(ModeloBase):
         related_name='movimientos_caja', verbose_name='venta',
         help_text='La venta de mostrador que genero este movimiento, si aplica.',
     )
+    # Que PARTE del cobro de esa venta es este movimiento. Una venta cobrada
+    # mitad facturada y mitad no genera un movimiento por parte, cada uno en su
+    # caja: guardar el pago exacto permite saber como se facturo ESTA plata
+    # (el ticket Z agrupa por ahi) aunque la venta tenga varias facturaciones.
+    pago = models.ForeignKey(
+        'inventario.PagoVenta', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='movimientos_caja', verbose_name='parte del cobro',
+    )
 
     class Meta:
         db_table = 'caja_movimientos'
@@ -307,7 +315,7 @@ def abrir_caja(caja, *, fondo_inicial, conteo_apertura=None, nota_apertura='', u
 
 
 def registrar_movimiento(sesion, *, tipo, medio='', monto, motivo, detalle='',
-                         usuario=None, venta=None):
+                         usuario=None, venta=None, pago=None):
     """Registra un movimiento en un turno abierto, con las guardas del arqueo."""
     monto = Decimal(str(monto))
     if monto <= 0:
@@ -346,6 +354,7 @@ def registrar_movimiento(sesion, *, tipo, medio='', monto, motivo, detalle='',
             motivo=motivo.strip(),
             detalle=(detalle or '').strip(),
             venta=venta,
+            pago=pago,
             creado_por=usuario,
             actualizado_por=usuario,
         )
@@ -360,43 +369,57 @@ CANAL_POR_FACTURACION = {
 }
 
 
-def caja_para_venta(venta):
-    """La caja del canal fiscal de la venta, si el local tiene cajas con canal."""
-    canal = CANAL_POR_FACTURACION.get(venta.facturacion)
+def caja_para_facturacion(facturacion):
+    """La caja del canal fiscal indicado, si el local tiene cajas con canal."""
+    canal = CANAL_POR_FACTURACION.get(facturacion)
     if not canal:
         return None
     return Caja.objects.filter(canal=canal, activa=True).first()
 
 
+def caja_para_venta(venta):
+    """La caja del canal fiscal de la venta (su facturacion principal)."""
+    return caja_para_facturacion(venta.facturacion)
+
+
 def registrar_venta_en_caja(venta, *, caja=None, usuario=None):
     """Engancha una venta de mostrador al turno abierto que corresponde.
 
-    Devuelve la LISTA de movimientos creados: una venta cobrada con varios
-    medios (parte efectivo, parte transferencia) genera un movimiento POR
-    MEDIO, todos apuntando a la misma venta, para que el conteo por medio del
-    arqueo siga cerrando. Sin turno donde anotarla devuelve la lista vacia.
+    Devuelve `(movimientos, avisos)`: un movimiento POR PARTE del cobro (una
+    venta cobrada mitad en efectivo y mitad por transferencia genera dos), todos
+    apuntando a la misma venta, para que el conteo por medio del arqueo siga
+    cerrando. `avisos` son los mensajes de las partes que NO pudieron anotarse.
 
-    Si existe una caja del canal fiscal de la venta (facturado RI a su caja;
-    monotributo y sin factura a la general), la venta va SOLO a esa caja: con
-    su turno cerrado se avisa (ValidationError) en vez de mezclar la plata en
-    otro cajon. Sin cajas con canal vale el comportamiento historico: la
-    `caja` indicada o la unica sesion abierta. La venta vale igual en todos los
-    casos (el stock ya se desconto).
+    Cada parte va a la caja de SU facturacion: lo facturado con el RI a su caja
+    y lo de monotributo o sin factura a la general. Asi una venta con una parte
+    facturada y otra no se reparte entre las dos cajas sin dejar de ser una sola
+    venta. Si la caja de una parte esta cerrada, esa parte no entra y se avisa
+    (las otras si); si NINGUNA parte pudo anotarse se lanza ValidationError, en
+    vez de mezclar la plata en el cajon equivocado. Sin cajas con canal vale el
+    comportamiento historico: la `caja` indicada o la unica sesion abierta. La
+    venta vale igual en todos los casos (el stock ya se desconto).
     """
     if venta.total is None or venta.total <= 0:
-        return []
+        return [], []
 
-    caja_canal = caja_para_venta(venta)
-    if caja_canal is not None:
-        sesion = SesionCaja.objects.filter(
-            caja=caja_canal, estado=SesionCaja.Estado.ABIERTA,
-        ).first()
-        if sesion is None:
-            raise ValidationError(
-                f'La caja "{caja_canal.nombre}" no tiene turno abierto: '
-                'abrila para que esta venta entre a su arqueo.'
-            )
-    else:
+    items = list(venta.items.select_related('producto')[:4])
+    # `detalle` del item sirve para las tres clases de renglon (mercaderia,
+    # service e item libre); los services no tienen producto asociado.
+    detalle = ', '.join(f'{i.cantidad}x {i.detalle}' for i in items)
+
+    # Una parte por medio y facturacion. Las ventas viejas (sin filas de pago)
+    # se anotan enteras con sus valores principales, exactamente como antes.
+    partes = [
+        (pago, pago.medio, pago.facturacion, pago.monto)
+        for pago in venta.pagos.all()
+        if pago.monto > 0
+    ]
+    if not partes:
+        partes = [(None, venta.forma_pago, venta.facturacion, venta.total)]
+
+    # La sesion de respaldo (sin cajas con canal fiscal): la indicada o la unica
+    # abierta. Se calcula una sola vez para todas las partes.
+    def _sesion_de_respaldo():
         sesion = None
         if caja is not None:
             sesion = SesionCaja.objects.filter(
@@ -406,22 +429,27 @@ def registrar_venta_en_caja(venta, *, caja=None, usuario=None):
             abiertas = list(SesionCaja.objects.filter(estado=SesionCaja.Estado.ABIERTA)[:2])
             if len(abiertas) == 1:
                 sesion = abiertas[0]
-        if sesion is None:
-            return []
-
-    items = list(venta.items.select_related('producto')[:4])
-    # `detalle` del item sirve para las tres clases de renglon (mercaderia,
-    # service e item libre); los services no tienen producto asociado.
-    detalle = ', '.join(f'{i.cantidad}x {i.detalle}' for i in items)
-
-    # Un movimiento por medio cobrado. Las ventas viejas (sin filas de pago) se
-    # anotan enteras en su `forma_pago`, exactamente como antes.
-    partes = [(pago.medio, pago.monto) for pago in venta.pagos.all() if pago.monto > 0]
-    if not partes:
-        partes = [(venta.forma_pago, venta.total)]
+        return sesion
 
     movimientos = []
-    for indice, (medio, monto) in enumerate(partes, start=1):
+    avisos = []
+    for indice, (pago, medio, facturacion, monto) in enumerate(partes, start=1):
+        caja_canal = caja_para_facturacion(facturacion)
+        if caja_canal is not None:
+            sesion = SesionCaja.objects.filter(
+                caja=caja_canal, estado=SesionCaja.Estado.ABIERTA,
+            ).first()
+            if sesion is None:
+                avisos.append(
+                    f'La caja "{caja_canal.nombre}" no tiene turno abierto: '
+                    'abrila para que esta venta entre a su arqueo.'
+                )
+                continue
+        else:
+            sesion = _sesion_de_respaldo()
+            if sesion is None:
+                continue
+
         prefijo = f'Pago {indice} de {len(partes)} · ' if len(partes) > 1 else ''
         movimientos.append(
             registrar_movimiento(
@@ -433,9 +461,15 @@ def registrar_venta_en_caja(venta, *, caja=None, usuario=None):
                 detalle=(prefijo + detalle)[:200],
                 usuario=usuario,
                 venta=venta,
+                pago=pago,
             )
         )
-    return movimientos
+
+    # Ninguna parte entro y hay cajas de canal cerradas: se corta con el mismo
+    # error de siempre (nada se anota en la caja equivocada).
+    if not movimientos and avisos:
+        raise ValidationError(' '.join(dict.fromkeys(avisos)))
+    return movimientos, list(dict.fromkeys(avisos))
 
 
 def eliminar_movimiento(movimiento, *, usuario=None):
