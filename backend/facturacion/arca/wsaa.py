@@ -25,22 +25,26 @@ from .errores import ErrorARCA
 def obtener_ta(emisor) -> tuple[str, str]:
     """Devuelve ``(token, sign)`` para el emisor, reusando el TA cacheado.
 
-    Si no hay TA vigente (o cambio el ambiente homologacion/produccion), autentica
-    de nuevo. La autenticacion se serializa por emisor (lock de fila) para que dos
-    workers no pidan dos TA a la vez.
+    El TA de ARCA vale para el **CUIT** (no para el punto de venta): ARCA entrega
+    un solo TA por CUIT+servicio y rechaza pedir otro teniendo uno vigente. Por eso,
+    si otro emisor con el MISMO CUIT (p. ej. dos puntos de venta de un mismo
+    Responsable Inscripto) ya tiene un TA vigente, lo reusamos en vez de re-loguear.
+    Si no hay TA vigente (o cambio el ambiente), autentica de nuevo. El login se
+    serializa por CUIT (lock de filas) para que dos workers no pidan dos TA a la vez.
     """
     from ..models import Emisor, TicketAcceso
 
-    ta = TicketAcceso.objects.filter(emisor=emisor, servicio=SERVICIO_WSFE).first()
-    if ta and ta.produccion == emisor.produccion and ta.vigente():
+    ta = _ta_vigente_de_cuit(emisor)
+    if ta:
         return ta.token, ta.sign
 
     with transaction.atomic():
-        # Lock de la fila del emisor: serializa el login concurrente.
-        Emisor.objects.select_for_update().get(pk=emisor.pk)
+        # Lock de TODOS los emisores de este CUIT: serializa el login concurrente,
+        # incluidos los otros puntos de venta del mismo contribuyente.
+        list(Emisor.objects.select_for_update().filter(cuit=emisor.cuit).order_by('pk'))
 
-        ta = TicketAcceso.objects.filter(emisor=emisor, servicio=SERVICIO_WSFE).first()
-        if ta and ta.produccion == emisor.produccion and ta.vigente():
+        ta = _ta_vigente_de_cuit(emisor)
+        if ta:
             return ta.token, ta.sign
 
         token, sign, expiracion = _login(emisor)
@@ -56,6 +60,25 @@ def obtener_ta(emisor) -> tuple[str, str]:
             },
         )
         return token, sign
+
+
+def _ta_vigente_de_cuit(emisor):
+    """TA vigente de CUALQUIER emisor con el mismo CUIT y ambiente, o ``None``.
+
+    Compartir el TA entre los puntos de venta de un mismo contribuyente evita el
+    error de ARCA "el CEE ya posee un TA valido para el acceso al WSN solicitado".
+    """
+    from ..models import TicketAcceso
+
+    tas = TicketAcceso.objects.filter(
+        emisor__cuit=emisor.cuit,
+        servicio=SERVICIO_WSFE,
+        produccion=emisor.produccion,
+    )
+    for ta in tas:
+        if ta.vigente():
+            return ta
+    return None
 
 
 def _login(emisor) -> tuple[str, str, datetime]:

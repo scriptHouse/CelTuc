@@ -474,6 +474,50 @@ class LimiteMensualTests(TestCase):
         )
 
 
+class TicketAccesoCompartidoTests(TestCase):
+    """Dos emisores del MISMO CUIT comparten el Ticket de Acceso (ARCA entrega uno
+    por CUIT): el segundo NO vuelve a loguear, asi no rompe la cuenta que ya funciona."""
+
+    def _emisor(self, nombre, pv, cuit='20350940643', yb=False):
+        return Emisor.objects.create(
+            nombre=nombre, condicion='responsable_inscripto', cuit=cuit,
+            punto_venta=pv, produccion=True, responsable_yb=yb,
+            certificado='cert', clave_privada='key',
+        )
+
+    def test_segundo_emisor_del_mismo_cuit_reusa_el_ta(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from .arca import wsaa
+        from .models import TicketAcceso
+
+        e1 = self._emisor('RI Centro', 10)
+        e2 = self._emisor('RI Yerba Buena', 11, yb=True)
+        exp = timezone.now() + timedelta(hours=12)
+        with patch.object(wsaa, '_login', return_value=('TOK', 'SIG', exp)) as login:
+            self.assertEqual(wsaa.obtener_ta(e1), ('TOK', 'SIG'))
+            self.assertEqual(wsaa.obtener_ta(e2), ('TOK', 'SIG'))
+        login.assert_called_once()  # el 2do reuso el TA del 1ro (no re-logueo)
+        self.assertEqual(TicketAcceso.objects.count(), 1)
+
+    def test_cuit_distinto_no_comparte_ta(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from .arca import wsaa
+
+        e1 = self._emisor('RI A', 10, cuit='20350940643')
+        otro = self._emisor('RI B', 1, cuit='20111111112')
+        exp = timezone.now() + timedelta(hours=12)
+        with patch.object(wsaa, '_login', return_value=('T', 'S', exp)) as login:
+            wsaa.obtener_ta(e1)
+            wsaa.obtener_ta(otro)
+        self.assertEqual(login.call_count, 2)  # CUIT distinto = TA propio
+
+
 class EmisorSerializerTests(TestCase):
     base = {
         'nombre': 'CelTuc SRL',
