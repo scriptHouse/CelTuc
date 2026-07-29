@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
-from facturacion.models import Cliente
+from facturacion.models import Cliente, Emisor
 from precios_service.models import ItemService
 from productos.models import Producto
 
@@ -112,9 +112,11 @@ class PagoVentaSerializer(serializers.ModelSerializer):
 
     monto = serializers.DecimalField(max_digits=14, decimal_places=2, coerce_to_string=False)
 
+    emisor_nombre = serializers.CharField(source='emisor.nombre', read_only=True, default=None)
+
     class Meta:
         model = PagoVenta
-        fields = ('medio', 'facturacion', 'monto')
+        fields = ('medio', 'facturacion', 'emisor', 'emisor_nombre', 'monto')
 
 
 class VentaSerializer(serializers.ModelSerializer):
@@ -178,6 +180,10 @@ class PagoVentaInputSerializer(serializers.Serializer):
 
     medio = serializers.ChoiceField(choices=Venta.FormaPago.choices)
     facturacion = serializers.ChoiceField(choices=Venta.Facturacion.choices, required=False)
+    # Cuenta que emite ESTA parte (solo si se factura).
+    emisor = serializers.PrimaryKeyRelatedField(
+        queryset=Emisor.objects.all(), required=False, allow_null=True,
+    )
     monto = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal('0'))
 
 

@@ -148,6 +148,12 @@ export interface PagoVenta {
    * parte de la venta y cobrar el resto sin factura.
    */
   facturacion: FacturacionVenta
+  /**
+   * Cuenta (emisor) que emite esta parte. Cada parte facturada es una factura
+   * aparte: dos partes pueden ir a nombre de dos cuentas distintas.
+   */
+  emisor?: number | null
+  emisor_nombre?: string | null
   monto: number
 }
 

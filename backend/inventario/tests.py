@@ -163,6 +163,33 @@ class VentasTests(TestCase):
         # El medio principal (el de mayor monto) es el que ven los reportes.
         self.assertEqual(venta.forma_pago, 'transferencia')
 
+    def test_dos_partes_de_factura_c_con_cuentas_distintas_no_se_fusionan(self):
+        """Cada parte facturada es una factura aparte: con su propia cuenta."""
+        from facturacion.models import Emisor
+
+        uno = Emisor.objects.create(
+            nombre='Mono Uno test', condicion='monotributista', cuit='20111111112',
+        )
+        dos = Emisor.objects.create(
+            nombre='Mono Dos test', condicion='monotributista', cuit='20111111113',
+        )
+        venta = registrar_venta(
+            self.solar,
+            [(self.fuente, 1, Decimal('38800'))],
+            pagos=[
+                {'medio': 'efectivo', 'facturacion': 'factura_c',
+                 'emisor': uno, 'monto': Decimal('18800')},
+                {'medio': 'efectivo', 'facturacion': 'factura_c',
+                 'emisor': dos, 'monto': Decimal('20000')},
+            ],
+        )
+        pagos = list(venta.pagos.all())
+        self.assertEqual(len(pagos), 2)  # mismo medio y facturacion, cuentas distintas
+        self.assertEqual(
+            {p.emisor_id: p.monto for p in pagos},
+            {uno.pk: Decimal('18800'), dos.pk: Decimal('20000')},
+        )
+
     def test_pagos_repetidos_se_suman_en_una_sola_parte(self):
         venta = registrar_venta(
             self.solar,
@@ -175,6 +202,20 @@ class VentasTests(TestCase):
         pagos = list(venta.pagos.all())
         self.assertEqual(len(pagos), 1)
         self.assertEqual(pagos[0].monto, Decimal('38800'))
+
+    def test_diferencia_de_un_centavo_se_ajusta_sola(self):
+        """Un redondeo de precios no puede hacer rebotar la venta."""
+        venta = registrar_venta(
+            self.solar,
+            [(self.fuente, 1, Decimal('38800.005'))],
+            pagos=[
+                {'medio': 'efectivo', 'monto': Decimal('18800')},
+                {'medio': 'tarjeta', 'monto': Decimal('20000')},
+            ],
+        )
+        self.assertEqual(
+            sum((p.monto for p in venta.pagos.all()), Decimal('0')), venta.total,
+        )
 
     def test_pagos_que_no_suman_el_total_no_registran_nada(self):
         from django.core.exceptions import ValidationError

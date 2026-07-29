@@ -8,7 +8,7 @@ y para que, mas adelante, una venta descuente stock sola.
 Los precios NO viven aca: se leen del catalogo (`productos`), derivados del
 dolar del negocio como siempre.
 """
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
@@ -327,6 +327,17 @@ class PagoVenta(models.Model):
         default=Venta.Facturacion.SIN_FACTURA,
         help_text='Como se factura ESTA parte: decide a que caja entra.',
     )
+    # Con que cuenta se emite ESTA parte. Cada parte facturada es una factura
+    # aparte: dos partes pueden ir a nombre de dos monotributistas distintos
+    # (por ejemplo, para repartir el tope mensual de cada uno).
+    emisor = models.ForeignKey(
+        'facturacion.Emisor',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='pagos_venta',
+        verbose_name='cuenta que factura',
+    )
     monto = models.DecimalField('monto ($)', max_digits=14, decimal_places=2)
 
     class Meta:
@@ -434,19 +445,21 @@ def _normalizar_item_venta(item):
 
 
 def _normalizar_pagos(pagos, *, forma_pago, facturacion, total):
-    """Valida el cobro y lo devuelve como [(medio, facturacion, monto)].
+    """Valida el cobro y lo devuelve como [(medio, facturacion, emisor, monto)].
 
     Sin `pagos` (el caso comun) devuelve la venta entera en `forma_pago` con la
     facturacion de la venta. Con varias partes: las de monto cero se descartan,
-    las que repiten medio Y facturacion se suman en una sola (cada combinacion
-    es un movimiento de caja) y el total tiene que coincidir con el de la venta
-    — si no, no se registra nada, porque una venta cuyos pagos no cierran
-    romperia el arqueo.
+    las que repiten medio, facturacion Y cuenta se suman en una sola (cada
+    combinacion es un movimiento de caja) y el total tiene que coincidir con el
+    de la venta — si no, no se registra nada, porque una venta cuyos pagos no
+    cierran romperia el arqueo. Dos partes con la MISMA facturacion pero
+    distinta cuenta quedan separadas: son dos facturas distintas.
     """
     medios_validos = set(Venta.FormaPago.values)
     facturaciones_validas = set(Venta.Facturacion.values)
     por_defecto = facturacion or Venta.Facturacion.SIN_FACTURA
     partes = {}
+    emisores = {}
     for pago in pagos or []:
         medio = (pago.get('medio') or '').strip()
         if medio not in medios_validos:
@@ -459,18 +472,33 @@ def _normalizar_pagos(pagos, *, forma_pago, facturacion, total):
             raise ValidationError('Los montos de los pagos no pueden ser negativos.')
         if monto == 0:
             continue
-        clave = (medio, fact)
+        # Sin factura no hay cuenta que la emita.
+        emisor = pago.get('emisor') if fact != Venta.Facturacion.SIN_FACTURA else None
+        emisor_id = getattr(emisor, 'pk', emisor)
+        clave = (medio, fact, emisor_id)
         partes[clave] = partes.get(clave, Decimal('0')) + monto
+        emisores[clave] = emisor
 
     if not partes:
-        return [(forma_pago or Venta.FormaPago.EFECTIVO, por_defecto, total)]
+        return [(forma_pago or Venta.FormaPago.EFECTIVO, por_defecto, None, total)]
 
     suma = sum(partes.values(), Decimal('0'))
-    if suma != total:
-        raise ValidationError(
-            f'Los pagos suman ${suma} y la venta es de ${total}: tienen que coincidir.'
-        )
-    return [(medio, fact, monto) for (medio, fact), monto in partes.items()]
+    diferencia = total - suma
+    if diferencia != 0:
+        if abs(diferencia) > Decimal('0.01'):
+            raise ValidationError(
+                f'Los pagos suman ${suma} y la venta es de ${total}: tienen que coincidir.'
+            )
+        # Diferencia de un centavo (redondeo de precios con decimales): se
+        # ajusta la parte mas grande en vez de rechazar la venta.
+        mayor = max(partes, key=lambda clave: partes[clave])
+        partes[mayor] += diferencia
+
+    return [
+        (medio, fact, emisores[clave], monto)
+        for clave, monto in partes.items()
+        for medio, fact, _ in [clave]
+    ]
 
 
 def registrar_venta(sucursal, items, *, forma_pago='', facturacion='', nota='',
@@ -522,19 +550,22 @@ def registrar_venta(sucursal, items, *, forma_pago='', facturacion='', nota='',
                 usuario=usuario,
                 permitir_negativo=permitir_faltante,
             )
+        # A 2 decimales, como la columna: asi el total guardado y la suma de los
+        # pagos hablan siempre el mismo idioma (no queda un centavo colgado).
+        total = total.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         venta.total = total
         # El cobro se resuelve al final, cuando ya se sabe el total de la venta.
         partes = _normalizar_pagos(
             pagos, forma_pago=venta.forma_pago, facturacion=venta.facturacion, total=total,
         )
         PagoVenta.objects.bulk_create([
-            PagoVenta(venta=venta, medio=medio, facturacion=fact, monto=monto)
-            for medio, fact, monto in partes
+            PagoVenta(venta=venta, medio=medio, facturacion=fact, emisor=emisor, monto=monto)
+            for medio, fact, emisor, monto in partes
         ])
         # Los valores principales (los de la parte de mayor monto) son los que
         # sigue viendo todo lo que ya leia `forma_pago` / `facturacion`:
         # reportes, filtros del admin e historiales.
-        principal = max(partes, key=lambda parte: parte[2])
+        principal = max(partes, key=lambda parte: parte[3])
         venta.forma_pago = principal[0]
         venta.facturacion = principal[1]
         venta.save(update_fields=['total', 'forma_pago', 'facturacion'])

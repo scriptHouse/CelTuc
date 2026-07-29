@@ -138,7 +138,7 @@ class VentasView(_BaseInventario, APIView):
 
     def get(self, request):
         qs = Venta.objects.select_related('sucursal', 'creado_por', 'cliente').prefetch_related(
-            'items__producto', 'pagos',
+            'items__producto', 'pagos__emisor',
         )
         sucursal = request.query_params.get('sucursal')
         if sucursal:
