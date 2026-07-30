@@ -148,12 +148,8 @@ class UsuarioListCreateView(APIView):
     def post(self, request):
         serializer = UsuarioCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        # Jerarquia: crear una cuenta administradora es solo del superadministrador.
-        if serializer.validated_data.get('is_staff') and not request.user.is_superuser:
-            return Response(
-                {'detail': 'Solo un superadministrador puede crear administradores.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        # Cualquier administrador puede crear cuentas, incluso administradoras
+        # (nunca superusuarios: eso lo garantiza el serializer).
         user = serializer.save()
         return Response(UsuarioAdminSerializer(user).data, status=status.HTTP_201_CREATED)
 
@@ -169,12 +165,6 @@ class UsuarioDetailView(APIView):
         if user.es_administrador and user.pk != actor.pk and not actor.is_superuser:
             return Response(
                 {'detail': 'Solo un superadministrador puede editar a un administrador.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        # Tampoco puede PROMOVER una cuenta a administradora si no es superadmin.
-        if request.data.get('is_staff') is True and not user.is_staff and not actor.is_superuser:
-            return Response(
-                {'detail': 'Solo un superadministrador puede dar permisos de administrador.'},
                 status=status.HTTP_403_FORBIDDEN,
             )
         # Evitar que el admin se deje afuera a sí mismo.

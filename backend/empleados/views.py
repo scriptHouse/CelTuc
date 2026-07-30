@@ -92,13 +92,6 @@ class EmpleadoAccesoView(APIView):
             )
         serializer = AccesoSerializer(data=request.data, context={'empleado': empleado})
         serializer.is_valid(raise_exception=True)
-        # Tampoco puede asignar un rol de administrador si no es superadmin.
-        rol = serializer.validated_data.get('rol_id')
-        if rol is not None and rol.es_admin and not request.user.is_superuser:
-            return Response(
-                {'detail': 'Solo un superadministrador puede asignar un rol de administrador.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
         serializer.save()
         empleado.refresh_from_db()
         return Response(EmpleadoSerializer(empleado).data)

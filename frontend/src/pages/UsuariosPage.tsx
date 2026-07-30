@@ -75,7 +75,8 @@ export function UsuariosPage() {
   const toast = useToast()
   const confirm = useConfirm()
   const yo = useAuth((s) => s.usuario)
-  // Solo el superadministrador (dueño) gestiona cuentas de nivel administrador.
+  // Solo el superadministrador (dueño) edita o elimina cuentas de nivel administrador;
+  // crear administradores lo puede hacer cualquier admin.
   const soySuper = Boolean(yo?.is_superuser)
 
   const { data: usuarios = [], isLoading } = useQuery({
@@ -294,7 +295,6 @@ export function UsuariosPage() {
         open={modalOpen}
         usuario={editando}
         esYoMismo={Boolean(editando && editando.id === yo?.id)}
-        puedeAsignarAdmin={soySuper}
         saving={crear.isPending || actualizar.isPending}
         onClose={() => setModalOpen(false)}
         onSubmit={handleGuardar}
@@ -309,7 +309,6 @@ function UsuarioFormModal({
   open,
   usuario,
   esYoMismo,
-  puedeAsignarAdmin,
   saving,
   onClose,
   onSubmit,
@@ -317,7 +316,6 @@ function UsuarioFormModal({
   open: boolean
   usuario: UsuarioAdmin | null
   esYoMismo: boolean
-  puedeAsignarAdmin: boolean
   saving: boolean
   onClose: () => void
   onSubmit: (values: FormData) => Promise<void>
@@ -436,29 +434,25 @@ function UsuarioFormModal({
         </div>
 
         {/* Permisos */}
-        {(puedeAsignarAdmin || esEdicion) && (
-          <div className="space-y-2 rounded-2xl border border-line bg-canvas/40 p-4">
-            {puedeAsignarAdmin && (
-              <Check
-                label="Puede administrar (gestiona empleados y usuarios)"
-                checked={isStaff}
-                disabled={esYoMismo}
-                onChange={(v) => setValue('isStaff', v)}
-              />
-            )}
-            {esEdicion && (
-              <Check
-                label="Cuenta activa"
-                checked={activo}
-                disabled={esYoMismo}
-                onChange={(v) => setValue('activo', v)}
-              />
-            )}
-            {esYoMismo && (
-              <p className="text-xs text-ink-400">No podés cambiar tus propios permisos ni desactivarte.</p>
-            )}
-          </div>
-        )}
+        <div className="space-y-2 rounded-2xl border border-line bg-canvas/40 p-4">
+          <Check
+            label="Puede administrar (gestiona empleados y usuarios)"
+            checked={isStaff}
+            disabled={esYoMismo}
+            onChange={(v) => setValue('isStaff', v)}
+          />
+          {esEdicion && (
+            <Check
+              label="Cuenta activa"
+              checked={activo}
+              disabled={esYoMismo}
+              onChange={(v) => setValue('activo', v)}
+            />
+          )}
+          {esYoMismo && (
+            <p className="text-xs text-ink-400">No podés cambiar tus propios permisos ni desactivarte.</p>
+          )}
+        </div>
 
         {/* Crear empleado (solo al crear una cuenta nueva) */}
         {!esEdicion && (

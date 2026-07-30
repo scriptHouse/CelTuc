@@ -316,9 +316,9 @@ class RolesAPITests(TestCase):
 
 
 class JerarquiaSuperadminTests(TestCase):
-    """Jerarquia: un administrador COMUN no puede crear/editar/eliminar a otros
-    administradores ni superadministradores; eso queda reservado al superadmin
-    (is_superuser). El admin comun si gestiona usuarios regulares."""
+    """Jerarquia: cualquier administrador puede CREAR administradores (alta o
+    promocion), pero editar/eliminar a otro administrador y gestionar roles de
+    administrador queda reservado al superadmin (is_superuser)."""
 
     def setUp(self):
         cache.clear()
@@ -340,13 +340,16 @@ class JerarquiaSuperadminTests(TestCase):
         self.client = APIClient()
         self.client.force_authenticate(self.admin)
 
-    def test_admin_no_crea_administradores(self):
+    def test_admin_si_crea_administradores(self):
         r = self.client.post(
             reverse('usuarios_gestion:list'),
             {'username': 'nuevoadmin', 'email': 'na@celtuc.ar', 'password': 'clave-123', 'is_staff': True},
             format='json',
         )
-        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.status_code, 201)
+        u = Usuario.objects.get(username='nuevoadmin')
+        self.assertTrue(u.is_staff)
+        self.assertFalse(u.is_superuser)
 
     def test_admin_si_crea_usuarios_regulares(self):
         r = self.client.post(
@@ -356,12 +359,14 @@ class JerarquiaSuperadminTests(TestCase):
         )
         self.assertEqual(r.status_code, 201)
 
-    def test_admin_no_promueve_a_administrador(self):
+    def test_admin_si_promueve_a_administrador(self):
         r = self.client.patch(
             reverse('usuarios_gestion:detail', args=[self.regular.id]),
             {'is_staff': True}, format='json',
         )
-        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.status_code, 200)
+        self.regular.refresh_from_db()
+        self.assertTrue(self.regular.es_administrador)
 
     def test_admin_no_edita_a_otro_admin(self):
         r = self.client.patch(

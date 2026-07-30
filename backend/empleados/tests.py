@@ -202,6 +202,26 @@ class EmpleadoAPITests(TestCase):
         self._auth(regular)
         self.assertEqual(self.client.get(reverse('empleados:list')).status_code, 403)
 
+    def test_admin_comun_puede_asignar_rol_administrador(self):
+        # Un admin comun (rol es_admin, sin is_superuser) tambien puede dar acceso
+        # con un rol de administrador: crear administradores no es solo del superadmin.
+        comun = Usuario.objects.create_user(
+            email='ac@celtuc.ar', username='admincomun', password='x',
+            rol=Rol.objects.get(nombre='Administrador'),
+        )
+        self._auth(comun)
+        emp = self.client.post(reverse('empleados:list'), {'nombre': 'Ana'}, format='json').data
+        r = self.client.put(
+            reverse('empleados:acceso', args=[emp['id']]),
+            {
+                'username': 'ana', 'email': 'ana@celtuc.ar', 'password': 'clave-123',
+                'rol_id': Rol.objects.get(nombre='Administrador').id,
+            },
+            format='json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(Usuario.objects.get(username='ana').es_administrador)
+
     def test_dar_acceso_asigna_rol_empleado_por_defecto(self):
         self._auth()
         emp = self.client.post(reverse('empleados:list'), {'nombre': 'Ana'}, format='json').data
