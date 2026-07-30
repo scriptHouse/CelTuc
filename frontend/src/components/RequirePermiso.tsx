@@ -2,12 +2,13 @@ import type { ReactNode } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { Lock, LogOut } from 'lucide-react'
 import { useAuth } from '@/store/auth'
-import { esAdmin, primeraRutaPermitida, puedeVer } from '@/lib/permisos'
+import { esAdmin, esSuperAdmin, primeraRutaPermitida, puedeVer } from '@/lib/permisos'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 
 /**
  * Protege una ruta según el sistema de roles:
+ *  - `soloSuper`: sólo el superadministrador (dueño).
  *  - `soloAdmin`: sólo administradores.
  *  - `permiso`: requiere ese código de módulo (los admin pasan siempre).
  *
@@ -18,15 +19,21 @@ export function RequirePermiso({
   children,
   permiso,
   soloAdmin = false,
+  soloSuper = false,
 }: {
   children: ReactNode
   permiso?: string
   soloAdmin?: boolean
+  soloSuper?: boolean
 }) {
   const usuario = useAuth((s) => s.usuario)
   const location = useLocation()
 
-  const autorizado = soloAdmin ? esAdmin(usuario) : puedeVer(usuario, permiso)
+  const autorizado = soloSuper
+    ? esSuperAdmin(usuario)
+    : soloAdmin
+      ? esAdmin(usuario)
+      : puedeVer(usuario, permiso)
   if (autorizado) return <>{children}</>
 
   const destino = primeraRutaPermitida(usuario)

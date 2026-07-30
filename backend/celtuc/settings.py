@@ -123,6 +123,7 @@ INSTALLED_APPS = [
     'caja',
     'facturacion',
     'comunicados',
+    'auditoria',
 ]
 
 MIDDLEWARE = [
@@ -135,6 +136,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Expone la peticion actual a las señales de auditoria (quien hizo que).
+    'auditoria.middleware.AuditoriaMiddleware',
 ]
 
 ROOT_URLCONF = 'celtuc.urls'

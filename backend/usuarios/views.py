@@ -3,6 +3,8 @@ from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from auditoria.registro import registrar_ingreso
+
 from .models import Usuario
 from .serializers import LoginSerializer, RefreshSerializer, UsuarioSerializer
 from .tokens import create_token_pair, decode_token
@@ -27,6 +29,8 @@ class LoginView(APIView):
         Usuario.objects.filter(pk=user.pk).update(last_login=ahora, ultima_actividad=ahora)
         user.last_login = ahora
         user.ultima_actividad = ahora
+        # El ingreso queda en el historial de auditoria (nunca rompe el login).
+        registrar_ingreso(user, request)
         return Response({
             **create_token_pair(user),
             'user': UsuarioSerializer(user).data,

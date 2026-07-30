@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { LogOut } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/store/auth'
-import { esAdmin, puedeVer } from '@/lib/permisos'
+import { puedeVerItem } from '@/lib/permisos'
 import { usePresencia } from '@/lib/usePresencia'
 import { useInactividad } from '@/lib/useInactividad'
 import { useConfirm } from '@/components/ConfirmProvider'
@@ -31,10 +31,9 @@ export function Layout() {
   usePresencia()
   // Cierra la sesión y vuelve al login tras 6 h de inactividad.
   useInactividad()
-  // El sidebar muestra cada módulo según los permisos del rol (los admin ven todo).
-  const items = navItems.filter((item) =>
-    item.soloAdmin ? esAdmin(usuario) : puedeVer(usuario, item.permiso),
-  )
+  // El sidebar muestra cada módulo según los permisos del rol (los admin ven
+  // todo; Auditoría es solo del superadministrador).
+  const items = navItems.filter((item) => puedeVerItem(usuario, item))
   const navigate = useNavigate()
   const confirm = useConfirm()
 

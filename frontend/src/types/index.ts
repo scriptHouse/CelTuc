@@ -716,3 +716,46 @@ export const MOTIVOS_MOVIMIENTO_CAJA: Record<'ingreso' | 'egreso' | 'retiro', st
   egreso: ['Pago a proveedor', 'Gasto del local', 'Envíos / viáticos', 'Adelanto a empleado', 'Otro'],
   retiro: ['Retiro a bóveda', 'Depósito bancario', 'Retiro del dueño'],
 }
+
+// ===== Auditoría (solo superadministrador) =====
+
+export type AccionAuditoria = 'crear' | 'editar' | 'eliminar' | 'restaurar' | 'ingreso'
+
+/** El antes y el después de UN campo que cambió. */
+export interface CambioAuditoria {
+  antes: unknown
+  despues: unknown
+}
+
+/** Una acción registrada en el historial del sistema. */
+export interface RegistroAuditoria {
+  id: number
+  creado: string // ISO
+  accion: AccionAuditoria
+  accion_display: string
+  /** La cuenta que hizo la acción (null si fue eliminada; queda la foto). */
+  usuario: { id: number; username: string; nombre: string } | null
+  /** Foto del username al momento de la acción (sobrevive a la cuenta). */
+  usuario_username: string
+  app: string
+  /** Nombre visible del módulo ("Inventario", "Facturación"...). */
+  modulo: string
+  /** Qué tipo de cosa se tocó ("venta", "usuario", "producto"...). */
+  modelo: string
+  objeto_id: string
+  /** Foto en texto del objeto al momento de la acción. */
+  objeto: string
+  /** Solo lo que cambió: campo → { antes, despues }. */
+  cambios: Record<string, CambioAuditoria>
+  ip: string | null
+}
+
+/** Una página del historial (paginación por offset). */
+export interface PaginaAuditoria {
+  total: number
+  resultados: RegistroAuditoria[]
+  /** Solo en la primera página. */
+  resumen?: { hoy: number; semana: number; usuarios_hoy: number; total: number }
+  /** Usernames que aparecen en el historial (para el filtro). Solo en la primera página. */
+  usuarios?: string[]
+}

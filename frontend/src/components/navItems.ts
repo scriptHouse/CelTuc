@@ -1,4 +1,4 @@
-import { Boxes, Contact, CreditCard, DollarSign, FileText, LayoutDashboard, ReceiptText, ScanSearch, ShoppingBag, Smartphone, UserCog, Users, Wallet, Wrench } from 'lucide-react'
+import { Boxes, Contact, CreditCard, DollarSign, FileText, History, LayoutDashboard, ReceiptText, ScanSearch, ShoppingBag, Smartphone, UserCog, Users, Wallet, Wrench } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 export interface NavItem {
@@ -9,6 +9,8 @@ export interface NavItem {
   permiso?: string
   /** Si es true, solo se muestra a administradores (staff/superusuario/rol admin). */
   soloAdmin?: boolean
+  /** Si es true, solo se muestra al superadministrador (dueño). */
+  soloSuper?: boolean
 }
 
 export const navItems: NavItem[] = [
@@ -29,4 +31,5 @@ export const navItems: NavItem[] = [
   // (p. ej. 'ver_documentos') acá y en la ruta.
   { to: '/documentos', label: 'Documentos', icon: FileText },
   { to: '/usuarios', label: 'Usuarios', icon: UserCog, soloAdmin: true },
+  { to: '/auditoria', label: 'Auditoría', icon: History, soloSuper: true },
 ]
