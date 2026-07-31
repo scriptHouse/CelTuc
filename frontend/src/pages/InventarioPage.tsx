@@ -474,8 +474,16 @@ function FilaProducto({
   estilo: React.CSSProperties
 }) {
   const lista = producto.efectivo?.lista_ars
+  const cash = producto.efectivo?.cash_ars
 
   const etiquetas = [producto.calidad, producto.marca, producto.nota].filter(Boolean).join(' · ')
+  // Contado y transferencia comparten precio (misma regla que la Venta rápida de Caja).
+  const precios = [
+    lista != null ? `lista ${money0(Number(lista))}` : null,
+    cash != null ? `contado/transf. ${money0(Number(cash))}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
 
   if (sel === 'todas') {
     const total = activas.reduce((acc, s) => acc + (filaDe(producto.id, s.id)?.cantidad ?? 0), 0)
@@ -492,8 +500,8 @@ function FilaProducto({
           </p>
           <p className="truncate text-xs text-ink-400">
             {etiquetas}
-            {etiquetas && lista != null && ' · '}
-            {lista != null && <span className="tnum">{money0(Number(lista))}</span>}
+            {etiquetas && precios && ' · '}
+            {precios && <span className="tnum">{precios}</span>}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -548,8 +556,8 @@ function FilaProducto({
         </p>
         <p className="truncate text-xs text-ink-400">
           {etiquetas}
-          {etiquetas && lista != null && ' · '}
-          {lista != null && <span className="tnum">{money0(Number(lista))}</span>}
+          {etiquetas && precios && ' · '}
+          {precios && <span className="tnum">{precios}</span>}
           {admin && producto.costo_usd != null && (
             <span className="tnum"> · costo US$ {num(Number(producto.costo_usd))}</span>
           )}
@@ -738,6 +746,9 @@ function DetalleStockModal({
           Stock en <b className="text-ink-700">{sucursal.nombre}</b>
           {producto.efectivo?.lista_ars != null && (
             <span className="tnum"> · lista {money0(Number(producto.efectivo.lista_ars))}</span>
+          )}
+          {producto.efectivo?.cash_ars != null && (
+            <span className="tnum"> · contado/transf. {money0(Number(producto.efectivo.cash_ars))}</span>
           )}
           {admin && producto.costo_usd != null && (
             <span className="tnum"> · costo US$ {num(Number(producto.costo_usd))}</span>
