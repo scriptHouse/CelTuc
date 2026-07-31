@@ -510,6 +510,100 @@ class ApiInventarioTests(TestCase):
         self.assertEqual(APIClient().get('/api/inventario/stock/').status_code, 401)
 
 
+class IngresoCompraventaApiTests(TestCase):
+    """POST /compraventa/ingresar/: alta de un usado SIN ser admin, auditada."""
+
+    URL = '/api/inventario/compraventa/ingresar/'
+
+    def setUp(self):
+        self.central = Sucursal.objects.create(nombre='Central test', orden=1)
+        rol = Rol.objects.create(nombre='Mostrador cv test')
+        rol.permisos.set(Permiso.objects.filter(codigo='ver_inventario'))
+        self.empleado = Usuario.objects.create_user(
+            email='cv@celtuc.test', username='empleado.cv', password='x', rol=rol,
+        )
+
+    def _cliente(self, usuario=None):
+        cliente = APIClient()
+        cliente.force_authenticate(usuario or self.empleado)
+        return cliente
+
+    def _payload(self, **extra):
+        base = {
+            'marca': 'Apple', 'modelo': 'iPhone 17 Pro', 'color': 'Negro',
+            'imei1': '356938035643809', 'imei2': '356938035643810',
+            'cupon': 'CV-001', 'bateria': 99, 'sucursal': self.central.id,
+        }
+        base.update(extra)
+        return base
+
+    def test_empleado_sin_admin_da_de_alta_con_auditoria_completa(self):
+        r = self._cliente().post(self.URL, self._payload(), format='json')
+        self.assertEqual(r.status_code, 201)
+        self.assertFalse(r.data['reutilizado'])
+
+        producto = Producto.objects.get(pk=r.data['producto']['id'])
+        self.assertEqual(producto.nombre, 'Apple iPhone 17 Pro (usado) · 99% bat.')
+        self.assertEqual(producto.calidad, 'Usado')
+        self.assertIn('IMEI 356938035643809 / 356938035643810', producto.nota)
+        self.assertIn('Negro', producto.nota)
+        self.assertIn('Cupón CV-001', producto.nota)
+        self.assertEqual(producto.categoria.nombre, 'Equipos usados')
+        self.assertTrue(producto.categoria.es_equipo)
+
+        # Auditoria de ModeloBase: quien creo cada cosa.
+        self.assertEqual(producto.creado_por, self.empleado)
+        self.assertEqual(producto.categoria.creado_por, self.empleado)
+
+        self.assertEqual(r.data['stock']['cantidad'], 1)
+        movimiento = MovimientoStock.objects.get(producto=producto)
+        self.assertEqual(movimiento.tipo, MovimientoStock.Tipo.INGRESO)
+        self.assertEqual(movimiento.creado_por, self.empleado)
+        self.assertIn('cupón CV-001', movimiento.nota)
+
+        # Auditoria por señales: un registro 'crear' por cada modelo tocado.
+        from auditoria.models import RegistroAuditoria
+        modelos = set(
+            RegistroAuditoria.objects
+            .filter(usuario=self.empleado, accion='crear')
+            .values_list('modelo', flat=True)
+        )
+        self.assertIn(str(Producto._meta.verbose_name), modelos)
+        self.assertIn(str(CategoriaProducto._meta.verbose_name), modelos)
+        self.assertIn(str(MovimientoStock._meta.verbose_name), modelos)
+
+    def test_mismo_imei_no_duplica_el_producto(self):
+        cliente = self._cliente()
+        cliente.post(self.URL, self._payload(), format='json')
+        r = cliente.post(self.URL, self._payload(), format='json')
+        self.assertEqual(r.status_code, 201)
+        self.assertTrue(r.data['reutilizado'])
+        self.assertEqual(Producto.objects.filter(nota__contains='356938035643809').count(), 1)
+        self.assertEqual(r.data['stock']['cantidad'], 2)
+
+    def test_categoria_usados_se_reutiliza(self):
+        cliente = self._cliente()
+        cliente.post(self.URL, self._payload(), format='json')
+        cliente.post(self.URL, self._payload(imei1='999990001112223'), format='json')
+        self.assertEqual(
+            CategoriaProducto.objects.filter(nombre__icontains='usad').count(), 1,
+        )
+
+    def test_requiere_marca_o_modelo(self):
+        r = self._cliente().post(self.URL, self._payload(marca='  ', modelo=''), format='json')
+        self.assertEqual(r.status_code, 400)
+
+    def test_sin_permiso_403(self):
+        pelado = Usuario.objects.create_user(
+            email='pelado.cv@celtuc.test', username='pelado.cv', password='x',
+        )
+        r = self._cliente(pelado).post(self.URL, self._payload(), format='json')
+        self.assertEqual(r.status_code, 403)
+        # El catalogo viene sembrado por las migraciones: alcanza con verificar
+        # que el equipo del contrato no se dio de alta.
+        self.assertFalse(Producto.objects.filter(nota__contains='356938035643809').exists())
+
+
 class CostoSoloAdminTests(TestCase):
     """`costo_usd` de Producto: visible para admins, oculto para el resto."""
 

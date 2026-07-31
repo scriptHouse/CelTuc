@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Building2, Clock, Eraser, FileSpreadsheet, FileText, Loader2, Printer } from 'lucide-react'
+import { Building2, Clock, Eraser, FileSpreadsheet, FileText, Loader2, PackagePlus, Printer } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
 import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
+import { SumarCompraventaInventario } from '@/components/SumarCompraventaInventario'
 import { useAuth } from '@/store/auth'
 import { cn, ctStagger } from '@/lib/utils'
 import { PaperScaler } from '@/documentos/PaperScaler'
 import { SUCURSALES_DOC, SUCURSAL_DOC_POR_DEFECTO, direccionDeSucursal } from '@/documentos/content'
+import type { CompraventaData } from '@/documentos/compraventaContent'
 import { DOC_MODULES, PROXIMOS_DOCS } from '@/documentos/registry'
 
 /** Sucursal del encabezado de todos los documentos. Como en la venta rápida:
@@ -59,6 +61,12 @@ export function DocumentosPage() {
   const patch = (p: Record<string, unknown>) =>
     setEstados((s) => ({ ...s, [active.id]: { ...(s[active.id] as object), ...p } }))
 
+  // Compraventa: el equipo del contrato se puede sumar al inventario (con
+  // confirmación). El modal también se ofrece solo al exportar el PDF.
+  const [sumarInv, setSumarInv] = useState(false)
+  const cv = active.id === 'compraventa' ? (datos as CompraventaData) : null
+  const equipoCargado = !!cv && (cv.marca.trim() !== '' || cv.modelo.trim() !== '')
+
   // Mientras no elija una a mano, seguimos la sucursal de su cuenta (puede
   // llegar tras el refresco de sesión que hace el Layout al montar la app).
   const elegidaAMano = useRef(false)
@@ -81,6 +89,8 @@ export function DocumentosPage() {
       const blob = await pdf(<Pdf datos={datos} direccion={direccion} />).toBlob()
       descargar(blob, `${active.nombreArchivo(datos)}.pdf`)
       toast.success('PDF generado', `Se descargó: ${active.nombre}.`)
+      // Contrato exportado con equipo cargado: ofrecer sumarlo al inventario.
+      if (cv && equipoCargado) setSumarInv(true)
     } catch (e) {
       console.error(e)
       toast.error('No se pudo generar el PDF', 'Probá de nuevo en un momento.')
@@ -202,6 +212,21 @@ export function DocumentosPage() {
                 triggerClassName="h-9 text-xs"
               />
             </div>
+            {cv && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSumarInv(true)}
+                disabled={!!busy || !equipoCargado}
+                title={
+                  equipoCargado
+                    ? 'Sumar el equipo del contrato al inventario'
+                    : 'Completá la marca o el modelo del equipo para poder sumarlo'
+                }
+              >
+                <PackagePlus className="h-4 w-4" /> Sumar a inventario
+              </Button>
+            )}
             <Button variant="ghost" size="sm" onClick={limpiar} disabled={!!busy}>
               <Eraser className="h-4 w-4" /> Limpiar
             </Button>
@@ -233,6 +258,14 @@ export function DocumentosPage() {
           </div>
         </div>
       </Card>
+
+      {cv && (
+        <SumarCompraventaInventario
+          abierto={sumarInv}
+          datos={cv}
+          onCerrar={() => setSumarInv(false)}
+        />
+      )}
     </div>
   )
 }

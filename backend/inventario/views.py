@@ -1,11 +1,15 @@
 import logging
 
 from django.core.exceptions import ValidationError
+from django.db import transaction
+from django.db.models import Max
 from rest_framework import generics
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from comun.mixins import AuditoriaMixin
+from productos.models import CategoriaProducto, ConfiguracionProductos, Producto
+from productos.serializers import ProductoSerializer
 from usuarios.permissions import LecturaConPermisoEscrituraAdmin, LecturaYEscrituraConPermiso
 
 from .models import (
@@ -20,6 +24,7 @@ from .models import (
 from .serializers import (
     AjusteStockSerializer,
     CrearVentaSerializer,
+    IngresoCompraventaSerializer,
     MovimientoStockSerializer,
     StockProductoSerializer,
     SucursalSerializer,
@@ -126,6 +131,110 @@ class TransferirStockView(_BaseInventario, APIView):
             'origen': StockProductoSerializer(salida).data,
             'destino': StockProductoSerializer(entrada_fila).data,
         })
+
+
+NOMBRE_CATEGORIA_USADOS = 'Equipos usados'
+
+
+def _categoria_usados(usuario):
+    """La categoria raiz de los usados; si no existe todavia, se crea."""
+    categoria = (
+        CategoriaProducto.objects
+        .filter(padre__isnull=True, activo=True, nombre__icontains='usad')
+        .order_by('orden', 'id')
+        .first()
+    )
+    if categoria is not None:
+        return categoria
+    ultimo = CategoriaProducto.objects.aggregate(maximo=Max('orden'))['maximo'] or 0
+    return CategoriaProducto.objects.create(
+        nombre=NOMBRE_CATEGORIA_USADOS,
+        es_equipo=True,
+        tarifa_cuotas=CategoriaProducto.TarifaCuotas.EQUIPOS,
+        orden=ultimo + 1,
+        creado_por=usuario,
+        actualizado_por=usuario,
+    )
+
+
+def _crear_producto_usado(datos, usuario):
+    """El producto del catalogo para el equipo del contrato.
+
+    La bateria queda en el nombre y el IMEI/color/cupon en la nota: asi se ven
+    directo en la fila del inventario. Sin precios: se cargan despues desde
+    Productos (solo-admin, como siempre).
+    """
+    equipo = ' '.join(parte for parte in (datos['marca'], datos['modelo']) if parte)
+    nombre = f'{equipo} (usado)'
+    if datos.get('bateria') is not None:
+        nombre += f' · {datos["bateria"]}% bat.'
+    imei = datos['imei1']
+    if imei and datos['imei2']:
+        imei += f' / {datos["imei2"]}'
+    nota = ' · '.join(parte for parte in (
+        f'IMEI {imei}' if imei else '',
+        datos['color'],
+        f'Cupón {datos["cupon"]}' if datos['cupon'] else '',
+    ) if parte)
+    return Producto.objects.create(
+        categoria=_categoria_usados(usuario),
+        nombre=nombre[:200],
+        marca=datos['marca'],
+        calidad='Usado',
+        nota=nota[:200],
+        creado_por=usuario,
+        actualizado_por=usuario,
+    )
+
+
+class IngresoCompraventaView(_BaseInventario, APIView):
+    """Alta de mostrador del equipo usado de un contrato de compraventa.
+
+    Crea el producto en el catalogo y suma 1 unidad en la sucursal indicada.
+    Como el ajuste de stock, lo puede hacer cualquier cuenta con
+    `ver_inventario`: comprar usados es trabajo del dia a dia del mostrador,
+    no de un admin. Todo queda auditado igual: `creado_por`/`actualizado_por`
+    de `ModeloBase` en producto, categoria y movimiento, y los registros de la
+    app `auditoria` (señales sobre esos tres modelos, con usuario, hora e IP).
+    Si el IMEI ya esta en el catalogo NO se duplica el producto: se le suma la
+    unidad al existente.
+    """
+
+    permission_classes = [LecturaYEscrituraConPermiso]
+
+    def post(self, request):
+        entrada = IngresoCompraventaSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        datos = entrada.validated_data
+        usuario = request.user
+
+        # IMEIs reales tienen 15 digitos; el minimo evita falsos positivos al
+        # buscar coincidencias dentro de las notas del catalogo.
+        imei1 = datos['imei1']
+        producto = (
+            Producto.objects.filter(activo=True, nota__contains=imei1).first()
+            if len(imei1) >= 8 else None
+        )
+        reutilizado = producto is not None
+
+        with transaction.atomic():
+            if producto is None:
+                producto = _crear_producto_usado(datos, usuario)
+            nota = 'Compra de usado — contrato de compraventa'
+            if datos['cupon']:
+                nota += f' (cupón {datos["cupon"]})'
+            fila, movimiento = aplicar_ajuste(
+                producto, datos['sucursal'], delta=1,
+                tipo=MovimientoStock.Tipo.INGRESO, nota=nota, usuario=usuario,
+            )
+
+        contexto = {'request': request, 'config': ConfiguracionProductos.obtener()}
+        return Response({
+            'producto': ProductoSerializer(producto, context=contexto).data,
+            'stock': StockProductoSerializer(fila).data,
+            'movimiento': MovimientoStockSerializer(movimiento).data if movimiento else None,
+            'reutilizado': reutilizado,
+        }, status=201)
 
 
 class VentasView(_BaseInventario, APIView):

@@ -250,3 +250,27 @@ class TransferenciaStockSerializer(serializers.Serializer):
         if data['origen'].pk == data['destino'].pk:
             raise serializers.ValidationError('La sucursal de origen y la de destino son la misma.')
         return data
+
+
+class IngresoCompraventaSerializer(serializers.Serializer):
+    """Entrada de POST /compraventa/ingresar/: el equipo usado de un contrato.
+
+    Los textos vienen tal cual se cargaron en el documento; aca solo se
+    recortan espacios y se exige poder identificar el equipo (marca o modelo).
+    """
+
+    marca = serializers.CharField(required=False, allow_blank=True, max_length=60)
+    modelo = serializers.CharField(required=False, allow_blank=True, max_length=120)
+    color = serializers.CharField(required=False, allow_blank=True, max_length=60)
+    imei1 = serializers.CharField(required=False, allow_blank=True, max_length=40)
+    imei2 = serializers.CharField(required=False, allow_blank=True, max_length=40)
+    cupon = serializers.CharField(required=False, allow_blank=True, max_length=40)
+    bateria = serializers.IntegerField(required=False, allow_null=True, min_value=0, max_value=100)
+    sucursal = _campo_sucursal()
+
+    def validate(self, data):
+        for campo in ('marca', 'modelo', 'color', 'imei1', 'imei2', 'cupon'):
+            data[campo] = (data.get(campo) or '').strip()
+        if not data['marca'] and not data['modelo']:
+            raise serializers.ValidationError('Cargá al menos la marca o el modelo del equipo.')
+        return data

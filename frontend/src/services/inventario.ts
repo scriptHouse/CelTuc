@@ -1,4 +1,4 @@
-import type { FacturacionVenta } from '@/types'
+import type { FacturacionVenta, ProductoCatalogo } from '@/types'
 import { api } from '@/lib/api'
 import { useAuth } from '@/store/auth'
 
@@ -103,6 +103,38 @@ export function transferirStock(
   input: TransferenciaInput,
 ): Promise<{ origen: StockRow; destino: StockRow }> {
   return api.post('/inventario/stock/transferir/', input, token())
+}
+
+/** El equipo usado de un contrato de compraventa, para darlo de alta. */
+export interface IngresoCompraventaInput {
+  marca?: string
+  modelo?: string
+  color?: string
+  imei1?: string
+  imei2?: string
+  cupon?: string
+  /** 0–100; null u omitido = sin dato. */
+  bateria?: number | null
+  sucursal: number
+}
+
+export interface IngresoCompraventaResultado {
+  producto: ProductoCatalogo
+  stock: StockRow
+  movimiento: MovimientoStock | null
+  /** El IMEI ya estaba en el catálogo: se sumó al producto existente. */
+  reutilizado: boolean
+}
+
+/**
+ * Alta de mostrador del equipo de un contrato de compraventa: crea el producto
+ * (categoría "Equipos usados") y suma 1 unidad. Solo pide `ver_inventario`
+ * (no admin); queda auditado en el backend (ModeloBase + app auditoría).
+ */
+export function ingresarCompraventa(
+  input: IngresoCompraventaInput,
+): Promise<IngresoCompraventaResultado> {
+  return api.post('/inventario/compraventa/ingresar/', input, token())
 }
 
 export type FormaPago = 'efectivo' | 'transferencia' | 'tarjeta' | 'otro'
