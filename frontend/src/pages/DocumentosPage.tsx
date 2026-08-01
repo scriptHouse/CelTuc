@@ -11,7 +11,7 @@ import { useAuth } from '@/store/auth'
 import { cn, ctStagger } from '@/lib/utils'
 import { PaperScaler } from '@/documentos/PaperScaler'
 import { SUCURSALES_DOC, SUCURSAL_DOC_POR_DEFECTO, direccionDeSucursal } from '@/documentos/content'
-import type { CompraventaData } from '@/documentos/compraventaContent'
+import { cvTieneEquipo, type CompraventaData } from '@/documentos/compraventaContent'
 import { DOC_MODULES, PROXIMOS_DOCS } from '@/documentos/registry'
 
 /** Sucursal del encabezado de todos los documentos. Como en la venta rápida:
@@ -65,7 +65,7 @@ export function DocumentosPage() {
   // confirmación). El modal también se ofrece solo al exportar el PDF.
   const [sumarInv, setSumarInv] = useState(false)
   const cv = active.id === 'compraventa' ? (datos as CompraventaData) : null
-  const equipoCargado = !!cv && (cv.marca.trim() !== '' || cv.modelo.trim() !== '')
+  const equipoCargado = !!cv && cvTieneEquipo(cv)
 
   // Mientras no elija una a mano, seguimos la sucursal de su cuenta (puede
   // llegar tras el refresco de sesión que hace el Layout al montar la app).
@@ -221,7 +221,7 @@ export function DocumentosPage() {
                 title={
                   equipoCargado
                     ? 'Sumar el equipo del contrato al inventario'
-                    : 'Completá la marca o el modelo del equipo para poder sumarlo'
+                    : 'Completá el modelo del equipo para poder sumarlo'
                 }
               >
                 <PackagePlus className="h-4 w-4" /> Sumar a inventario

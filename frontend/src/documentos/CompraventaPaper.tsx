@@ -2,6 +2,7 @@ import type { CSSProperties } from 'react'
 import { Body, CtHeader, Field, INK, Inline, Paper, STD_CONTENT_W, STD_PAD, STD_W, TitleBar, pt } from './kit'
 import {
   CV_CARACTERISTICAS,
+  CV_CARACT_FILA_H,
   CV_CUARTA,
   CV_FIRMAS,
   CV_H,
@@ -52,11 +53,14 @@ export function CompraventaPaper({ datos, onChange, readOnly, direccion }: Paper
 
         {/* Características del equipo: bloque alineado y sangrado */}
         <div style={{ marginTop: 7, marginBottom: 3, paddingLeft: 14 }}>
-          {CV_CARACTERISTICAS.map((c, i) => {
+          {CV_CARACTERISTICAS.map((c) => {
             const label = limpiarEtiqueta(c.label)
-            const largo = i === CV_CARACTERISTICAS.length - 1 // "Observaciones (…)"
+            const largo = !!c.largo // "Porcentaje de batería" y "Observaciones (…)"
             return (
-              <div key={c.f} style={{ height: 21, display: 'flex', alignItems: 'flex-end', fontSize: pt(10) }}>
+              <div
+                key={c.f}
+                style={{ height: CV_CARACT_FILA_H, display: 'flex', alignItems: 'flex-end', fontSize: pt(10) }}
+              >
                 <span
                   style={{
                     width: largo ? undefined : LABEL_COL,

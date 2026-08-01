@@ -29,11 +29,13 @@ function clausulaRich(c: Clausula, d: CompraventaData): ExcelJS.CellValue {
 export async function construirCompraventaXlsx(d: CompraventaData, direccion?: string): Promise<Blob> {
   const { wb, ws } = nuevaHoja('COMPRA VENTA')
   setCols(ws, STD_COLS)
+  // El renglón de batería (fila 17) sale del aire que sobraba antes de las
+  // firmas: la hoja sigue teniendo 50 filas y el mismo alto total.
   setRows(ws, [
     15, 15, 15, 15, 5.1, // 1-5
-    ...Array(36).fill(15), // 6-41
-    20.2, // 42
-    ...Array(7).fill(15), // 43-49
+    ...Array(37).fill(15), // 6-42
+    20.2, // 43
+    ...Array(6).fill(15), // 44-49
     15.8, // 50
   ])
   ;[
@@ -46,11 +48,12 @@ export async function construirCompraventaXlsx(d: CompraventaData, direccion?: s
     'B14:H14',
     'B15:H15',
     'B16:H16',
-    'B17:I18',
-    'B19:I21',
-    'B22:I29',
-    'B30:I33',
-    'B34:I41',
+    'B17:H17',
+    'B18:I19',
+    'B20:I22',
+    'B23:I30',
+    'B31:I34',
+    'B35:I42',
     'B46:D46',
     'F46:H46',
     'B47:D47',
@@ -77,11 +80,11 @@ export async function construirCompraventaXlsx(d: CompraventaData, direccion?: s
 
   const clausulas: Array<[string, Clausula]> = [
     ['B8', CV_PRIMERA],
-    ['B17', CV_SEGUNDA],
-    ['B19', CV_TERCERA],
-    ['B22', CV_CUARTA],
-    ['B30', CV_QUINTA],
-    ['B34', CV_SEXTA],
+    ['B18', CV_SEGUNDA],
+    ['B20', CV_TERCERA],
+    ['B23', CV_CUARTA],
+    ['B31', CV_QUINTA],
+    ['B35', CV_SEXTA],
   ]
   for (const [addr, c] of clausulas) {
     ws.getCell(addr).value = clausulaRich(c, d)

@@ -29,6 +29,17 @@ function extraerBateria(obs: string): string {
   return m && Number(m[1]) <= 100 ? m[1] : ''
 }
 
+/**
+ * % de batería con el que arranca el modal: el campo del contrato (tolera que
+ * lo hayan escrito con el símbolo, "99%") y, si está vacío, lo que diga
+ * Observaciones — así los contratos donde se anotaba ahí siguen funcionando.
+ */
+function bateriaDelContrato(datos: CompraventaData): string {
+  const propio = datos.bateria.trim().replace(/\s*%$/, '')
+  if (/^\d{1,3}$/.test(propio) && Number(propio) <= 100) return propio
+  return extraerBateria(datos.obs)
+}
+
 export function SumarCompraventaInventario({
   abierto,
   datos,
@@ -63,7 +74,7 @@ export function SumarCompraventaInventario({
   const [sucursalSel, setSucursalSel] = useState('')
 
   useEffect(() => {
-    if (abierto) setBateria(extraerBateria(datos.obs))
+    if (abierto) setBateria(bateriaDelContrato(datos))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [abierto])
 
@@ -188,7 +199,9 @@ export function SumarCompraventaInventario({
                   data-autofocus
                 />
                 <p className="mt-1 text-xs text-ink-400">
-                  {batValida ? 'Queda en el nombre del producto.' : 'Tiene que ser un número de 0 a 100.'}
+                  {batValida
+                    ? 'Se toma del contrato y queda en el nombre del producto.'
+                    : 'Tiene que ser un número de 0 a 100.'}
                 </p>
               </div>
               <div>

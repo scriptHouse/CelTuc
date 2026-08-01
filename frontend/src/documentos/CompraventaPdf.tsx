@@ -3,6 +3,7 @@ import { BOLD, PAGINA_ISO_STYLE, PdfBody, PdfCtHeader, PdfPaper, PdfTitle, REG, 
 import { INK, STD_CONTENT_W, STD_PAD, STD_W, pt } from './kit'
 import {
   CV_CARACTERISTICAS,
+  CV_CARACT_FILA_H,
   CV_CUARTA,
   CV_FIRMAS,
   CV_H,
@@ -40,11 +41,11 @@ export function CompraventaPdf({ datos, direccion }: { datos: CompraventaData; d
 
             {/* Características del equipo: bloque alineado y sangrado */}
             <View style={{ marginTop: 7, marginBottom: 3, paddingLeft: 14 }}>
-              {CV_CARACTERISTICAS.map((c, i) => {
+              {CV_CARACTERISTICAS.map((c) => {
                 const label = limpiarEtiqueta(c.label)
-                const largo = i === CV_CARACTERISTICAS.length - 1
+                const largo = !!c.largo
                 return (
-                  <View key={c.f} style={{ height: 21, flexDirection: 'row', alignItems: 'flex-end' }}>
+                  <View key={c.f} style={{ height: CV_CARACT_FILA_H, flexDirection: 'row', alignItems: 'flex-end' }}>
                     <Text
                       style={{
                         width: largo ? undefined : LABEL_COL,

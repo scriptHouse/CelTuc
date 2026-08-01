@@ -28,10 +28,15 @@ export interface CompraventaData {
   color: string
   imei1: string
   imei2: string
+  /** % de batería del equipo (0-100, sin el símbolo). Viaja al inventario. */
+  bateria: string
   obs: string
   precioNum: string
   precioLetras: string
 }
+
+/** Marca precargada (la mayoría de los usados que entran): se puede borrar. */
+export const CV_MARCA_DEFECTO = 'iPhone'
 
 export function compraventaVacia(): CompraventaData {
   const { dia, mes, anio } = hoyDMY()
@@ -42,15 +47,26 @@ export function compraventaVacia(): CompraventaData {
     fechaAnio: anio,
     nombreVendedor: '',
     dniVendedor: '',
-    marca: '',
+    marca: CV_MARCA_DEFECTO,
     modelo: '',
     color: '',
     imei1: '',
     imei2: '',
+    bateria: '',
     obs: '',
     precioNum: '',
     precioLetras: '',
   }
+}
+
+/**
+ * ¿El contrato identifica un equipo concreto? La marca viene precargada, así que
+ * sola no alcanza: hace falta el modelo (o una marca distinta de la sugerida).
+ * Con esto el documento en blanco no se ofrece para sumar al inventario.
+ */
+export function cvTieneEquipo(d: CompraventaData): boolean {
+  const marca = d.marca.trim()
+  return d.modelo.trim() !== '' || (marca !== '' && marca !== CV_MARCA_DEFECTO)
 }
 
 export const CV_W = 776
@@ -104,14 +120,39 @@ function etiqueta(linea: string): string {
   return linea.split(/_{3,}/)[0]
 }
 
-export const CV_CARACTERISTICAS = [
-  { label: etiqueta(L_CV_MARCA), f: 'marca' as const },
-  { label: etiqueta(L_CV_MODELO), f: 'modelo' as const },
-  { label: etiqueta(L_CV_COLOR), f: 'color' as const },
-  { label: etiqueta(L_CV_IMEI1), f: 'imei1' as const },
-  { label: etiqueta(L_CV_IMEI2), f: 'imei2' as const },
-  { label: etiqueta(L_CV_OBS), f: 'obs' as const },
+/**
+ * Renglón del % de batería. No sale del Excel original (los de `textosLegales`
+ * están generados desde la planilla y no se editan a mano): lo agregamos acá
+ * para poder dejarlo asentado en el contrato y llevarlo al inventario.
+ */
+const L_CV_BATERIA =
+  '·         Porcentaje de batería: ______________________________________________________________'
+
+/** Un renglón de características del equipo. */
+export interface CaracteristicaCV {
+  label: string
+  f: keyof CompraventaData
+  /** Etiqueta larga: ocupa lo que necesita en vez de la columna fija. */
+  largo?: boolean
+}
+
+export const CV_CARACTERISTICAS: CaracteristicaCV[] = [
+  { label: etiqueta(L_CV_MARCA), f: 'marca' },
+  { label: etiqueta(L_CV_MODELO), f: 'modelo' },
+  { label: etiqueta(L_CV_COLOR), f: 'color' },
+  { label: etiqueta(L_CV_IMEI1), f: 'imei1' },
+  { label: etiqueta(L_CV_IMEI2), f: 'imei2' },
+  { label: etiqueta(L_CV_BATERIA), f: 'bateria', largo: true },
+  { label: etiqueta(L_CV_OBS), f: 'obs', largo: true },
 ]
+
+/**
+ * Alto del bloque de características en el papel/PDF. Es fijo: se reparte entre
+ * los renglones, así sumar uno nuevo no corre el resto del contrato ni el pie
+ * de firmas (el documento sigue entrando en una sola página).
+ */
+const CV_CARACT_BLOQUE_H = 126
+export const CV_CARACT_FILA_H = CV_CARACT_BLOQUE_H / CV_CARACTERISTICAS.length
 
 /** Pie de firmas tal cual el Excel nuevo. */
 export const CV_FIRMAS = {
