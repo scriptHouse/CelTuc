@@ -67,6 +67,13 @@ const VISTAS: Array<{ id: Vista; label: string }> = [
   { id: 'no-informado', label: 'No informado' },
 ]
 
+/**
+ * Ancho de las columnas de precio. Lo comparten el encabezado y cada fila para
+ * que "lista" y "contado/transf." queden alineados en columna de punta a punta.
+ * En mobile no aplica: ahí las celdas se apilan y llevan su propia etiqueta.
+ */
+const COL_PRECIO = 'md:w-[5.75rem] lg:w-[6.75rem]'
+
 export function InventarioPage() {
   const queryClient = useQueryClient()
   const toast = useToast()
@@ -385,6 +392,7 @@ export function InventarioPage() {
                 </h2>
                 <span className="tnum shrink-0 text-xs text-ink-400">{num(items.length)}</span>
               </div>
+              <EncabezadoColumnas sel={sel} />
               <ul className="divide-y divide-line">
                 {items.map((p, i) => (
                   <FilaProducto
@@ -452,6 +460,63 @@ function PillSucursal({
   )
 }
 
+/**
+ * Encabezado de columnas de la tarjeta (solo md+): nombra "Lista" y
+ * "Contado/transf." para que las filas muestren solo los números.
+ */
+function EncabezadoColumnas({ sel }: { sel: SeleccionSucursal }) {
+  return (
+    <div
+      className="hidden items-center gap-3 border-b border-line bg-ink-50/50 px-4 py-1.5 text-[0.6rem] font-semibold uppercase tracking-[0.12em] text-ink-400 sm:px-5 md:flex"
+      aria-hidden
+    >
+      <span className="min-w-0 flex-1">Producto</span>
+      <span className={cn('shrink-0 text-right', COL_PRECIO)}>Lista</span>
+      <span className={cn('shrink-0 text-right', COL_PRECIO)}>Contado/transf.</span>
+      <span className={cn('shrink-0 text-right', sel === 'todas' ? 'w-10' : 'pr-[2.625rem]')}>
+        {sel === 'todas' ? 'Total' : 'Stock'}
+      </span>
+    </div>
+  )
+}
+
+/**
+ * Celda de precio: columna alineada a la derecha en md+, y en mobile una
+ * mini-tarjeta con su etiqueta arriba (ahí no hay encabezado que la nombre).
+ */
+function CeldaPrecio({
+  label,
+  valor,
+  destacado = false,
+}: {
+  label: string
+  valor: string | number | null | undefined
+  destacado?: boolean
+}) {
+  const vacio = valor == null || valor === ''
+  return (
+    <div
+      className={cn(
+        'min-w-0 flex-1 rounded-lg border border-line bg-canvas/60 px-2 py-1 md:flex-none md:rounded-none md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-right',
+        COL_PRECIO,
+      )}
+    >
+      <span className="block text-[0.6rem] font-medium uppercase tracking-[0.08em] text-ink-400 md:hidden">
+        {label}
+      </span>
+      <span
+        className={cn(
+          'tnum block truncate text-xs md:text-[0.8125rem]',
+          vacio ? 'text-ink-300' : destacado ? 'font-semibold text-ink-900' : 'text-ink-600',
+        )}
+        title={vacio ? 'Sin precio cargado' : `${label}: ${money0(Number(valor))}`}
+      >
+        {vacio ? '—' : money0(Number(valor))}
+      </span>
+    </div>
+  )
+}
+
 function FilaProducto({
   producto,
   admin,
@@ -478,12 +543,14 @@ function FilaProducto({
 
   const etiquetas = [producto.calidad, producto.marca, producto.nota].filter(Boolean).join(' · ')
   // Contado y transferencia comparten precio (misma regla que la Venta rápida de Caja).
-  const precios = [
-    lista != null ? `lista ${money0(Number(lista))}` : null,
-    cash != null ? `contado/transf. ${money0(Number(cash))}` : null,
-  ]
-    .filter(Boolean)
-    .join(' · ')
+  // Van en columnas propias: en md+ alineadas bajo el encabezado; en mobile,
+  // como dos celdas etiquetadas en su propio renglón.
+  const columnasPrecio = (
+    <div className="order-last flex w-full basis-full items-stretch gap-2 md:order-none md:w-auto md:shrink-0 md:basis-auto md:items-center md:gap-3">
+      <CeldaPrecio label="Lista" valor={lista} />
+      <CeldaPrecio label="Contado/transf." valor={cash} destacado />
+    </div>
+  )
 
   if (sel === 'todas') {
     const total = activas.reduce((acc, s) => acc + (filaDe(producto.id, s.id)?.cantidad ?? 0), 0)
@@ -492,19 +559,19 @@ function FilaProducto({
       return fila?.sin_dato && fila.cantidad === 0
     })
     return (
-      <li className="ct-stagger-fade flex items-center gap-3 px-4 py-3 sm:px-5" style={estilo}>
+      <li
+        className="ct-stagger-fade flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 sm:px-5 md:flex-nowrap"
+        style={estilo}
+      >
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-ink-900">
             {producto.nombre}
             {producto.a_pedido && <Badge tone="outline" className="ml-2 align-middle">a pedido</Badge>}
           </p>
-          <p className="truncate text-xs text-ink-400">
-            {etiquetas}
-            {etiquetas && precios && ' · '}
-            {precios && <span className="tnum">{precios}</span>}
-          </p>
+          {etiquetas && <p className="truncate text-xs text-ink-400">{etiquetas}</p>}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        {columnasPrecio}
+        <div className="ml-auto flex shrink-0 items-center gap-2 md:ml-0">
           {activas.map((s) => {
             const fila = filaDe(producto.id, s.id)
             const bajo = fila && fila.stock_minimo !== null && fila.cantidad <= fila.stock_minimo
@@ -548,23 +615,30 @@ function FilaProducto({
   const trabajando = ocupado === claveOcupado
 
   return (
-    <li className="ct-stagger-fade flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 sm:px-5" style={estilo}>
+    <li
+      className="ct-stagger-fade flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 sm:px-5 md:flex-nowrap"
+      style={estilo}
+    >
       <div className="min-w-0 flex-1 basis-52">
         <p className="truncate text-sm font-medium text-ink-900">
           {producto.nombre}
           {producto.a_pedido && <Badge tone="outline" className="ml-2 align-middle">a pedido</Badge>}
         </p>
-        <p className="truncate text-xs text-ink-400">
-          {etiquetas}
-          {etiquetas && precios && ' · '}
-          {precios && <span className="tnum">{precios}</span>}
-          {admin && producto.costo_usd != null && (
-            <span className="tnum"> · costo US$ {num(Number(producto.costo_usd))}</span>
-          )}
-        </p>
+        {(etiquetas || (admin && producto.costo_usd != null)) && (
+          <p className="truncate text-xs text-ink-400">
+            {etiquetas}
+            {admin && producto.costo_usd != null && (
+              <span className="tnum">
+                {etiquetas && ' · '}costo US$ {num(Number(producto.costo_usd))}
+              </span>
+            )}
+          </p>
+        )}
       </div>
 
-      <div className="flex shrink-0 items-center gap-1.5">
+      {columnasPrecio}
+
+      <div className="ml-auto flex shrink-0 items-center gap-1.5 md:ml-0">
         {sinDato && (
           <Badge tone="outline" title="La planilla no traía cantidad: cargala para informarla">
             (no informado)
