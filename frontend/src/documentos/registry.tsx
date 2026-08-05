@@ -15,6 +15,16 @@ import { CompraventaPaper } from './CompraventaPaper'
 import { CV_H, CV_W, compraventaVacia, type CompraventaData } from './compraventaContent'
 import { GarantiaAccPaper } from './GarantiaAccPaper'
 import { GACC_H, GACC_W, gAccVacia, type GAccData } from './garantiaAccContent'
+import {
+  resumenCompra,
+  resumenCompraventa,
+  resumenExtension,
+  resumenMayorista,
+  resumenRecepcion,
+  resumenReparacion,
+  resumenSena,
+  resumenVacio,
+} from './resumen'
 
 /* ============================================================================
  * Catálogo de documentos. Cada entrada es un `DocModule`: su preview HTML
@@ -32,6 +42,7 @@ export const recepcionModule: DocModule<RecepcionData> = {
   naturalH: NATURAL_H,
   crearVacio: recepcionVacia,
   nombreArchivo: (d) => (d.cupon.trim() ? `recepcion-${d.cupon.trim()}` : 'recepcion'),
+  resumen: resumenRecepcion,
   Paper: RecepcionPaper,
   loadPdf: async () => (await import('./RecepcionPdf')).RecepcionPdf,
   loadXlsx: async () => (await import('./recepcionXlsx')).construirRecepcionXlsx,
@@ -45,6 +56,7 @@ export const reparacionModule: DocModule<ReparacionData> = {
   naturalH: REP_H,
   crearVacio: reparacionVacia,
   nombreArchivo: (d) => (d.cupon.trim() ? `reparacion-${d.cupon.trim()}` : 'reparacion'),
+  resumen: resumenReparacion,
   Paper: ReparacionPaper,
   loadPdf: async () => (await import('./ReparacionPdf')).ReparacionPdf,
   loadXlsx: async () => (await import('./reparacionXlsx')).construirReparacionXlsx,
@@ -58,6 +70,7 @@ export const compraModule: DocModule<CompraData> = {
   naturalH: COMPRA_H,
   crearVacio: compraVacia,
   nombreArchivo: (d) => (d.cupon.trim() ? `compra-${d.cupon.trim()}` : 'compra'),
+  resumen: resumenCompra,
   Paper: CompraPaper,
   loadPdf: async () => (await import('./CompraPdf')).CompraPdf,
   loadXlsx: async () => (await import('./compraXlsx')).construirCompraXlsx,
@@ -71,6 +84,7 @@ export const mayoristaModule: DocModule<MayoristaData> = {
   naturalH: MAY_H,
   crearVacio: mayoristaVacia,
   nombreArchivo: (d) => (d.cupon.trim() ? `compra-mayorista-${d.cupon.trim()}` : 'compra-mayorista'),
+  resumen: resumenMayorista,
   Paper: MayoristaPaper,
   loadPdf: async () => (await import('./MayoristaPdf')).MayoristaPdf,
   loadXlsx: async () => (await import('./mayoristaXlsx')).construirMayoristaXlsx,
@@ -84,6 +98,7 @@ export const extensionModule: DocModule<ExtensionData> = {
   naturalH: EXT_H,
   crearVacio: extensionVacia,
   nombreArchivo: (d) => (d.cupon.trim() ? `extension-garantia-${d.cupon.trim()}` : 'extension-garantia'),
+  resumen: resumenExtension,
   Paper: ExtensionPaper,
   loadPdf: async () => (await import('./ExtensionPdf')).ExtensionPdf,
   loadXlsx: async () => (await import('./extensionXlsx')).construirExtensionXlsx,
@@ -97,6 +112,7 @@ export const senaModule: DocModule<SenaData> = {
   naturalH: SENA_H,
   crearVacio: senaVacia,
   nombreArchivo: (d) => (d.numeroRecibo.trim() ? `sena-${d.numeroRecibo.trim()}` : 'sena'),
+  resumen: resumenSena,
   Paper: SenaPaper,
   loadPdf: async () => (await import('./SenaPdf')).SenaPdf,
   loadXlsx: async () => (await import('./senaXlsx')).construirSenaXlsx,
@@ -110,6 +126,7 @@ export const compraventaModule: DocModule<CompraventaData> = {
   naturalH: CV_H,
   crearVacio: compraventaVacia,
   nombreArchivo: (d) => (d.cupon.trim() ? `compraventa-${d.cupon.trim()}` : 'compraventa'),
+  resumen: resumenCompraventa,
   Paper: CompraventaPaper,
   loadPdf: async () => (await import('./CompraventaPdf')).CompraventaPdf,
   loadXlsx: async () => (await import('./compraventaXlsx')).construirCompraventaXlsx,
@@ -123,6 +140,7 @@ export const garantiaAccModule: DocModule<GAccData> = {
   naturalH: GACC_H,
   crearVacio: gAccVacia,
   nombreArchivo: () => 'garantia-accesorios',
+  resumen: resumenVacio,
   Paper: GarantiaAccPaper,
   loadPdf: async () => (await import('./GarantiaAccPdf')).GarantiaAccPdf,
   loadXlsx: async () => (await import('./garantiaAccXlsx')).construirGarantiaAccXlsx,

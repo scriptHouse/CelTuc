@@ -123,6 +123,7 @@ INSTALLED_APPS = [
     'caja',
     'facturacion',
     'comunicados',
+    'documentos',
     'auditoria',
 ]
 

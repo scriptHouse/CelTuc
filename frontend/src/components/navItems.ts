@@ -26,9 +26,11 @@ export const navItems: NavItem[] = [
   { to: '/service', label: 'Service', icon: Wrench, permiso: 'ver_precios_service' },
   { to: '/productos', label: 'Productos', icon: ShoppingBag, permiso: 'ver_productos' },
   { to: '/equipos', label: 'Equipos', icon: ScanSearch, permiso: 'ver_equipos' },
-  // Documentos: por ahora es 100 % front (sin backend), por eso queda visible a
-  // toda cuenta autenticada. Cuando se sume el backend, asignarle un permiso
-  // (p. ej. 'ver_documentos') acá y en la ruta.
+  // Documentos queda visible a toda cuenta autenticada (no tiene permiso de
+  // módulo propio). El backend acota lo sensible por su cuenta: en el historial
+  // cada empleado ve solo los documentos que generó él y los administradores
+  // ven los de todo el equipo. Si algún día hace falta cerrarlo del todo,
+  // sumarle un permiso (p. ej. 'ver_documentos') acá y en la ruta de App.tsx.
   { to: '/documentos', label: 'Documentos', icon: FileText },
   { to: '/usuarios', label: 'Usuarios', icon: UserCog, soloAdmin: true },
   { to: '/auditoria', label: 'Auditoría', icon: History, soloSuper: true },

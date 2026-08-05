@@ -60,6 +60,7 @@ AUDITADOS = {
         'omitir': lambda instancia: instancia.venta_id is not None,
     },
     'comunicados.Comunicado': {},
+    'documentos.DocumentoGenerado': {},
     'comun.Preferencia': {},
 }
 

@@ -28,6 +28,7 @@ MODULOS = {
     'cotizaciones': 'Cotizaciones',
     'precios_service': 'Service',
     'comunicados': 'Comunicados',
+    'documentos': 'Documentos',
     'comun': 'Preferencias',
 }
 

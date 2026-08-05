@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Building2, Clock, Eraser, FileSpreadsheet, FileText, Loader2, PackagePlus, Printer } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
+import { Archive, Building2, Clock, Eraser, FileSpreadsheet, FileText, Loader2, PackagePlus, PenLine, Printer } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -13,6 +15,8 @@ import { PaperScaler } from '@/documentos/PaperScaler'
 import { SUCURSALES_DOC, SUCURSAL_DOC_POR_DEFECTO, direccionDeSucursal } from '@/documentos/content'
 import { cvTieneEquipo, type CompraventaData } from '@/documentos/compraventaContent'
 import { DOC_MODULES, PROXIMOS_DOCS } from '@/documentos/registry'
+import { HistorialDocumentos, QK_HISTORIAL } from '@/documentos/HistorialDocumentos'
+import { registrarDocumento, type FormatoDocumento } from '@/services/documentos'
 
 /** Sucursal del encabezado de todos los documentos. Como en la venta rápida:
  *  cada visita arranca en la del empleado logueado y elegir otra a mano vale
@@ -44,7 +48,9 @@ function descargar(blob: Blob, filename: string) {
 export function DocumentosPage() {
   const toast = useToast()
   const confirm = useConfirm()
+  const qc = useQueryClient()
 
+  const [vista, setVista] = useState<'generar' | 'historial'>('generar')
   const [activeId, setActiveId] = useState(DOC_MODULES[0].id)
   // Estado por documento: se preserva al cambiar de pestaña dentro de la sesión.
   const [estados, setEstados] = useState<Record<string, unknown>>(() =>
@@ -81,14 +87,58 @@ export function DocumentosPage() {
     setSucursal(v)
   }
 
+  /**
+   * Sube al historial el archivo recién generado (con los datos del formulario
+   * y quién lo hizo). Es de "mejor esfuerzo" a propósito: la descarga ya
+   * ocurrió, así que un fallo de red avisa pero NUNCA le saca al usuario el
+   * documento que tenía que entregar.
+   */
+  async function archivar(
+    blob: Blob,
+    formato: FormatoDocumento,
+    nombreArchivo: string,
+  ): Promise<boolean> {
+    try {
+      const r = active.resumen(datos)
+      await registrarDocumento(
+        {
+          tipo: active.id,
+          tipoNombre: active.nombre,
+          formato,
+          nombreArchivo,
+          sucursal,
+          referencia: r.referencia,
+          cliente: r.cliente,
+          clienteDocumento: r.clienteDocumento,
+          detalle: r.detalle,
+          total: r.total,
+          datos,
+        },
+        blob,
+      )
+      await qc.invalidateQueries({ queryKey: [QK_HISTORIAL] })
+      return true
+    } catch (e) {
+      console.error(e)
+      toast.error(
+        'Quedó sin registrar en el historial',
+        'El archivo se descargó igual. Revisá la conexión y volvé a exportarlo para archivarlo.',
+      )
+      return false
+    }
+  }
+
   async function exportarPdf() {
     if (busy) return
     setBusy('pdf')
     try {
       const [{ pdf }, Pdf] = await Promise.all([import('@react-pdf/renderer'), active.loadPdf()])
       const blob = await pdf(<Pdf datos={datos} direccion={direccion} />).toBlob()
-      descargar(blob, `${active.nombreArchivo(datos)}.pdf`)
-      toast.success('PDF generado', `Se descargó: ${active.nombre}.`)
+      const nombre = `${active.nombreArchivo(datos)}.pdf`
+      descargar(blob, nombre)
+      if (await archivar(blob, 'pdf', nombre)) {
+        toast.success('PDF generado', `Se descargó y quedó en el historial: ${active.nombre}.`)
+      }
       // Contrato exportado con equipo cargado: ofrecer sumarlo al inventario.
       if (cv && equipoCargado) setSumarInv(true)
     } catch (e) {
@@ -105,8 +155,11 @@ export function DocumentosPage() {
     try {
       const construir = await active.loadXlsx()
       const blob = await construir(datos, direccion)
-      descargar(blob, `${active.nombreArchivo(datos)}.xlsx`)
-      toast.success('Excel generado', 'Se descargó la planilla editable.')
+      const nombre = `${active.nombreArchivo(datos)}.xlsx`
+      descargar(blob, nombre)
+      if (await archivar(blob, 'xlsx', nombre)) {
+        toast.success('Excel generado', 'Se descargó la planilla y quedó en el historial.')
+      }
     } catch (e) {
       console.error(e)
       toast.error('No se pudo generar el Excel', 'Probá de nuevo en un momento.')
@@ -127,6 +180,7 @@ export function DocumentosPage() {
     try {
       const [{ pdf }, Pos80] = await Promise.all([import('@react-pdf/renderer'), active.loadPos80()])
       const blob = await pdf(<Pos80 direccion={direccion} />).toBlob()
+      const nombre = `${active.nombreArchivo(datos)}-ticket.pdf`
       const url = URL.createObjectURL(blob)
       const win = window.open(url, '_blank')
       if (win) {
@@ -135,9 +189,10 @@ export function DocumentosPage() {
       } else {
         // Popup bloqueado: caemos a descarga.
         URL.revokeObjectURL(url)
-        descargar(blob, `${active.nombreArchivo(datos)}-ticket.pdf`)
+        descargar(blob, nombre)
         toast.success('Ticket POS80 descargado', 'Abrilo e imprimí a tamaño real (100%).')
       }
+      await archivar(blob, 'pos80', nombre)
     } catch (e) {
       console.error(e)
       toast.error('No se pudo generar el ticket', 'Probá de nuevo en un momento.')
@@ -167,97 +222,124 @@ export function DocumentosPage() {
         icon={FileText}
         eyebrow="Plantillas"
         title="Documentos"
-        subtitle="Completá los formularios de CelTuc y exportalos en PDF o Excel editable, idénticos al original."
+        subtitle="Completá los formularios de CelTuc, exportalos idénticos al original y consultá todo lo que se generó."
         className="ct-rise"
       />
 
-      {/* Selector de tipo de documento. Flex centrado: mismo ancho por tarjeta
-          que una grilla de 2/3/4 columnas, pero la última fila (si queda
-          incompleta) se centra en lugar de dejar un hueco al costado. */}
-      <div className="ct-rise mb-4 flex flex-wrap justify-center">
-        {DOC_MODULES.map((m, i) => (
-          <div key={m.id} className={CHIP_CELL}>
-            <DocChip
-              className="h-full w-full"
-              nombre={m.nombre}
-              descripcion={m.descripcion}
-              activo={m.id === activeId}
-              index={i}
-              onClick={() => setActiveId(m.id)}
-            />
-          </div>
-        ))}
-        {PROXIMOS_DOCS.map((d, i) => (
-          <div key={d.id} className={CHIP_CELL}>
-            <DocChip className="h-full w-full" nombre={d.nombre} descripcion={d.descripcion} index={DOC_MODULES.length + i} proximamente />
-          </div>
-        ))}
+      {/* Generar / Historial. Ocupa todo el ancho en móvil y se ajusta al
+          contenido desde sm: dos objetivos táctiles grandes en el celular. */}
+      <div
+        role="tablist"
+        aria-label="Vista del módulo Documentos"
+        className="ct-rise mb-4 flex gap-1 rounded-2xl border border-line bg-surface p-1 sm:w-fit"
+      >
+        <VistaTab
+          activo={vista === 'generar'}
+          icon={PenLine}
+          label="Generar"
+          onClick={() => setVista('generar')}
+        />
+        <VistaTab
+          activo={vista === 'historial'}
+          icon={Archive}
+          label="Historial"
+          onClick={() => setVista('historial')}
+        />
       </div>
 
-      {/* Editor */}
-      <Card className="ct-rise overflow-hidden">
-        <div className="flex flex-col gap-3 border-b border-line p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
-          <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold text-ink-900">{active.nombre}</h2>
-            <p className="text-xs text-ink-400">Tocá cualquier campo para completarlo.</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-1.5" title="Sucursal del encabezado (se aplica a todos los documentos)">
-              <Building2 className="h-4 w-4 shrink-0 text-ink-400" />
-              <Select
-                options={SUC_OPTIONS}
-                value={sucursal}
-                onChange={cambiarSucursal}
-                className="w-44"
-                triggerClassName="h-9 text-xs"
+      {vista === 'historial' ? (
+        <HistorialDocumentos />
+      ) : (
+        <>
+        {/* Selector de tipo de documento. Flex centrado: mismo ancho por tarjeta
+            que una grilla de 2/3/4 columnas, pero la última fila (si queda
+            incompleta) se centra en lugar de dejar un hueco al costado. */}
+        <div className="ct-rise mb-4 flex flex-wrap justify-center">
+          {DOC_MODULES.map((m, i) => (
+            <div key={m.id} className={CHIP_CELL}>
+              <DocChip
+                className="h-full w-full"
+                nombre={m.nombre}
+                descripcion={m.descripcion}
+                activo={m.id === activeId}
+                index={i}
+                onClick={() => setActiveId(m.id)}
               />
             </div>
-            {cv && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setSumarInv(true)}
-                disabled={!!busy || !equipoCargado}
-                title={
-                  equipoCargado
-                    ? 'Sumar el equipo del contrato al inventario'
-                    : 'Completá el modelo del equipo para poder sumarlo'
-                }
-              >
-                <PackagePlus className="h-4 w-4" /> Sumar a inventario
-              </Button>
-            )}
-            <Button variant="ghost" size="sm" onClick={limpiar} disabled={!!busy}>
-              <Eraser className="h-4 w-4" /> Limpiar
-            </Button>
-            <Button variant="outline" size="sm" onClick={exportarXlsx} disabled={!!busy}>
-              {busy === 'xlsx' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
-              Excel
-            </Button>
-            {active.loadPos80 && (
-              <Button variant="outline" size="sm" onClick={imprimirPos80} disabled={!!busy} title="Imprimir en ticketera térmica POS80 (80mm)">
-                {busy === 'pos80' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
-                Ticket POS80
-              </Button>
-            )}
-            <Button size="sm" onClick={exportarPdf} disabled={!!busy}>
-              {busy === 'pdf' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-              PDF
-            </Button>
-          </div>
+          ))}
+          {PROXIMOS_DOCS.map((d, i) => (
+            <div key={d.id} className={CHIP_CELL}>
+              <DocChip className="h-full w-full" nombre={d.nombre} descripcion={d.descripcion} index={DOC_MODULES.length + i} proximamente />
+            </div>
+          ))}
         </div>
 
-        {/* "Escritorio": el papel blanco sobre un fondo neutro */}
-        <div className="bg-canvas p-4 sm:p-6 lg:p-8">
-          <div className="mx-auto" style={{ maxWidth: Math.min(active.naturalW * 1.55, 820) }}>
-            <div className="overflow-hidden rounded-[5px] bg-white shadow-[0_12px_44px_rgba(10,10,11,0.18)] ring-1 ring-black/5">
-              <PaperScaler naturalW={active.naturalW} naturalH={active.naturalH}>
-                <Paper datos={datos} onChange={patch} direccion={direccion} />
-              </PaperScaler>
+        {/* Editor */}
+        <Card className="ct-rise overflow-hidden">
+          <div className="flex flex-col gap-3 border-b border-line p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
+            <div className="min-w-0">
+              <h2 className="truncate text-sm font-semibold text-ink-900">{active.nombre}</h2>
+              <p className="text-xs text-ink-400">Tocá cualquier campo para completarlo.</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1.5" title="Sucursal del encabezado (se aplica a todos los documentos)">
+                <Building2 className="h-4 w-4 shrink-0 text-ink-400" />
+                <Select
+                  options={SUC_OPTIONS}
+                  value={sucursal}
+                  onChange={cambiarSucursal}
+                  className="w-44"
+                  triggerClassName="h-9 text-xs"
+                />
+              </div>
+              {cv && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSumarInv(true)}
+                  disabled={!!busy || !equipoCargado}
+                  title={
+                    equipoCargado
+                      ? 'Sumar el equipo del contrato al inventario'
+                      : 'Completá el modelo del equipo para poder sumarlo'
+                  }
+                >
+                  <PackagePlus className="h-4 w-4" /> Sumar a inventario
+                </Button>
+              )}
+              <Button variant="ghost" size="sm" onClick={limpiar} disabled={!!busy}>
+                <Eraser className="h-4 w-4" /> Limpiar
+              </Button>
+              <Button variant="outline" size="sm" onClick={exportarXlsx} disabled={!!busy}>
+                {busy === 'xlsx' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
+                Excel
+              </Button>
+              {active.loadPos80 && (
+                <Button variant="outline" size="sm" onClick={imprimirPos80} disabled={!!busy} title="Imprimir en ticketera térmica POS80 (80mm)">
+                  {busy === 'pos80' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                  Ticket POS80
+                </Button>
+              )}
+              <Button size="sm" onClick={exportarPdf} disabled={!!busy}>
+                {busy === 'pdf' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                PDF
+              </Button>
             </div>
           </div>
-        </div>
-      </Card>
+
+          {/* "Escritorio": el papel blanco sobre un fondo neutro */}
+          <div className="bg-canvas p-4 sm:p-6 lg:p-8">
+            <div className="mx-auto" style={{ maxWidth: Math.min(active.naturalW * 1.55, 820) }}>
+              <div className="overflow-hidden rounded-[5px] bg-white shadow-[0_12px_44px_rgba(10,10,11,0.18)] ring-1 ring-black/5">
+                <PaperScaler naturalW={active.naturalW} naturalH={active.naturalH}>
+                  <Paper datos={datos} onChange={patch} direccion={direccion} />
+                </PaperScaler>
+              </div>
+            </div>
+          </div>
+        </Card>
+        </>
+      )}
 
       {cv && (
         <SumarCompraventaInventario
@@ -267,6 +349,37 @@ export function DocumentosPage() {
         />
       )}
     </div>
+  )
+}
+
+/** Pestaña del switch Generar / Historial. */
+function VistaTab({
+  activo,
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  activo: boolean
+  icon: LucideIcon
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={activo}
+      onClick={onClick}
+      className={cn(
+        'inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 sm:flex-none',
+        activo
+          ? 'bg-ink-950 text-on-ink shadow-[0_6px_18px_rgba(10,10,11,0.16)]'
+          : 'text-ink-500 hover:bg-ink-50 hover:text-ink-900',
+      )}
+    >
+      <Icon className="h-4 w-4" strokeWidth={1.9} />
+      {label}
+    </button>
   )
 }
 

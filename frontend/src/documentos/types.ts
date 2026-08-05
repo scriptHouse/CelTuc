@@ -46,6 +46,7 @@ export function recepcionVacia(): RecepcionData {
 }
 
 import type { ComponentType } from 'react'
+import type { ResumenDocumento } from './resumen'
 
 /** Props comunes a todos los "papeles" (preview HTML rellenable). */
 export interface PaperProps<T> {
@@ -75,6 +76,11 @@ export interface DocModule<T = unknown> {
   crearVacio: () => T
   /** Nombre de archivo base para las exportaciones (sin extensión). */
   nombreArchivo: (datos: T) => string
+  /**
+   * Campos con los que se archiva la exportación en el historial (cliente,
+   * cupón, equipo, importe). Ver `resumen.ts`.
+   */
+  resumen: (datos: T) => ResumenDocumento
   Paper: ComponentType<PaperProps<T>>
   loadPdf: () => Promise<ComponentType<{ datos: T; direccion?: string }>>
   loadXlsx: () => Promise<(datos: T, direccion?: string) => Promise<Blob>>
