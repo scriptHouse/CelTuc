@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Archive, Building2, Clock, Eraser, FileSpreadsheet, FileText, Loader2, PackagePlus, PenLine, Printer } from 'lucide-react'
+import { Archive, Building2, Clock, Eraser, FileSpreadsheet, FileText, Loader2, PackagePlus, PenLine, Printer, UserSearch } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
@@ -16,7 +16,13 @@ import { SUCURSALES_DOC, SUCURSAL_DOC_POR_DEFECTO, direccionDeSucursal } from '@
 import { cvTieneEquipo, type CompraventaData } from '@/documentos/compraventaContent'
 import { DOC_MODULES, PROXIMOS_DOCS } from '@/documentos/registry'
 import { HistorialDocumentos, QK_HISTORIAL } from '@/documentos/HistorialDocumentos'
-import { registrarDocumento, type FormatoDocumento } from '@/services/documentos'
+import { BuscarClienteModal } from '@/documentos/BuscarClienteModal'
+import {
+  registrarDocumento,
+  type ClienteSugerido,
+  type DocumentoArchivado,
+  type FormatoDocumento,
+} from '@/services/documentos'
 
 /** Sucursal del encabezado de todos los documentos. Como en la venta rápida:
  *  cada visita arranca en la del empleado logueado y elegir otra a mano vale
@@ -32,6 +38,16 @@ const CHIP_CELL = 'w-1/2 p-1 sm:w-1/3 lg:w-1/4'
 function leerSucursal(sucursalUsuario?: string | null): string {
   if (sucursalUsuario && SUC_NOMBRES.includes(sucursalUsuario)) return sucursalUsuario
   return SUCURSAL_DOC_POR_DEFECTO
+}
+
+/** "nombre, DNI y teléfono": qué datos del cliente completa esta plantilla. */
+function listaDeCampos(campos: { documento?: string; telefono?: string; email?: string }): string {
+  const partes = ['nombre']
+  if (campos.documento) partes.push('DNI')
+  if (campos.telefono) partes.push('teléfono')
+  if (campos.email) partes.push('mail')
+  if (partes.length === 1) return partes[0]
+  return `${partes.slice(0, -1).join(', ')} y ${partes[partes.length - 1]}`
 }
 
 function descargar(blob: Blob, filename: string) {
@@ -70,6 +86,7 @@ export function DocumentosPage() {
   // Compraventa: el equipo del contrato se puede sumar al inventario (con
   // confirmación). El modal también se ofrece solo al exportar el PDF.
   const [sumarInv, setSumarInv] = useState(false)
+  const [buscarCliente, setBuscarCliente] = useState(false)
   const cv = active.id === 'compraventa' ? (datos as CompraventaData) : null
   const equipoCargado = !!cv && cvTieneEquipo(cv)
 
@@ -87,20 +104,32 @@ export function DocumentosPage() {
     setSucursal(v)
   }
 
+  // Dónde vive el cliente en esta plantilla (cada una lo nombra distinto).
+  const campos = active.camposCliente
+  /** Valor cargado en un campo del formulario activo, o undefined si está vacío. */
+  function valorDe(campo?: string): string | undefined {
+    if (!campo) return undefined
+    const valor = (datos as Record<string, unknown>)[campo]
+    return typeof valor === 'string' && valor.trim() ? valor.trim() : undefined
+  }
+
   /**
    * Sube al historial el archivo recién generado (con los datos del formulario
    * y quién lo hizo). Es de "mejor esfuerzo" a propósito: la descarga ya
    * ocurrió, así que un fallo de red avisa pero NUNCA le saca al usuario el
    * documento que tenía que entregar.
+   *
+   * De paso, el backend deja al cliente del papel en la base compartida (la
+   * misma de facturas y ventas), así la próxima operación lo autocompleta.
    */
   async function archivar(
     blob: Blob,
     formato: FormatoDocumento,
     nombreArchivo: string,
-  ): Promise<boolean> {
+  ): Promise<DocumentoArchivado | null> {
     try {
       const r = active.resumen(datos)
-      await registrarDocumento(
+      const archivado = await registrarDocumento(
         {
           tipo: active.id,
           tipoNombre: active.nombre,
@@ -110,6 +139,9 @@ export function DocumentosPage() {
           referencia: r.referencia,
           cliente: r.cliente,
           clienteDocumento: r.clienteDocumento,
+          // Contacto: no se archiva con el papel, identifica al cliente.
+          clienteTelefono: valorDe(campos?.telefono),
+          clienteEmail: valorDe(campos?.email),
           detalle: r.detalle,
           total: r.total,
           datos,
@@ -117,15 +149,36 @@ export function DocumentosPage() {
         blob,
       )
       await qc.invalidateQueries({ queryKey: [QK_HISTORIAL] })
-      return true
+      return archivado
     } catch (e) {
       console.error(e)
       toast.error(
         'Quedó sin registrar en el historial',
         'El archivo se descargó igual. Revisá la conexión y volvé a exportarlo para archivarlo.',
       )
-      return false
+      return null
     }
+  }
+
+  /** Coletilla del toast cuando el documento además tocó la base de clientes. */
+  function avisoCliente(archivado: DocumentoArchivado): string {
+    const c = archivado.cliente_registrado
+    if (!c) return ''
+    return c.nuevo
+      ? ` ${c.nombre} quedó guardado en clientes.`
+      : ` Se actualizaron los datos de ${c.nombre} en clientes.`
+  }
+
+  /** Carga en el papel los datos de un cliente ya guardado. */
+  function traerCliente(cliente: ClienteSugerido) {
+    if (!campos) return
+    const cambios: Record<string, unknown> = { [campos.nombre]: cliente.nombre }
+    if (campos.documento && cliente.doc_numero) cambios[campos.documento] = cliente.doc_numero
+    if (campos.telefono && cliente.telefono) cambios[campos.telefono] = cliente.telefono
+    if (campos.email && cliente.email) cambios[campos.email] = cliente.email
+    patch(cambios)
+    setBuscarCliente(false)
+    toast.success('Datos cargados', `${cliente.nombre} · ${active.nombre}.`)
   }
 
   async function exportarPdf() {
@@ -136,8 +189,12 @@ export function DocumentosPage() {
       const blob = await pdf(<Pdf datos={datos} direccion={direccion} />).toBlob()
       const nombre = `${active.nombreArchivo(datos)}.pdf`
       descargar(blob, nombre)
-      if (await archivar(blob, 'pdf', nombre)) {
-        toast.success('PDF generado', `Se descargó y quedó en el historial: ${active.nombre}.`)
+      const archivado = await archivar(blob, 'pdf', nombre)
+      if (archivado) {
+        toast.success(
+          'PDF generado',
+          `Se descargó y quedó en el historial: ${active.nombre}.${avisoCliente(archivado)}`,
+        )
       }
       // Contrato exportado con equipo cargado: ofrecer sumarlo al inventario.
       if (cv && equipoCargado) setSumarInv(true)
@@ -157,8 +214,12 @@ export function DocumentosPage() {
       const blob = await construir(datos, direccion)
       const nombre = `${active.nombreArchivo(datos)}.xlsx`
       descargar(blob, nombre)
-      if (await archivar(blob, 'xlsx', nombre)) {
-        toast.success('Excel generado', 'Se descargó la planilla y quedó en el historial.')
+      const archivado = await archivar(blob, 'xlsx', nombre)
+      if (archivado) {
+        toast.success(
+          'Excel generado',
+          `Se descargó la planilla y quedó en el historial.${avisoCliente(archivado)}`,
+        )
       }
     } catch (e) {
       console.error(e)
@@ -292,6 +353,17 @@ export function DocumentosPage() {
                   triggerClassName="h-9 text-xs"
                 />
               </div>
+              {campos && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setBuscarCliente(true)}
+                  disabled={!!busy}
+                  title="Completar con los datos de un cliente ya guardado"
+                >
+                  <UserSearch className="h-4 w-4" /> Traer cliente
+                </Button>
+              )}
               {cv && (
                 <Button
                   variant="outline"
@@ -339,6 +411,16 @@ export function DocumentosPage() {
           </div>
         </Card>
         </>
+      )}
+
+      {campos && (
+        <BuscarClienteModal
+          abierto={buscarCliente}
+          documento={active.nombre}
+          completa={listaDeCampos(campos)}
+          onCerrar={() => setBuscarCliente(false)}
+          onElegir={traerCliente}
+        />
       )}
 
       {cv && (

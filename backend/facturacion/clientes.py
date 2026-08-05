@@ -188,9 +188,14 @@ def registrar_cliente(*, nombre, doc_tipo='', doc_numero='', condicion='', telef
     """Crea o actualiza el cliente identificado por documento / teléfono / email.
 
     Es el único lugar donde se da de alta un cliente: lo usan la emisión de
-    facturas y la venta de mostrador. Si no llega ninguno de los tres datos de
-    identidad no registra nada (no habría forma de reconocerlo después) y
-    devuelve None. Nunca pisa con vacío un dato ya guardado.
+    facturas, la venta de mostrador y los documentos del módulo Documentos. Si
+    no llega ninguno de los tres datos de identidad no registra nada (no habría
+    forma de reconocerlo después) y devuelve None. Nunca pisa con vacío un dato
+    ya guardado.
+
+    El cliente devuelto trae `recien_creado` (atributo de instancia, no se
+    guarda): dice si esta llamada lo dio de alta o solo lo actualizó, para que
+    quien llama pueda avisarlo sin repetir la búsqueda de identidad.
     """
     nombre = (nombre or '').strip()
     doc = (doc_numero or '').strip()
@@ -238,6 +243,7 @@ def registrar_cliente(*, nombre, doc_tipo='', doc_numero='', condicion='', telef
         cliente.actualizado_por = usuario
         cliente.save()
 
+    cliente.recien_creado = es_nuevo
     return cliente
 
 

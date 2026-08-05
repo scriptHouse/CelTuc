@@ -58,6 +58,20 @@ export interface PaperProps<T> {
 }
 
 /**
+ * Qué campo del formulario lleva cada dato del cliente. Cada plantilla los
+ * nombra distinto (`recibiDe` / `nombreVendedor`, `cel` / `tel` / `celular`),
+ * así que el mapa vive en el módulo y lo usan las dos puntas: para traer un
+ * cliente ya guardado y para registrarlo al exportar.
+ */
+export interface CamposCliente<T> {
+  nombre: keyof T & string
+  /** DNI / CUIT, si la plantilla lo pide. */
+  documento?: keyof T & string
+  telefono?: keyof T & string
+  email?: keyof T & string
+}
+
+/**
  * Un documento del módulo: su preview HTML (`Paper`) y la carga diferida de sus
  * exportadores (PDF con @react-pdf, XLSX con exceljs). El Paper es liviano y va
  * en el bundle principal; los exportadores pesan, por eso se importan on-demand.
@@ -81,6 +95,11 @@ export interface DocModule<T = unknown> {
    * cupón, equipo, importe). Ver `resumen.ts`.
    */
   resumen: (datos: T) => ResumenDocumento
+  /**
+   * Campos donde vive el cliente. Sin esto, la plantilla no ofrece traer datos
+   * de la base (la garantía de accesorios, por ejemplo, no tiene cliente).
+   */
+  camposCliente?: CamposCliente<T>
   Paper: ComponentType<PaperProps<T>>
   loadPdf: () => Promise<ComponentType<{ datos: T; direccion?: string }>>
   loadXlsx: () => Promise<(datos: T, direccion?: string) => Promise<Blob>>

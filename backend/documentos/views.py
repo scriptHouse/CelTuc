@@ -10,6 +10,8 @@
 Los archivos no tienen URL publica: se sirven por un endpoint autenticado con
 el content-type que decide el servidor segun el formato guardado.
 """
+import logging
+import re
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
@@ -31,6 +33,53 @@ MAX_TAMANIO_ARCHIVO = 15 * 1024 * 1024  # 15 MB
 
 LIMITE_MAXIMO = 100
 LIMITE_POR_DEFECTO = 30
+
+logger = logging.getLogger(__name__)
+
+
+def _documento_de_identidad(texto):
+    """Los digitos de un DNI/CUIT escrito a mano, o '' si no parece un documento.
+
+    En el papel el DNI se tipea libre ("12.345.678", "20-12345678-3"), pero la
+    base de clientes lo guarda solo con digitos: sin normalizar, el mismo
+    cliente entraria dos veces (una por factura y otra por documento).
+    """
+    digitos = re.sub(r'\D', '', texto or '')
+    return digitos if 7 <= len(digitos) <= 11 else ''
+
+
+def _registrar_cliente_del_documento(documento, telefono, email, usuario):
+    """Da de alta (o actualiza) al cliente del documento en la base compartida.
+
+    Mismo criterio de identidad que la factura y la venta de mostrador: manda el
+    documento y, si no hay, el telefono. Es secundario a proposito: el papel ya
+    se genero y se archivo, asi que un problema aca se registra y se sigue.
+
+    Devuelve el resumen para el front, o None si no habia con que identificarlo.
+    """
+    try:
+        from facturacion.clientes import registrar_cliente
+        from facturacion.models import Comprobante
+
+        doc = _documento_de_identidad(documento.cliente_documento)
+        cliente = registrar_cliente(
+            nombre=documento.cliente,
+            doc_tipo=Comprobante.DocTipo.DNI if doc else '',
+            doc_numero=doc,
+            telefono=telefono,
+            email=email,
+            usuario=usuario,
+        )
+        if cliente is None:
+            return None
+        return {
+            'id': cliente.pk,
+            'nombre': cliente.nombre,
+            'nuevo': bool(getattr(cliente, 'recien_creado', False)),
+        }
+    except Exception:
+        logger.exception('No se pudo registrar el cliente del documento %s', documento.pk)
+        return None
 
 
 class HistorialDocumentos(permissions.BasePermission):
@@ -161,6 +210,10 @@ class DocumentoListCreateView(APIView):
 
         formato = datos.get('formato') or DocumentoGenerado.Formato.PDF
         usuario = request.user
+        # Telefono y mail no se archivan con el documento: solo identifican al
+        # cliente en la base compartida.
+        telefono_cliente = datos.pop('cliente_telefono', '')
+        email_cliente = datos.pop('cliente_email', '')
         documento = DocumentoGenerado.objects.create(
             **{**datos, 'formato': formato},
             archivo=archivo,
@@ -172,8 +225,59 @@ class DocumentoListCreateView(APIView):
             creado_por=usuario,
             actualizado_por=usuario,
         )
-        return Response(DocumentoGeneradoSerializer(documento).data,
-                        status=status.HTTP_201_CREATED)
+        # El cliente del papel entra a la misma base que usan factura y venta:
+        # asi la proxima operacion lo autocompleta y su historial queda completo.
+        cuerpo = DocumentoGeneradoSerializer(documento).data
+        registrado = _registrar_cliente_del_documento(
+            documento, telefono_cliente, email_cliente, usuario,
+        )
+        if registrado is not None:
+            cuerpo['cliente_registrado'] = registrado
+        return Response(cuerpo, status=status.HTTP_201_CREATED)
+
+
+class ClientesParaDocumentoView(APIView):
+    """Autocompletado del cliente en los formularios de Documentos.
+
+    Devuelve lo justo para completar un papel —nombre, documento, telefono y
+    mail— de quien ya esta en la base. A proposito NO reusa el endpoint de
+    Facturacion: aquel muestra compras, totales y ultima operacion y pide
+    `ver_facturacion`; esto es el mismo dato de contacto que el empleado
+    escribiria a mano, asi que alcanza con poder usar Documentos.
+    """
+
+    permission_classes = [HistorialDocumentos]
+
+    # Ademas de acotar los campos, se acota el volumen: es un autocompletado.
+    MAXIMO = 10
+    MINIMO_BUSQUEDA = 2
+
+    def get(self, request):
+        buscar = (request.query_params.get('buscar') or '').strip()
+        # Sin termino no se lista la base entera: solo se busca lo que se tipea.
+        if len(buscar) < self.MINIMO_BUSQUEDA:
+            return Response([])
+
+        from facturacion.models import Cliente
+
+        filtro = (
+            Q(nombre__icontains=buscar)
+            | Q(telefono__icontains=buscar)
+            | Q(email__icontains=buscar)
+        )
+        digitos = re.sub(r'\D', '', buscar)
+        if digitos:
+            filtro |= Q(doc_numero__startswith=digitos)
+        return Response([
+            {
+                'id': c.pk,
+                'nombre': c.nombre,
+                'doc_numero': c.doc_numero,
+                'telefono': c.telefono,
+                'email': c.email,
+            }
+            for c in Cliente.objects.filter(filtro).order_by('nombre')[:self.MAXIMO]
+        ])
 
 
 class DocumentoDetailView(APIView):

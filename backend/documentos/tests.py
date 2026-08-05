@@ -7,6 +7,7 @@ decide el servidor (no el que declara el navegador).
 """
 import json
 import tempfile
+from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
@@ -14,6 +15,7 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from auditoria.models import RegistroAuditoria
+from facturacion.models import Cliente
 from usuarios.models import Rol, Usuario
 
 from .models import DocumentoGenerado
@@ -235,3 +237,115 @@ class HistorialDocumentosTests(TestCase):
         self.assertEqual(registro.usuario_username, 'empdocs')
         self.assertIn('Compra / Venta', registro.objeto)
         self.assertIn('Juan Perez', registro.objeto)
+
+
+@override_settings(MEDIA_ROOT=MEDIA_TEMPORAL)
+class ClienteDelDocumentoTests(TestCase):
+    """El cliente del papel entra a la misma base que factura y venta.
+
+    Identidad: manda el documento y, si no hay, el telefono. Sin ninguno de los
+    dos no se registra (no habria como reconocerlo despues).
+    """
+
+    def setUp(self):
+        self.empleado = Usuario.objects.create_user(
+            email='doc-cli@celtuc.ar', username='doccli', password='x',
+            rol=Rol.objects.get(nombre='Empleado'),
+        )
+        self.cliente = APIClient()
+        self.cliente.force_authenticate(self.empleado)
+
+    def _registrar(self, **campos):
+        cuerpo = {
+            'tipo': 'compraventa',
+            'tipo_nombre': 'Compra / Venta',
+            'formato': 'pdf',
+            'nombre_archivo': 'compraventa-1.pdf',
+            'sucursal': 'Salta',
+            'cliente': 'Juan Perez',
+            'datos': json.dumps(DATOS_CV),
+            'archivo': SimpleUploadedFile('c.pdf', b'%PDF-1.4 fake', content_type='application/pdf'),
+        }
+        cuerpo.update(campos)
+        return self.cliente.post(reverse('documentos:documento-list'), cuerpo, format='multipart')
+
+    def test_con_dni_da_de_alta_el_cliente(self):
+        r = self._registrar(cliente_documento='30111222')
+        self.assertEqual(r.status_code, 201)
+        self.assertTrue(r.data['cliente_registrado']['nuevo'])
+
+        cliente = Cliente.objects.get(doc_numero='30111222')
+        self.assertEqual(cliente.nombre, 'Juan Perez')
+        self.assertEqual(cliente.doc_tipo, 'DNI')
+        self.assertEqual(cliente.creado_por, self.empleado)
+
+    def test_el_mismo_dni_no_se_duplica_ni_con_puntos(self):
+        self._registrar(cliente_documento='30111222')
+        r = self._registrar(cliente='Juan Perez Lopez', cliente_documento='30.111.222')
+
+        self.assertFalse(r.data['cliente_registrado']['nuevo'])
+        self.assertEqual(Cliente.objects.filter(doc_numero='30111222').count(), 1)
+        # El nombre mas nuevo pisa al viejo; el documento sigue siendo el mismo.
+        self.assertEqual(Cliente.objects.get(doc_numero='30111222').nombre, 'Juan Perez Lopez')
+
+    def test_sin_documento_identifica_por_telefono(self):
+        r = self._registrar(tipo='sena', cliente='Ana Gomez', cliente_telefono='3815551234')
+        self.assertEqual(r.status_code, 201)
+
+        cliente = Cliente.objects.get(telefono='3815551234')
+        self.assertEqual(cliente.nombre, 'Ana Gomez')
+        self.assertEqual(cliente.doc_numero, '')
+
+    def test_sin_documento_ni_telefono_no_registra_nada(self):
+        r = self._registrar(tipo='reparacion', cliente='Cliente de paso')
+        self.assertEqual(r.status_code, 201)
+        self.assertNotIn('cliente_registrado', r.data)
+        self.assertEqual(Cliente.objects.count(), 0)
+
+    def test_un_numero_que_no_es_documento_no_se_usa_como_identidad(self):
+        r = self._registrar(cliente_documento='123')
+        self.assertNotIn('cliente_registrado', r.data)
+        self.assertEqual(Cliente.objects.count(), 0)
+
+    def test_el_documento_se_archiva_igual_si_el_cliente_falla(self):
+        with patch('facturacion.clientes.registrar_cliente', side_effect=RuntimeError('boom')):
+            r = self._registrar(cliente_documento='30111222')
+        self.assertEqual(r.status_code, 201)
+        self.assertTrue(DocumentoGenerado.objects.filter(pk=r.data['id']).exists())
+        self.assertNotIn('cliente_registrado', r.data)
+
+
+class AutocompletadoClientesTests(TestCase):
+    """El buscador de clientes del formulario: acotado y sin datos de mas."""
+
+    def setUp(self):
+        self.empleado = Usuario.objects.create_user(
+            email='doc-ac@celtuc.ar', username='docac', password='x',
+            rol=Rol.objects.get(nombre='Empleado'),
+        )
+        self.cliente = APIClient()
+        self.cliente.force_authenticate(self.empleado)
+        self.url = reverse('documentos:documento-clientes')
+        Cliente.objects.create(nombre='Juan Perez', doc_numero='30111222',
+                               telefono='3815551234', email='juan@mail.com')
+        Cliente.objects.create(nombre='Ana Gomez', doc_numero='27999888')
+
+    def test_busca_por_nombre_documento_y_telefono(self):
+        for termino, esperado in (('juan', 'Juan Perez'), ('30.111', 'Juan Perez'),
+                                  ('5551234', 'Juan Perez'), ('gomez', 'Ana Gomez')):
+            r = self.cliente.get(self.url, {'buscar': termino})
+            self.assertEqual(r.status_code, 200, termino)
+            self.assertEqual([c['nombre'] for c in r.data], [esperado], termino)
+
+    def test_devuelve_solo_datos_de_contacto(self):
+        r = self.cliente.get(self.url, {'buscar': 'juan'})
+        self.assertEqual(
+            set(r.data[0]), {'id', 'nombre', 'doc_numero', 'telefono', 'email'},
+        )
+
+    def test_sin_termino_no_lista_la_base(self):
+        self.assertEqual(self.cliente.get(self.url).data, [])
+        self.assertEqual(self.cliente.get(self.url, {'buscar': 'a'}).data, [])
+
+    def test_pide_sesion(self):
+        self.assertEqual(APIClient().get(self.url).status_code, 401)

@@ -1,11 +1,18 @@
 from django.urls import path
 
-from .views import DocumentoArchivoView, DocumentoDetailView, DocumentoListCreateView
+from .views import (
+    ClientesParaDocumentoView,
+    DocumentoArchivoView,
+    DocumentoDetailView,
+    DocumentoListCreateView,
+)
 
 app_name = 'documentos'
 
 urlpatterns = [
     path('', DocumentoListCreateView.as_view(), name='documento-list'),
+    # Antes de `<int:pk>/` no hace falta (no colisiona), pero se lee mejor junto.
+    path('clientes/', ClientesParaDocumentoView.as_view(), name='documento-clientes'),
     path('<int:pk>/', DocumentoDetailView.as_view(), name='documento-detail'),
     path('<int:pk>/archivo/', DocumentoArchivoView.as_view(), name='documento-archivo'),
 ]

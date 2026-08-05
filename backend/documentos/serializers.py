@@ -46,11 +46,23 @@ class NuevoDocumentoSerializer(serializers.ModelSerializer):
     descartan antes de validar y `datos` se parsea a mano desde su JSON.
     """
 
+    # No son campos del modelo (el documento no archiva contactos): los manda el
+    # front cuando la plantilla los tiene —la seña pide telefono, la reparacion
+    # tambien mail— y sirven solo para reconocer al cliente en la base
+    # compartida. La vista los saca antes de crear la fila.
+    cliente_telefono = serializers.CharField(
+        max_length=30, required=False, allow_blank=True, write_only=True,
+    )
+    cliente_email = serializers.CharField(
+        max_length=254, required=False, allow_blank=True, write_only=True,
+    )
+
     class Meta:
         model = DocumentoGenerado
         fields = (
             'tipo', 'tipo_nombre', 'formato', 'nombre_archivo', 'sucursal',
-            'referencia', 'cliente', 'cliente_documento', 'detalle', 'total', 'datos',
+            'referencia', 'cliente', 'cliente_documento', 'cliente_telefono',
+            'cliente_email', 'detalle', 'total', 'datos',
         )
         extra_kwargs = {
             'tipo': {'required': True, 'allow_blank': False},

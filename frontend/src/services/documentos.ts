@@ -91,17 +91,37 @@ export interface NuevoDocumento {
   referencia?: string
   cliente?: string
   clienteDocumento?: string
+  /**
+   * Contacto del cliente, si la plantilla lo pide. No se archiva con el
+   * documento: sirve para reconocerlo en la base de clientes (una seña sin DNI
+   * se identifica por teléfono, igual que una factura a consumidor final).
+   */
+  clienteTelefono?: string
+  clienteEmail?: string
   detalle?: string
   /** Importe normalizado (`"1500000.00"`); se omite si no se pudo leer. */
   total?: string
   datos: unknown
 }
 
+/** El cliente que quedó dado de alta (o actualizado) con este documento. */
+export interface ClienteRegistrado {
+  id: number
+  nombre: string
+  /** true si este documento lo dio de alta; false si ya existía. */
+  nuevo: boolean
+}
+
+/** Respuesta del alta: el documento archivado y, si hubo, el cliente. */
+export type DocumentoArchivado = DocumentoGenerado & {
+  cliente_registrado?: ClienteRegistrado
+}
+
 /** Sube el archivo generado y lo deja registrado en el historial. */
 export function registrarDocumento(
   meta: NuevoDocumento,
   archivo: Blob,
-): Promise<DocumentoGenerado> {
+): Promise<DocumentoArchivado> {
   const form = new FormData()
   form.set('tipo', meta.tipo)
   form.set('tipo_nombre', meta.tipoNombre)
@@ -111,11 +131,36 @@ export function registrarDocumento(
   if (meta.referencia) form.set('referencia', meta.referencia)
   if (meta.cliente) form.set('cliente', meta.cliente)
   if (meta.clienteDocumento) form.set('cliente_documento', meta.clienteDocumento)
+  if (meta.clienteTelefono) form.set('cliente_telefono', meta.clienteTelefono)
+  if (meta.clienteEmail) form.set('cliente_email', meta.clienteEmail)
   if (meta.detalle) form.set('detalle', meta.detalle)
   if (meta.total) form.set('total', meta.total)
   form.set('datos', JSON.stringify(meta.datos ?? {}))
   form.append('archivo', archivo, meta.nombreArchivo)
-  return api.post<DocumentoGenerado>('/documentos/', form, token())
+  return api.post<DocumentoArchivado>('/documentos/', form, token())
+}
+
+/** Un cliente ya guardado, con lo justo para completar un formulario. */
+export interface ClienteSugerido {
+  id: number
+  nombre: string
+  doc_numero: string
+  telefono: string
+  email: string
+}
+
+/**
+ * Busca clientes por nombre, documento, teléfono o mail para autocompletar el
+ * papel. Con menos de dos caracteres no se consulta: el backend tampoco lista
+ * la base entera sin término.
+ */
+export function buscarClientesDocumento(busqueda: string): Promise<ClienteSugerido[]> {
+  const q = busqueda.trim()
+  if (q.length < 2) return Promise.resolve([])
+  return api.get<ClienteSugerido[]>(
+    `/documentos/clientes/?buscar=${encodeURIComponent(q)}`,
+    token(),
+  )
 }
 
 /** Borrado lógico: sale del historial pero no se pierde. Solo administradores. */
