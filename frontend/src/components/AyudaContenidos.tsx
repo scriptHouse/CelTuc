@@ -434,9 +434,9 @@ export function AyudaInventario() {
       <AyudaSeccion titulo="Transferir entre sucursales">
         <AyudaPasos
           pasos={[
-            <>Pará en la pestaña de la sucursal de <b>origen</b> (de donde sale la mercadería).</>,
-            <>En la fila del producto tocá <b>⇄ Transferir</b>.</>,
-            <>Elegí el destino y las unidades. Arriba ves cuántas hay de cada lado y abajo cómo queda cada sucursal después.</>,
+            <>En la fila del producto tocá <b>⇄ Transferir</b>. Está en todas las pestañas, incluida <b>Todas</b>.</>,
+            <>Elegí <b>desde</b> qué sucursal sale y <b>hacia</b> cuál va (cada opción muestra cuántas unidades tiene hoy). Si entraste parado en una sucursal, esa ya viene puesta como origen.</>,
+            <>Poné las unidades. Abajo ves cómo queda cada sucursal después de mover.</>,
             <>Listo: sale de una y entra en la otra <b>en una sola operación</b> (nunca queda por la mitad), y queda asentado en el historial de las dos.</>,
           ]}
         />

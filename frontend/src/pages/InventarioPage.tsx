@@ -417,7 +417,7 @@ export function InventarioPage() {
                 </h2>
                 <span className="tnum shrink-0 text-xs text-ink-400">{num(items.length)}</span>
               </div>
-              <EncabezadoColumnas sel={sel} activas={activas} />
+              <EncabezadoColumnas sel={sel} activas={activas} conAcciones={activas.length > 1} />
               <ul className="divide-y divide-line">
                 {items.map((p, i) => (
                   <FilaProducto
@@ -521,7 +521,16 @@ function PillSucursal({
  * estructura de la fila (mismos anchos y mismos gaps) para que cada rótulo
  * caiga justo arriba de su dato.
  */
-function EncabezadoColumnas({ sel, activas }: { sel: SeleccionSucursal; activas: Sucursal[] }) {
+function EncabezadoColumnas({
+  sel,
+  activas,
+  conAcciones,
+}: {
+  sel: SeleccionSucursal
+  activas: Sucursal[]
+  /** En "Todas" la única acción es Transferir, y solo si hay más de una sucursal. */
+  conAcciones: boolean
+}) {
   return (
     <div
       className="hidden items-center gap-x-3 border-b border-line bg-ink-50/60 px-4 py-2 text-[0.6rem] font-semibold uppercase tracking-[0.06em] text-ink-500 sm:px-5 md:flex"
@@ -545,6 +554,11 @@ function EncabezadoColumnas({ sel, activas }: { sel: SeleccionSucursal; activas:
             <span key={s.id} className={cn('shrink-0', COL_SUCURSAL)} />
           ))}
           <span className="w-10 shrink-0 text-right">Total</span>
+          {conAcciones && (
+            <span className="w-9 shrink-0 text-right xl:w-[6.5rem]">
+              <span className="hidden xl:inline">Acciones</span>
+            </span>
+          )}
         </div>
       ) : (
         <div className={cn('flex shrink-0 items-center', COL_ACCIONES)}>
@@ -640,6 +654,13 @@ function FilaProducto({
       const fila = filaDe(producto.id, s.id)
       return fila?.sin_dato && fila.cantidad === 0
     })
+    // Acá no hay una sucursal "actual": el modal arranca en la que más tiene
+    // (lo habitual es repartir desde ahí) y el origen se puede cambiar igual.
+    const origenSugerido = activas.reduce<Sucursal | undefined>((mejor, s) => {
+      const suya = filaDe(producto.id, s.id)?.cantidad ?? 0
+      const mejorCantidad = mejor ? (filaDe(producto.id, mejor.id)?.cantidad ?? 0) : -1
+      return suya > mejorCantidad ? s : mejor
+    }, undefined)
     return (
       <li
         className="ct-stagger-fade flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 sm:px-5 md:flex-nowrap"
@@ -686,6 +707,21 @@ function FilaProducto({
           >
             {total === 0 && algunaSinDato ? '—' : num(total)}
           </span>
+          {puedeTransferir && (
+            <div className="flex shrink-0 justify-end md:w-9 xl:w-[6.5rem]">
+              <BotonAccionFila
+                icono={ArrowLeftRight}
+                texto="Transferir"
+                onClick={() => onTransferir(origenSugerido ?? activas[0])}
+                disabled={total <= 0}
+                titulo={
+                  total <= 0
+                    ? `No hay unidades de ${producto.nombre} para mover`
+                    : `Mover unidades de ${producto.nombre} entre sucursales`
+                }
+              />
+            </div>
+          )}
         </div>
       </li>
     )
@@ -1066,25 +1102,39 @@ function TransferirStockModal({
   const toast = useToast()
   const queryClient = useQueryClient()
   const producto = contexto?.producto
-  const origen = contexto?.sucursal
 
+  const [origenId, setOrigenId] = useState('')
+  const [cantidad, setCantidad] = useState('')
+  const [destino, setDestino] = useState('')
+  const [nota, setNota] = useState('')
+
+  // El origen viene de la fila (o de la que más tiene, si se abrió desde
+  // "Todas") pero se puede cambiar acá mismo.
+  const origen = sucursales.find((s) => String(s.id) === origenId) ?? contexto?.sucursal
   const otras = useMemo(
     () => sucursales.filter((s) => s.id !== origen?.id),
     [sucursales, origen?.id],
   )
 
-  const [cantidad, setCantidad] = useState('')
-  const [destino, setDestino] = useState('')
-  const [nota, setNota] = useState('')
-
   useEffect(() => {
     if (!abierto || !contexto) return
     setCantidad('')
     setNota('')
+    setOrigenId(String(contexto.sucursal.id))
     // Con una sola candidata no hay nada que elegir: ya viene puesta.
-    setDestino(otras.length === 1 ? String(otras[0].id) : '')
+    const candidatas = sucursales.filter((s) => s.id !== contexto.sucursal.id)
+    setDestino(candidatas.length === 1 ? String(candidatas[0].id) : '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [abierto, contexto?.producto.id, contexto?.sucursal.id])
+
+  function cambiarOrigen(nuevo: string) {
+    setOrigenId(nuevo)
+    // Nadie se transfiere a sí mismo. Si queda una sola candidata, se elige
+    // sola (con dos sucursales, cambiar el origen invierte la transferencia).
+    const candidatas = sucursales.filter((s) => String(s.id) !== nuevo)
+    if (candidatas.length === 1) setDestino(String(candidatas[0].id))
+    else if (nuevo === destino) setDestino('')
+  }
 
   const disponible = producto && origen ? (filaDe(producto.id, origen.id)?.cantidad ?? 0) : 0
   const sucursalDestino = otras.find((s) => String(s.id) === destino)
@@ -1149,7 +1199,17 @@ function TransferirStockModal({
             <p className="text-[0.6rem] font-semibold uppercase tracking-[0.1em] text-ink-400">
               Desde
             </p>
-            <p className="mt-1 truncate text-sm font-semibold text-ink-900">{origen.nombre}</p>
+            <div className="mt-1">
+              <Select
+                options={sucursales.map((s) => ({
+                  value: String(s.id),
+                  label: `${s.nombre} (${num(producto ? (filaDe(producto.id, s.id)?.cantidad ?? 0) : 0)})`,
+                }))}
+                value={String(origen.id)}
+                onChange={cambiarOrigen}
+                placeholder="Elegí la sucursal"
+              />
+            </div>
             <p className="tnum mt-0.5 text-xs text-ink-500">{num(disponible)} u. disponibles</p>
           </div>
           <div className="grid place-items-center py-1 sm:py-0">
@@ -1167,7 +1227,10 @@ function TransferirStockModal({
             ) : (
               <div className="mt-1">
                 <Select
-                  options={otras.map((s) => ({ value: String(s.id), label: s.nombre }))}
+                  options={otras.map((s) => ({
+                    value: String(s.id),
+                    label: `${s.nombre} (${num(producto ? (filaDe(producto.id, s.id)?.cantidad ?? 0) : 0)})`,
+                  }))}
                   value={destino}
                   onChange={setDestino}
                   placeholder="Elegí la sucursal"
