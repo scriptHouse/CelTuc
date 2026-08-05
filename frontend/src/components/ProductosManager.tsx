@@ -774,7 +774,7 @@ function ProductoColapsable({
   )
 }
 
-function ProductoForm({
+export function ProductoForm({
   producto,
   categoria,
   productosDeCategoria,
@@ -788,7 +788,8 @@ function ProductoForm({
   productosDeCategoria: ProductoCatalogo[]
   dispositivos: DispositivoService[]
   modoCreacion?: boolean
-  onListo: () => void
+  /** Recibe el producto guardado (Inventario lo usa para dejarlo a la vista). */
+  onListo: (guardado?: ProductoCatalogo) => void
   onCancelar?: () => void
 }) {
   const toast = useToast()
@@ -865,9 +866,9 @@ function ProductoForm({
   const guardar = useMutation({
     mutationFn: (input: Partial<ProductoCatalogoInput>) =>
       producto ? actualizarProducto(producto.id, input) : crearProducto(input as ProductoCatalogoInput),
-    onSuccess: () => {
+    onSuccess: (guardado) => {
       toast.success(producto ? 'Producto actualizado' : 'Producto creado')
-      onListo()
+      onListo(guardado)
     },
     onError: (e) => toast.error('No se pudo guardar', e instanceof ApiError ? e.message : undefined),
   })

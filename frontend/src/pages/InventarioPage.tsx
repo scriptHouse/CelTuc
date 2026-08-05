@@ -3,11 +3,13 @@ import type { ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeftRight,
+  ArrowRight,
   Boxes,
   ClipboardList,
   Loader2,
   Minus,
   Package,
+  PackagePlus,
   PackageSearch,
   Pencil,
   Plus,
@@ -17,6 +19,7 @@ import {
 } from 'lucide-react'
 import type { CategoriaCatalogo, ProductoCatalogo } from '@/types'
 import { listarCategorias, listarProductos } from '@/services/productos'
+import { listarDispositivos } from '@/services/preciosService'
 import {
   actualizarSucursal,
   ajustarStock,
@@ -47,6 +50,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { AyudaInfo } from '@/components/ui/AyudaInfo'
 import { AyudaInventario } from '@/components/AyudaContenidos'
+import { ProductoForm } from '@/components/ProductosManager'
 import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
 
@@ -76,11 +80,15 @@ const VISTAS: Array<{ id: Vista; label: string }> = [
 const COL_PRECIO = 'md:w-[6.75rem] lg:w-[7.5rem]'
 const COL_SUCURSAL = 'md:w-[4.5rem] lg:w-[4.75rem]'
 /**
- * Bloque de acciones: stepper (36+40+36 + 1px de borde a cada lado = 114px) +
- * gap 6px + lápiz 36px = 156px. El encabezado reserva ese mismo ancho y usa el
- * padding derecho para que "Stock" caiga justo sobre el stepper.
+ * Bloque de acciones: stepper (36+40+36 + 1px de borde a cada lado = 114px) a la
+ * izquierda y los botones Transferir/Editar pegados a la derecha. De md a lg
+ * esos botones son solo ícono (36px c/u) para no comerle ancho al nombre; en xl
+ * muestran su texto y por eso el bloque se ensancha. El encabezado reserva el
+ * mismo ancho y reparte "Stock" / "Acciones" con la misma estructura.
  */
-const COL_ACCIONES = 'md:w-[9.75rem] md:pr-[2.625rem]'
+const COL_ACCIONES = 'md:w-[12.5rem] xl:w-[20rem]'
+/** Ancho exacto del stepper: el rótulo "Stock" del encabezado cae justo encima. */
+const ANCHO_STEPPER = 'w-[7.125rem]'
 
 export function InventarioPage() {
   const queryClient = useQueryClient()
@@ -259,8 +267,11 @@ export function InventarioPage() {
   })
 
   // ---- Modales ----
-  const [detalle, setDetalle] = useState<{ producto: ProductoCatalogo; sucursal: Sucursal } | null>(null)
+  type Contexto = { producto: ProductoCatalogo; sucursal: Sucursal }
+  const [detalle, setDetalle] = useState<Contexto | null>(null)
+  const [transferencia, setTransferencia] = useState<Contexto | null>(null)
   const [gestionarSucursales, setGestionarSucursales] = useState(false)
+  const [nuevoProducto, setNuevoProducto] = useState(false)
 
   const opcionesCategoria = [
     { value: '', label: 'Todas las categorías' },
@@ -277,6 +288,12 @@ export function InventarioPage() {
         className="ct-rise"
         actions={
           <>
+            {admin && (
+              <Button onClick={() => setNuevoProducto(true)}>
+                <PackagePlus className="h-4 w-4" />
+                Nuevo producto
+              </Button>
+            )}
             {admin && (
               <Button variant="outline" onClick={() => setGestionarSucursales(true)}>
                 <Store className="h-4 w-4" />
@@ -415,6 +432,8 @@ export function InventarioPage() {
                       ajustar.mutate({ producto: p.id, sucursal: sucursalId, delta })
                     }
                     onDetalle={(sucursal) => setDetalle({ producto: p, sucursal })}
+                    onTransferir={(sucursal) => setTransferencia({ producto: p, sucursal })}
+                    puedeTransferir={activas.length > 1}
                     estilo={ctStagger(Math.min(i, 14))}
                   />
                 ))}
@@ -427,13 +446,42 @@ export function InventarioPage() {
       <DetalleStockModal
         abierto={detalle !== null}
         contexto={detalle}
-        sucursales={activas}
         admin={admin}
         onCerrar={() => setDetalle(null)}
         onListo={refrescarStock}
       />
+      <TransferirStockModal
+        abierto={transferencia !== null}
+        contexto={transferencia}
+        sucursales={activas}
+        filaDe={filaDe}
+        onCerrar={() => setTransferencia(null)}
+        onListo={refrescarStock}
+      />
       {admin && (
         <SucursalesModal open={gestionarSucursales} onClose={() => setGestionarSucursales(false)} />
+      )}
+      {admin && (
+        <NuevoProductoModal
+          abierto={nuevoProducto}
+          categorias={categorias}
+          productos={productos}
+          categoriaSugerida={cat}
+          onCerrar={() => setNuevoProducto(false)}
+          onCreado={(creado) => {
+            queryClient.invalidateQueries({ queryKey: ['productos-items'] })
+            setNuevoProducto(false)
+            // Queda a la vista: la búsqueda recorre todo el catálogo, así que el
+            // producto recién creado (todavía sin stock) aparece igual.
+            setQ(creado.nombre)
+            toast.success(
+              'Listo, ya está en el catálogo',
+              sel === 'todas'
+                ? 'Elegí una sucursal arriba y cargale unidades con el + .'
+                : 'Cargale las unidades con el + de la fila.',
+            )
+          }}
+        />
       )}
     </div>
   )
@@ -499,7 +547,10 @@ function EncabezadoColumnas({ sel, activas }: { sel: SeleccionSucursal; activas:
           <span className="w-10 shrink-0 text-right">Total</span>
         </div>
       ) : (
-        <span className={cn('shrink-0 whitespace-nowrap text-right', COL_ACCIONES)}>Stock</span>
+        <div className={cn('flex shrink-0 items-center', COL_ACCIONES)}>
+          <span className={cn('whitespace-nowrap text-center', ANCHO_STEPPER)}>Stock</span>
+          <span className="ml-auto whitespace-nowrap">Acciones</span>
+        </div>
       )}
     </div>
   )
@@ -551,6 +602,8 @@ function FilaProducto({
   ocupado,
   onDelta,
   onDetalle,
+  onTransferir,
+  puedeTransferir,
   estilo,
 }: {
   producto: ProductoCatalogo
@@ -561,6 +614,9 @@ function FilaProducto({
   ocupado: string | null
   onDelta: (sucursalId: number, delta: number) => void
   onDetalle: (sucursal: Sucursal) => void
+  onTransferir: (sucursal: Sucursal) => void
+  /** Con una sola sucursal no hay a dónde mover: el botón no se muestra. */
+  puedeTransferir: boolean
   estilo: React.CSSProperties
 }) {
   const lista = producto.efectivo?.lista_ars
@@ -689,47 +745,101 @@ function FilaProducto({
 
       {columnasPrecio}
 
-      <div className="ml-auto flex shrink-0 items-center gap-1.5 md:ml-0">
-        <div className="inline-flex items-center rounded-xl border border-line-strong">
-          <button
-            type="button"
-            onClick={() => onDelta(sucursal.id, -1)}
-            disabled={trabajando || cantidad <= 0}
-            aria-label={`Restar una unidad de ${producto.nombre}`}
-            className="grid h-9 w-9 place-items-center rounded-l-xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-900 disabled:opacity-30"
-          >
-            <Minus className="h-3.5 w-3.5" />
-          </button>
-          <span
-            className={cn(
-              'tnum w-10 text-center text-sm font-semibold',
-              sinDato ? 'text-ink-400' : bajo ? 'text-ink-950' : 'text-ink-900',
-            )}
-            title={sinDato ? '(no informado)' : undefined}
-          >
-            {trabajando ? <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" /> : sinDato ? '—' : num(cantidad)}
+      <div className={cn('ml-auto flex shrink-0 items-end gap-1.5 md:ml-0 md:items-center', COL_ACCIONES)}>
+        <div className={cn('shrink-0', ANCHO_STEPPER)}>
+          {/* En mobile no hay encabezado de columnas: el stepper lleva su propio
+              rótulo, igual que las mini-tarjetas de precio. */}
+          <span className="mb-1 block text-center text-[0.6rem] font-medium uppercase tracking-[0.08em] text-ink-400 md:hidden">
+            Stock — unidades
           </span>
-          <button
-            type="button"
-            onClick={() => onDelta(sucursal.id, 1)}
-            disabled={trabajando}
-            aria-label={`Sumar una unidad de ${producto.nombre}`}
-            className="grid h-9 w-9 place-items-center rounded-r-xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-900 disabled:opacity-30"
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </button>
+          <div className="inline-flex items-center rounded-xl border border-line-strong">
+            <button
+              type="button"
+              onClick={() => onDelta(sucursal.id, -1)}
+              disabled={trabajando || cantidad <= 0}
+              aria-label={`Restar una unidad de ${producto.nombre}`}
+              title={`Restar 1 unidad de ${producto.nombre} en ${sucursal.nombre}`}
+              className="grid h-9 w-9 place-items-center rounded-l-xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-900 disabled:opacity-30"
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </button>
+            <span
+              className={cn(
+                'tnum w-10 text-center text-sm font-semibold',
+                sinDato ? 'text-ink-400' : bajo ? 'text-ink-950' : 'text-ink-900',
+              )}
+              title={sinDato ? '(no informado)' : undefined}
+            >
+              {trabajando ? <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" /> : sinDato ? '—' : num(cantidad)}
+            </span>
+            <button
+              type="button"
+              onClick={() => onDelta(sucursal.id, 1)}
+              disabled={trabajando}
+              aria-label={`Sumar una unidad de ${producto.nombre}`}
+              title={`Sumar 1 unidad de ${producto.nombre} al stock de ${sucursal.nombre}`}
+              className="grid h-9 w-9 place-items-center rounded-r-xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-900 disabled:opacity-30"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => onDetalle(sucursal)}
-          aria-label={`Detalle de ${producto.nombre}`}
-          title="Ajustar, mínimo, transferir y movimientos"
-          className="grid h-9 w-9 place-items-center rounded-xl text-ink-400 transition-colors hover:bg-ink-100 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
-        >
-          <Pencil className="h-4 w-4" />
-        </button>
+        <div className="ml-auto flex items-center gap-1.5">
+          {puedeTransferir && (
+            <BotonAccionFila
+              icono={ArrowLeftRight}
+              texto="Transferir"
+              onClick={() => onTransferir(sucursal)}
+              disabled={cantidad <= 0}
+              titulo={
+                cantidad <= 0
+                  ? `No hay unidades de ${producto.nombre} en ${sucursal.nombre} para mover`
+                  : `Mover unidades de ${producto.nombre} desde ${sucursal.nombre} a otra sucursal`
+              }
+            />
+          )}
+          <BotonAccionFila
+            icono={Pencil}
+            texto="Editar"
+            onClick={() => onDetalle(sucursal)}
+            titulo={`Cantidad exacta, stock mínimo y movimientos de ${producto.nombre}`}
+          />
+        </div>
       </div>
     </li>
+  )
+}
+
+/**
+ * Acción de fila con ícono + texto. El texto se ve en mobile (ahí el bloque
+ * tiene su propio renglón) y en xl; entre medio manda el ícono solo, para que
+ * las columnas de precio no se compriman.
+ */
+function BotonAccionFila({
+  icono: Icono,
+  texto,
+  titulo,
+  onClick,
+  disabled = false,
+}: {
+  icono: typeof Pencil
+  texto: string
+  titulo: string
+  onClick: () => void
+  disabled?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={titulo}
+      aria-label={titulo}
+      className="inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border border-line-strong bg-surface px-2.5 text-xs font-medium text-ink-600 transition-colors hover:border-ink-300 hover:bg-ink-50 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 disabled:cursor-not-allowed disabled:opacity-40 md:px-2 xl:px-2.5"
+    >
+      <Icono className="h-4 w-4 shrink-0" aria-hidden />
+      <span className="md:hidden xl:inline">{texto}</span>
+    </button>
   )
 }
 
@@ -744,20 +854,17 @@ const TIPO_LABEL: Record<MovimientoStock['tipo'], string> = {
 function DetalleStockModal({
   abierto,
   contexto,
-  sucursales,
   admin,
   onCerrar,
   onListo,
 }: {
   abierto: boolean
   contexto: { producto: ProductoCatalogo; sucursal: Sucursal } | null
-  sucursales: Sucursal[]
   admin: boolean
   onCerrar: () => void
   onListo: (fila: StockRow) => void
 }) {
   const toast = useToast()
-  const queryClient = useQueryClient()
   const producto = contexto?.producto
   const sucursal = contexto?.sucursal
 
@@ -771,17 +878,12 @@ function DetalleStockModal({
   const [cantidad, setCantidad] = useState('')
   const [minimo, setMinimo] = useState('')
   const [nota, setNota] = useState('')
-  const [transferir, setTransferir] = useState('')
-  const [destino, setDestino] = useState('')
 
   useEffect(() => {
     if (!abierto || !contexto) return
     setCantidad(String(fila?.cantidad ?? 0))
     setMinimo(fila?.stock_minimo != null ? String(fila.stock_minimo) : '')
     setNota('')
-    setTransferir('')
-    const otras = sucursales.filter((s) => s.id !== contexto.sucursal.id)
-    setDestino(otras.length === 1 ? String(otras[0].id) : '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [abierto, contexto?.producto.id, contexto?.sucursal.id])
 
@@ -818,38 +920,9 @@ function DetalleStockModal({
       toast.error('No se pudo guardar', e instanceof ApiError ? e.message : undefined),
   })
 
-  const mover = useMutation({
-    mutationFn: () => {
-      const cuanto = Number(transferir)
-      if (!Number.isInteger(cuanto) || cuanto <= 0) {
-        throw new ApiError(0, 'Poné cuántas unidades transferir (1 o más).', null)
-      }
-      if (!destino) throw new ApiError(0, 'Elegí la sucursal de destino.', null)
-      return transferirStock({
-        producto: producto!.id,
-        origen: sucursal!.id,
-        destino: Number(destino),
-        cantidad: cuanto,
-        nota: nota.trim(),
-      })
-    },
-    onSuccess: ({ origen, destino: filaDestino }) => {
-      onListo(origen)
-      onListo(filaDestino)
-      queryClient.invalidateQueries({ queryKey: ['inv-movimientos'] })
-      const nombreDestino = sucursales.find((s) => String(s.id) === destino)?.nombre ?? 'destino'
-      toast.success('Transferencia hecha', `${transferir} u. → ${nombreDestino}`)
-      onCerrar()
-    },
-    onError: (e) =>
-      toast.error('No se pudo transferir', e instanceof ApiError ? e.message : undefined),
-  })
-
   if (!producto || !sucursal) {
     return <Modal open={false} onClose={onCerrar}><span /></Modal>
   }
-
-  const otras = sucursales.filter((s) => s.id !== sucursal.id)
 
   return (
     <Modal open={abierto} onClose={onCerrar} size="lg" labelledBy="detalle-stock-titulo">
@@ -920,44 +993,11 @@ function DetalleStockModal({
           </Button>
         </div>
 
-        {otras.length > 0 && (
-          <div className="rounded-2xl border border-line bg-canvas/40 p-4">
-            <p className="mb-3 flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.1em] text-ink-400">
-              <ArrowLeftRight className="h-3.5 w-3.5" aria-hidden />
-              Transferir a otra sucursal
-            </p>
-            <div className="flex flex-col gap-2.5 sm:flex-row">
-              <Input
-                type="number"
-                inputMode="numeric"
-                min={1}
-                value={transferir}
-                onChange={(e) => setTransferir(e.target.value)}
-                placeholder="Cantidad"
-                aria-label="Cantidad a transferir"
-                className="sm:w-32"
-              />
-              <Select
-                options={otras.map((s) => ({ value: String(s.id), label: s.nombre }))}
-                value={destino}
-                onChange={setDestino}
-                placeholder="Destino"
-                className="flex-1"
-              />
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => mover.mutate()}
-                disabled={mover.isPending}
-              >
-                {mover.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Transferir'}
-              </Button>
-            </div>
-            <p className="mt-2 text-xs text-ink-400">
-              Sale de {sucursal.nombre} y entra en el destino, en una sola operación.
-            </p>
-          </div>
-        )}
+        <p className="flex items-center gap-1.5 rounded-xl bg-ink-50 px-3 py-2.5 text-xs text-ink-500">
+          <ArrowLeftRight className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          ¿Mover unidades a otra sucursal? Cerrá esto y usá <b>Transferir</b>, en la misma fila del
+          producto.
+        </p>
 
         <div>
           <p className="mb-2 flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.1em] text-ink-400">
@@ -1000,6 +1040,334 @@ function CampoLocal({ label, hint, children }: { label: string; hint?: string; c
       {children}
       {hint && <p className="mt-1 text-xs text-ink-400">{hint}</p>}
     </div>
+  )
+}
+
+/**
+ * Mover unidades de una sucursal a otra. El origen viene fijado por la fila
+ * desde donde se abrió: acá solo se elige destino y cantidad. El backend hace
+ * la salida y la entrada en una sola transacción (o las dos, o ninguna).
+ */
+function TransferirStockModal({
+  abierto,
+  contexto,
+  sucursales,
+  filaDe,
+  onCerrar,
+  onListo,
+}: {
+  abierto: boolean
+  contexto: { producto: ProductoCatalogo; sucursal: Sucursal } | null
+  sucursales: Sucursal[]
+  filaDe: (productoId: number, sucursalId: number) => StockRow | undefined
+  onCerrar: () => void
+  onListo: (fila: StockRow) => void
+}) {
+  const toast = useToast()
+  const queryClient = useQueryClient()
+  const producto = contexto?.producto
+  const origen = contexto?.sucursal
+
+  const otras = useMemo(
+    () => sucursales.filter((s) => s.id !== origen?.id),
+    [sucursales, origen?.id],
+  )
+
+  const [cantidad, setCantidad] = useState('')
+  const [destino, setDestino] = useState('')
+  const [nota, setNota] = useState('')
+
+  useEffect(() => {
+    if (!abierto || !contexto) return
+    setCantidad('')
+    setNota('')
+    // Con una sola candidata no hay nada que elegir: ya viene puesta.
+    setDestino(otras.length === 1 ? String(otras[0].id) : '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [abierto, contexto?.producto.id, contexto?.sucursal.id])
+
+  const disponible = producto && origen ? (filaDe(producto.id, origen.id)?.cantidad ?? 0) : 0
+  const sucursalDestino = otras.find((s) => String(s.id) === destino)
+  const enDestino =
+    producto && sucursalDestino ? (filaDe(producto.id, sucursalDestino.id)?.cantidad ?? 0) : 0
+
+  const cuanto = Number(cantidad)
+  const cantidadOk = cantidad.trim() !== '' && Number.isInteger(cuanto) && cuanto > 0
+  const excede = cantidadOk && cuanto > disponible
+
+  const mover = useMutation({
+    mutationFn: () => {
+      if (!cantidadOk) {
+        throw new ApiError(0, 'Poné cuántas unidades transferir (1 o más).', null)
+      }
+      if (!destino) throw new ApiError(0, 'Elegí la sucursal de destino.', null)
+      return transferirStock({
+        producto: producto!.id,
+        origen: origen!.id,
+        destino: Number(destino),
+        cantidad: cuanto,
+        nota: nota.trim(),
+      })
+    },
+    onSuccess: ({ origen: filaOrigen, destino: filaDestino }) => {
+      onListo(filaOrigen)
+      onListo(filaDestino)
+      queryClient.invalidateQueries({ queryKey: ['inv-movimientos'] })
+      toast.success(
+        'Transferencia hecha',
+        `${num(cuanto)} u. · ${origen!.nombre} → ${sucursalDestino?.nombre ?? 'destino'}`,
+      )
+      onCerrar()
+    },
+    onError: (e) =>
+      toast.error('No se pudo transferir', e instanceof ApiError ? e.message : undefined),
+  })
+
+  if (!producto || !origen) {
+    return <Modal open={false} onClose={onCerrar}><span /></Modal>
+  }
+
+  const atajos = [1, 5, 10].filter((n) => n < disponible)
+
+  return (
+    <Modal open={abierto} onClose={onCerrar} size="lg" labelledBy="transferir-stock-titulo">
+      <div className="border-b border-line px-5 py-4">
+        <h2
+          id="transferir-stock-titulo"
+          className="flex items-center gap-2 text-lg font-semibold text-ink-950"
+        >
+          <ArrowLeftRight className="h-4.5 w-4.5 shrink-0 text-ink-500" aria-hidden />
+          Transferir stock
+        </h2>
+        <p className="truncate text-xs text-ink-400">{producto.nombre}</p>
+      </div>
+
+      <div className="max-h-[70vh] space-y-5 overflow-y-auto px-5 py-5">
+        {/* De dónde sale y a dónde entra, con el stock actual de cada lado. */}
+        <div className="grid items-stretch gap-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+          <div className="rounded-2xl border border-line bg-canvas/40 px-4 py-3">
+            <p className="text-[0.6rem] font-semibold uppercase tracking-[0.1em] text-ink-400">
+              Desde
+            </p>
+            <p className="mt-1 truncate text-sm font-semibold text-ink-900">{origen.nombre}</p>
+            <p className="tnum mt-0.5 text-xs text-ink-500">{num(disponible)} u. disponibles</p>
+          </div>
+          <div className="grid place-items-center py-1 sm:py-0">
+            <ArrowRight
+              className="h-5 w-5 rotate-90 text-ink-300 sm:rotate-0"
+              aria-hidden
+            />
+          </div>
+          <div className="rounded-2xl border border-line bg-canvas/40 px-4 py-3">
+            <p className="text-[0.6rem] font-semibold uppercase tracking-[0.1em] text-ink-400">
+              Hacia
+            </p>
+            {otras.length === 1 ? (
+              <p className="mt-1 truncate text-sm font-semibold text-ink-900">{otras[0].nombre}</p>
+            ) : (
+              <div className="mt-1">
+                <Select
+                  options={otras.map((s) => ({ value: String(s.id), label: s.nombre }))}
+                  value={destino}
+                  onChange={setDestino}
+                  placeholder="Elegí la sucursal"
+                />
+              </div>
+            )}
+            <p className="tnum mt-0.5 text-xs text-ink-500">
+              {sucursalDestino ? `${num(enDestino)} u. hoy` : 'sin destino elegido'}
+            </p>
+          </div>
+        </div>
+
+        <div>
+          <CampoLocal label="Unidades a mover">
+            <Input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={disponible}
+              value={cantidad}
+              onChange={(e) => setCantidad(e.target.value)}
+              placeholder="0"
+              aria-label="Unidades a mover"
+              className="sm:w-40"
+            />
+          </CampoLocal>
+          {disponible > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              {atajos.map((n) => (
+                <ChipCantidad key={n} onClick={() => setCantidad(String(n))}>
+                  {n}
+                </ChipCantidad>
+              ))}
+              <ChipCantidad onClick={() => setCantidad(String(disponible))}>
+                Todo ({num(disponible)})
+              </ChipCantidad>
+            </div>
+          )}
+          {excede && (
+            <p className="mt-2 text-xs font-medium text-ink-900">
+              En {origen.nombre} hay {num(disponible)} u.: no se puede mover {num(cuanto)}.
+            </p>
+          )}
+        </div>
+
+        <CampoLocal label="Nota (opcional)" hint="Queda en el historial de las dos sucursales">
+          <Input
+            value={nota}
+            onChange={(e) => setNota(e.target.value)}
+            placeholder='Ej: "lo pidió un cliente de Central"'
+            maxLength={200}
+          />
+        </CampoLocal>
+
+        {cantidadOk && !excede && sucursalDestino && (
+          <p className="tnum rounded-xl bg-ink-50 px-3 py-2.5 text-xs text-ink-600">
+            Después de mover: <b>{origen.nombre}</b> {num(disponible - cuanto)} u. ·{' '}
+            <b>{sucursalDestino.nombre}</b> {num(enDestino + cuanto)} u.
+          </p>
+        )}
+
+        <div className="flex flex-col-reverse gap-2.5 border-t border-line pt-4 sm:flex-row sm:justify-end">
+          <Button type="button" variant="outline" onClick={onCerrar}>
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            onClick={() => mover.mutate()}
+            disabled={mover.isPending || !cantidadOk || excede || !destino}
+          >
+            {mover.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <ArrowLeftRight className="h-4 w-4" />
+            )}
+            Transferir
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+function ChipCantidad({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="tnum h-7 rounded-full border border-line-strong px-3 text-xs font-medium text-ink-600 transition-colors hover:border-ink-300 hover:bg-ink-50 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
+    >
+      {children}
+    </button>
+  )
+}
+
+/**
+ * Alta de un producto del catálogo sin salir de Inventario (mismo formulario
+ * que Productos → Configurar). Nace sin stock: las unidades se cargan después
+ * con el + de la fila.
+ */
+function NuevoProductoModal({
+  abierto,
+  categorias,
+  productos,
+  categoriaSugerida,
+  onCerrar,
+  onCreado,
+}: {
+  abierto: boolean
+  categorias: CategoriaCatalogo[]
+  productos: ProductoCatalogo[]
+  /** Id de la categoría raíz filtrada en la pantalla, si hay alguna. */
+  categoriaSugerida: string
+  onCerrar: () => void
+  onCreado: (creado: ProductoCatalogo) => void
+}) {
+  const { data: dispositivos = [] } = useQuery({
+    queryKey: ['service-dispositivos'],
+    queryFn: listarDispositivos,
+    enabled: abierto,
+  })
+
+  // Raíces y subcategorías en el mismo orden que el editor de catálogo, con la
+  // madre adelante para que "Fundas › iPhone" se lea de un vistazo.
+  const opciones = useMemo(() => {
+    const raices = categorias
+      .filter((c) => c.padre === null)
+      .sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre))
+    const lista: Array<{ value: string; label: string }> = []
+    for (const raiz of raices) {
+      const hijas = categorias
+        .filter((c) => c.padre === raiz.id)
+        .sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre))
+      lista.push({ value: String(raiz.id), label: raiz.nombre })
+      lista.push(...hijas.map((h) => ({ value: String(h.id), label: `${raiz.nombre} › ${h.nombre}` })))
+    }
+    return lista
+  }, [categorias])
+
+  const [categoriaId, setCategoriaId] = useState('')
+
+  useEffect(() => {
+    if (!abierto) return
+    // Si la pantalla está filtrada por una raíz sin subcategorías, esa misma.
+    const sugerida = Number(categoriaSugerida)
+    const tieneHijas = categorias.some((c) => c.padre === sugerida)
+    setCategoriaId(categoriaSugerida && !tieneHijas ? categoriaSugerida : '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [abierto])
+
+  const categoria = categorias.find((c) => String(c.id) === categoriaId)
+
+  return (
+    <Modal open={abierto} onClose={onCerrar} size="xl" labelledBy="nuevo-producto-titulo">
+      <div className="border-b border-line px-5 py-4">
+        <h2
+          id="nuevo-producto-titulo"
+          className="flex items-center gap-2 text-lg font-semibold text-ink-950"
+        >
+          <PackagePlus className="h-4.5 w-4.5 shrink-0 text-ink-500" aria-hidden />
+          Nuevo producto
+        </h2>
+        <p className="text-xs text-ink-400">
+          Se da de alta en el catálogo con sus precios. Las unidades se cargan después, con el + de
+          la fila, en cada sucursal.
+        </p>
+      </div>
+
+      <div className="max-h-[70vh] space-y-4 overflow-y-auto px-5 py-5">
+        <CampoLocal
+          label="Categoría"
+          hint="Define en qué grupo aparece y qué descuento cash le toca"
+        >
+          <Select
+            options={opciones}
+            value={categoriaId}
+            onChange={setCategoriaId}
+            placeholder="Elegí la categoría"
+            searchable
+            searchPlaceholder="Fundas, vidrios, iPhones…"
+          />
+        </CampoLocal>
+
+        {categoria ? (
+          <ProductoForm
+            key={categoria.id}
+            categoria={categoria}
+            productosDeCategoria={productos.filter((p) => p.categoria === categoria.id)}
+            dispositivos={dispositivos}
+            modoCreacion
+            onListo={(guardado) => (guardado ? onCreado(guardado) : onCerrar())}
+            onCancelar={onCerrar}
+          />
+        ) : (
+          <p className="rounded-xl bg-ink-50 px-3 py-3 text-xs text-ink-400">
+            Elegí la categoría y aparece el formulario (nombre, marca, calidad y precios).
+          </p>
+        )}
+      </div>
+    </Modal>
   )
 }
 

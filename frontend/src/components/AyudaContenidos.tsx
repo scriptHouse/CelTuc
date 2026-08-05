@@ -408,7 +408,9 @@ export function AyudaInventario() {
             [<>Pestañas de sucursal</>, <>Elegís qué local estás mirando (Solar, Centro…). <b>Todas</b> muestra las dos columnas juntas con el total.</>],
             [<>Vistas</>, <>«Con stock» es el día a día; «Todo el catálogo» muestra también lo que está en 0; «Bajo mínimo» es la lista de reposición; «No informado» junta los productos cuya cantidad nunca se cargó.</>],
             [<>Botones − / +</>, <>Restan o suman de a una unidad (vendí una / encontré una). Quedan registrados con tu usuario.</>],
-            [<>El lápiz ✎</>, <>Abre el detalle: cantidad exacta, stock mínimo, transferencia a otra sucursal y los últimos movimientos.</>],
+            [<><b>Transferir</b> ⇄</>, <>Mueve unidades de este producto a otra sucursal: sale de la que estás mirando y entra en la que elijas.</>],
+            [<><b>Editar</b> ✎</>, <>Abre el detalle: cantidad exacta, stock mínimo y los últimos movimientos.</>],
+            [<><b>Nuevo producto</b></>, <>(Solo administradores) Da de alta un producto del catálogo sin salir de acá. Nace sin unidades: después se las cargás con el <b>+</b>.</>],
           ]}
         />
       </AyudaSeccion>
@@ -418,7 +420,7 @@ export function AyudaInventario() {
           pasos={[
             <>Pará en la pestaña de la sucursal donde entró (ej: <b>Solar</b>).</>,
             <>Buscá el producto (ej: <b>funda Spigen Liquid Air</b>). La búsqueda recorre todo el catálogo, tenga stock o no.</>,
-            <>Tocá <b>+</b> por cada unidad, o el <b>✎</b> para poner la cantidad exacta (ej: llegaron 10) y una nota tipo «pedido del mayorista».</>,
+            <>Tocá <b>+</b> por cada unidad, o <b>✎ Editar</b> para poner la cantidad exacta (ej: llegaron 10) y una nota tipo «pedido del mayorista».</>,
           ]}
         />
         <AyudaEjemplo titulo="llegaron 5 cargadores 20W a Centro">
@@ -432,11 +434,18 @@ export function AyudaInventario() {
       <AyudaSeccion titulo="Transferir entre sucursales">
         <AyudaPasos
           pasos={[
-            <>Abrí el <b>✎</b> del producto parado en la sucursal de <b>origen</b>.</>,
-            <>En «Transferir a otra sucursal» poné la cantidad y el destino.</>,
-            <>Listo: sale de una y entra en la otra <b>en una sola operación</b> (nunca queda por la mitad).</>,
+            <>Pará en la pestaña de la sucursal de <b>origen</b> (de donde sale la mercadería).</>,
+            <>En la fila del producto tocá <b>⇄ Transferir</b>.</>,
+            <>Elegí el destino y las unidades. Arriba ves cuántas hay de cada lado y abajo cómo queda cada sucursal después.</>,
+            <>Listo: sale de una y entra en la otra <b>en una sola operación</b> (nunca queda por la mitad), y queda asentado en el historial de las dos.</>,
           ]}
         />
+        <AyudaEjemplo titulo="pasar 3 vidrios de Solar a Centro">
+          <p className="tnum">
+            Pestaña Solar → buscar «vidrio 15» → ⇄ Transferir → destino Centro → 3 → Transferir.
+            Solar queda con 3 menos y Centro con 3 más.
+          </p>
+        </AyudaEjemplo>
       </AyudaSeccion>
 
       <AyudaSeccion titulo="El stock mínimo (alertas de reposición)">
