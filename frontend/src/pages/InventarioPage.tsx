@@ -36,7 +36,7 @@ import {
 import { ApiError } from '@/lib/api'
 import { useAuth } from '@/store/auth'
 import { esAdmin } from '@/lib/permisos'
-import { money0, num, tiempoRelativo } from '@/lib/format'
+import { money0, num, tiempoRelativo, usd } from '@/lib/format'
 import { cn, coincideBusqueda, ctStagger } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatCard } from '@/components/ui/StatCard'
@@ -573,17 +573,22 @@ function EncabezadoColumnas({
 /**
  * Celda de precio: columna alineada a la derecha en md+, y en mobile una
  * mini-tarjeta con su etiqueta arriba (ahí no hay encabezado que la nombre).
+ * Debajo del peso va el mismo precio en dólares — el de la lista, no el costo:
+ * los dos salen ya resueltos del catálogo (`efectivo`), igual que en Productos.
  */
 function CeldaPrecio({
   label,
   valor,
+  valorUsd,
   destacado = false,
 }: {
   label: string
   valor: string | number | null | undefined
+  valorUsd: string | number | null | undefined
   destacado?: boolean
 }) {
   const vacio = valor == null || valor === ''
+  const vacioUsd = valorUsd == null || valorUsd === ''
   return (
     <div
       className={cn(
@@ -603,6 +608,14 @@ function CeldaPrecio({
       >
         {vacio ? '—' : money0(Number(valor))}
       </span>
+      {!vacioUsd && (
+        <span
+          className="tnum block truncate text-[0.65rem] leading-tight text-ink-400"
+          title={`${label} en dólares: ${usd(Number(valorUsd))}`}
+        >
+          {usd(Number(valorUsd))}
+        </span>
+      )}
     </div>
   )
 }
@@ -635,6 +648,8 @@ function FilaProducto({
 }) {
   const lista = producto.efectivo?.lista_ars
   const cash = producto.efectivo?.cash_ars
+  const listaUsd = producto.efectivo?.lista_usd
+  const cashUsd = producto.efectivo?.cash_usd
 
   const etiquetas = [producto.calidad, producto.marca, producto.nota].filter(Boolean).join(' · ')
   // Contado y transferencia comparten precio (misma regla que la Venta rápida
@@ -643,8 +658,8 @@ function FilaProducto({
   // debajo como celdas etiquetadas (solas en el celular, junto al stock en sm).
   const columnasPrecio = (
     <div className="flex w-full basis-full items-stretch gap-2 sm:w-auto sm:flex-1 md:w-auto md:flex-none md:shrink-0 md:basis-auto md:items-center md:gap-3">
-      <CeldaPrecio label="Lista" valor={lista} />
-      <CeldaPrecio label="Contado/transf." valor={cash} destacado />
+      <CeldaPrecio label="Lista" valor={lista} valorUsd={listaUsd} />
+      <CeldaPrecio label="Contado/transf." valor={cash} valorUsd={cashUsd} destacado />
     </div>
   )
 
@@ -969,10 +984,16 @@ function DetalleStockModal({
         <p className="text-xs text-ink-400">
           Stock en <b className="text-ink-700">{sucursal.nombre}</b>
           {producto.efectivo?.lista_ars != null && (
-            <span className="tnum"> · lista {money0(Number(producto.efectivo.lista_ars))}</span>
+            <span className="tnum">
+              {' '}· lista {money0(Number(producto.efectivo.lista_ars))}
+              {producto.efectivo.lista_usd != null && ` (${usd(Number(producto.efectivo.lista_usd))})`}
+            </span>
           )}
           {producto.efectivo?.cash_ars != null && (
-            <span className="tnum"> · contado/transf. {money0(Number(producto.efectivo.cash_ars))}</span>
+            <span className="tnum">
+              {' '}· contado/transf. {money0(Number(producto.efectivo.cash_ars))}
+              {producto.efectivo.cash_usd != null && ` (${usd(Number(producto.efectivo.cash_usd))})`}
+            </span>
           )}
           {admin && producto.costo_usd != null && (
             <span className="tnum"> · costo US$ {num(Number(producto.costo_usd))}</span>
