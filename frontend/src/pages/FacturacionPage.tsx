@@ -13,6 +13,7 @@ import {
   Gauge,
   Mail,
   MessageCircle,
+  PackageX,
   Pencil,
   Phone,
   Plus,
@@ -1309,6 +1310,41 @@ function NuevaFacturaModal({
     ...productos.map((p) => ({ value: p.id, label: `${p.nombre} — ${money(p.precio)}` })),
   ]
 
+  /**
+   * Aviso de stock: qué ítems NO van a mover inventario al emitir. Solo aplica
+   * si la cuenta ve inventario (hay selector de sucursal) y la factura no nace
+   * de una venta de mostrador, que ya descontó lo suyo.
+   */
+  const avisoStock = (() => {
+    if (prefill?.items.length || opcionesSucursalStock.length <= 1) return null
+    const cargados = items.filter((i) => i.descripcion.trim() && i.cantidad > 0)
+    const aMano = cargados.filter((i) => !i.productoId)
+    const delCatalogo = cargados.filter((i) => i.productoId)
+    if (sucursalStock && aMano.length > 0) {
+      return {
+        titulo:
+          aMano.length === 1
+            ? 'Un ítem no va a descontar stock.'
+            : `${aMano.length} ítems no van a descontar stock.`,
+        ayuda:
+          'Se escribieron a mano, sin vincular al catálogo. Si son mercadería, borralos y volvé a agregarlos con «Agregar producto del inventario…».',
+        cuales: aMano.map((i) => i.descripcion.trim()),
+      }
+    }
+    if (!sucursalStock && delCatalogo.length > 0) {
+      return {
+        titulo:
+          delCatalogo.length === 1
+            ? 'El ítem del catálogo no va a descontar stock.'
+            : `Los ${delCatalogo.length} ítems del catálogo no van a descontar stock.`,
+        ayuda:
+          'El selector de arriba está en «No descontar stock»: elegí la sucursal si querés que salgan del inventario.',
+        cuales: [],
+      }
+    }
+    return null
+  })()
+
   function updateItem(key: string, patch: Partial<BorradorItem>) {
     setItems((list) => list.map((i) => (i.key === key ? { ...i, ...patch } : i)))
   }
@@ -1599,6 +1635,21 @@ function NuevaFacturaModal({
               <p className="text-xs text-ink-400">
                 Los ítems agregados desde el catálogo descuentan stock de esa sucursal al emitir.
               </p>
+            </div>
+          )}
+
+          {avisoStock && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-line bg-ink-50 px-4 py-3 text-xs leading-relaxed text-ink-600">
+              <PackageX className="mt-0.5 h-4 w-4 shrink-0 text-ink-500" aria-hidden />
+              <span>
+                <strong className="text-ink-900">{avisoStock.titulo}</strong> {avisoStock.ayuda}
+                {avisoStock.cuales.length > 0 && (
+                  <span className="mt-1 block text-ink-500">
+                    {avisoStock.cuales.slice(0, 4).map((d) => `«${d}»`).join(' · ')}
+                    {avisoStock.cuales.length > 4 && ` y ${avisoStock.cuales.length - 4} más`}
+                  </span>
+                )}
+              </span>
             </div>
           )}
 
