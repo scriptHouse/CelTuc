@@ -1259,11 +1259,13 @@ function NuevaFacturaModal({
     setSugerenciasAbiertas(false)
   }, [open, emisor, prefill])
 
-  // El descuento de stock arranca preseleccionado en la sucursal del empleado
-  // logueado (se puede cambiar o volver a "No descontar stock"). Se aplica una
-  // sola vez por apertura, recién cuando la lista de sucursales llegó — si la
-  // cuenta no puede ver inventario, el selector no existe y queda como siempre.
-  // Con ítems precargados desde una venta no aplica: esa venta ya descontó stock.
+  // El descuento de stock arranca SIEMPRE activado: preseleccionado en la sucursal
+  // del empleado logueado y, si la cuenta no tiene sucursal vinculada (admins), en
+  // la primera activa. Siempre se puede cambiar o volver a "No descontar stock".
+  // Se aplica una sola vez por apertura, recién cuando la lista de sucursales llegó
+  // — si la cuenta no puede ver inventario, el selector no existe y queda como
+  // siempre. Con ítems precargados desde una venta no aplica: esa venta ya descontó
+  // stock y volver a descontar duplicaría el movimiento.
   const usuarioActual = useAuth((s) => s.usuario)
   const sucursalPropiaAplicada = useRef(false)
   useEffect(() => {
@@ -1275,9 +1277,9 @@ function NuevaFacturaModal({
     sucursalPropiaAplicada.current = true
     if (prefill?.items.length) return
     const propia = usuarioActual?.sucursal?.id
-    if (propia != null && sucursalesStock.some((s) => s.id === propia && s.activa)) {
-      setSucursalStock(String(propia))
-    }
+    const activas = sucursalesStock.filter((s) => s.activa).sort((a, b) => a.orden - b.orden)
+    const elegida = activas.find((s) => s.id === propia) ?? activas[0]
+    if (elegida) setSucursalStock(String(elegida.id))
   }, [open, sucursalesStock, prefill, usuarioActual])
 
   const tipo = tipoComprobante(emisor.condicion, condicion)
