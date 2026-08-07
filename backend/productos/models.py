@@ -185,6 +185,15 @@ class Producto(ModeloBase):
     a_pedido = models.BooleanField('a pedido', default=False,
                                    help_text='Requiere seña previa (no hay stock inmediato).')
     nuevo = models.BooleanField('producto nuevo', default=False)
+    concepto_generico_factura = models.BooleanField(
+        'concepto generico en factura',
+        default=False,
+        help_text=(
+            'En la factura este producto NO figura por su nombre: se agrupa en un '
+            'renglon con el mensaje configurado en Facturacion. Marcado en '
+            'parlantes, consolas y equipos Xiaomi/Samsung/Apple.'
+        ),
+    )
     dispositivos = models.ManyToManyField(
         Dispositivo,
         blank=True,

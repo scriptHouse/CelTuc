@@ -104,7 +104,7 @@ class ProductoSerializer(serializers.ModelSerializer):
         model = Producto
         fields = (
             'id', 'categoria', 'nombre', 'marca', 'calidad', 'nota',
-            'a_pedido', 'nuevo', 'dispositivos', 'costo_usd',
+            'a_pedido', 'nuevo', 'concepto_generico_factura', 'dispositivos', 'costo_usd',
             'precio_lista_usd', 'precio_cash_usd', 'precio_lista_ars', 'precio_cash_ars',
             'orden', 'activo',
         )

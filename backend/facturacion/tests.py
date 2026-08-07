@@ -20,6 +20,12 @@ from usuarios.models import Permiso, Rol, Usuario
 
 from .arca import qr
 from .arca.servicio import _construir_detalle, _iva_id
+from .concepto import (
+    CLAVE_PREFERENCIA,
+    MENSAJE_POR_DEFECTO,
+    aplicar_concepto_generico,
+    mensaje_concepto_generico,
+)
 from .limites import facturado_del_mes
 from .logica import calcular_totales, tipo_comprobante
 from .models import Comprobante, Emisor, LimiteMensual
@@ -741,3 +747,184 @@ class BaseClientesTests(TestCase):
         # apuntandolo (si se restaura, su historial vuelve completo).
         self.assertTrue(Venta.objects.filter(pk=venta.pk).exists())
         self.assertEqual(venta.cliente_id, cliente.pk)
+
+
+class ConceptoGenericoTests(TestCase):
+    """Los productos marcados no figuran por su nombre: van en un renglon unico.
+
+    Lo que mas importa probar aca es que fusionar NO cambia la plata: neto, IVA
+    y total salen iguales que sin fusionar, porque los totales se calculan
+    DESPUES, sobre la lista ya fusionada.
+    """
+
+    def setUp(self):
+        from precios_service.models import ItemService, SeccionService
+        from productos.models import CategoriaProducto, Producto
+
+        categoria, _ = CategoriaProducto.objects.get_or_create(nombre='Categoria concepto test')
+        self.marcado = Producto.objects.create(
+            categoria=categoria, nombre='Parlante marcado', concepto_generico_factura=True,
+        )
+        self.marcado2 = Producto.objects.create(
+            categoria=categoria, nombre='Consola marcada', concepto_generico_factura=True,
+        )
+        self.normal = Producto.objects.create(categoria=categoria, nombre='Cable normal')
+        seccion = SeccionService.objects.create(nombre='Seccion concepto test')
+        self.repuesto = ItemService.objects.create(
+            seccion=seccion, etiqueta='Bateria marcada', concepto_generico_factura=True,
+        )
+
+    def test_sin_marcados_la_lista_queda_identica(self):
+        items = [{'descripcion': 'Cable', 'cantidad': 2, 'precio_unitario': Decimal('100')}]
+        self.assertIs(aplicar_concepto_generico(items, [self.normal], [None]), items)
+
+    def test_fusiona_los_marcados_en_un_renglon_y_respeta_el_total(self):
+        items = [
+            {'descripcion': 'Parlante', 'cantidad': 2, 'precio_unitario': Decimal('100')},
+            {'descripcion': 'Cable', 'cantidad': 1, 'precio_unitario': Decimal('50')},
+            {'descripcion': 'Consola', 'cantidad': 1, 'precio_unitario': Decimal('300')},
+        ]
+        antes = calcular_totales(items, 'B', Decimal('21'))
+        salida = aplicar_concepto_generico(
+            items, [self.marcado, self.normal, self.marcado2], [None, None, None],
+        )
+        # Dos renglones: el fusionado (donde estaba el primer marcado) y el normal.
+        self.assertEqual(len(salida), 2)
+        self.assertEqual(salida[0]['descripcion'], MENSAJE_POR_DEFECTO)
+        self.assertEqual(salida[0]['cantidad'], Decimal('1'))
+        self.assertEqual(salida[0]['precio_unitario'], Decimal('500.00'))  # 2x100 + 1x300
+        self.assertEqual(salida[1]['descripcion'], 'Cable')
+        self.assertEqual(calcular_totales(salida, 'B', Decimal('21')), antes)
+
+    def test_repuesto_de_service_tambien_se_fusiona(self):
+        items = [{'descripcion': 'Bateria iPhone 13', 'cantidad': 1,
+                  'precio_unitario': Decimal('90')}]
+        salida = aplicar_concepto_generico(items, [None], [self.repuesto])
+        self.assertEqual(salida[0]['descripcion'], MENSAJE_POR_DEFECTO)
+
+    def test_usa_el_mensaje_configurado_en_la_preferencia(self):
+        from comun.models import Preferencia
+
+        Preferencia.objects.create(clave=CLAVE_PREFERENCIA, valor='  Servicio tecnico  ')
+        items = [{'descripcion': 'Parlante', 'cantidad': 1, 'precio_unitario': Decimal('10')}]
+        salida = aplicar_concepto_generico(items, [self.marcado], [None])
+        self.assertEqual(salida[0]['descripcion'], 'Servicio tecnico')
+
+    def test_preferencia_vacia_cae_al_mensaje_de_fabrica(self):
+        from comun.models import Preferencia
+
+        Preferencia.objects.create(clave=CLAVE_PREFERENCIA, valor='   ')
+        self.assertEqual(mensaje_concepto_generico(), MENSAJE_POR_DEFECTO)
+
+    def test_mensaje_larguisimo_se_recorta_al_largo_del_renglon(self):
+        from comun.models import Preferencia
+
+        Preferencia.objects.create(clave=CLAVE_PREFERENCIA, valor='x' * 500)
+        self.assertEqual(len(mensaje_concepto_generico()), 200)
+
+
+class EmitirConConceptoGenericoTests(TestCase):
+    """De punta a punta: que se manda a emitir y que pasa con el stock."""
+
+    def setUp(self):
+        from inventario.models import Sucursal, aplicar_ajuste
+        from productos.models import CategoriaProducto, Producto
+
+        rol = Rol.objects.create(nombre='CajeroConcepto')
+        rol.permisos.set(Permiso.objects.filter(codigo='ver_facturacion'))
+        self.usuario = Usuario.objects.create_user(
+            email='cg@celtuc.ar', username='concepto', password='x', rol=rol,
+        )
+        self.emisor = Emisor.objects.create(
+            nombre='Emisor concepto', condicion='monotributista',
+            cuit='20111111113', punto_venta=1,
+        )
+        categoria, _ = CategoriaProducto.objects.get_or_create(nombre='Categoria emitir concepto')
+        self.marcado = Producto.objects.create(
+            categoria=categoria, nombre='Parlante JBL', concepto_generico_factura=True,
+        )
+        self.normal = Producto.objects.create(categoria=categoria, nombre='Cable comun')
+        self.sucursal = Sucursal.objects.create(nombre='Sucursal concepto', orden=91)
+        aplicar_ajuste(self.marcado, self.sucursal, delta=5)
+        aplicar_ajuste(self.normal, self.sucursal, delta=5)
+
+        self.api = APIClient()
+        self.api.force_authenticate(self.usuario)
+
+    def _emitir_mock(self, emisor, datos, usuario=None):
+        totales = calcular_totales(datos['items'], 'C', Decimal('21'))
+        comp = Comprobante.objects.create(
+            emisor=emisor, tipo='C', punto_venta=1,
+            numero=(Comprobante.objects.count() + 1),
+            cliente_nombre=datos['cliente_nombre'],
+            cliente_condicion=datos['cliente_condicion'],
+            neto=totales['neto'], iva=totales['iva'], total=totales['total'], cae='999',
+        )
+        for item in datos['items']:
+            comp.items.create(**item)
+        return comp
+
+    def _payload(self, **extra):
+        payload = {
+            'emisor': self.emisor.id,
+            'cliente_nombre': 'Cliente',
+            'cliente_condicion': 'consumidor_final',
+            'items': [
+                {'descripcion': 'Parlante JBL', 'cantidad': 2,
+                 'precio_unitario': 100, 'producto': self.marcado.id},
+                {'descripcion': 'Cable comun', 'cantidad': 1,
+                 'precio_unitario': 50, 'producto': self.normal.id},
+            ],
+        }
+        payload.update(extra)
+        return payload
+
+    @patch('facturacion.views.servicio.emitir')
+    def test_el_renglon_marcado_se_emite_con_el_mensaje(self, mock_emitir):
+        mock_emitir.side_effect = self._emitir_mock
+        r = self.api.post(reverse('facturacion:comprobante-list'), self._payload(), format='json')
+        self.assertEqual(r.status_code, 201)
+        enviados = mock_emitir.call_args.args[1]['items']
+        self.assertEqual(len(enviados), 2)
+        self.assertEqual(enviados[0]['descripcion'], MENSAJE_POR_DEFECTO)
+        self.assertEqual(enviados[0]['precio_unitario'], Decimal('200.00'))
+        self.assertEqual(enviados[1]['descripcion'], 'Cable comun')
+        # Ni `producto` ni `item_service` llegan a la emision.
+        self.assertNotIn('producto', enviados[0])
+        self.assertNotIn('item_service', enviados[0])
+        # La plata es la misma que sin fusionar: 2x100 + 1x50.
+        self.assertEqual(Comprobante.objects.get(pk=r.data['id']).total, Decimal('250.00'))
+
+    @patch('facturacion.views.servicio.emitir')
+    def test_fusionar_no_le_saca_el_descuento_de_stock_a_nadie(self, mock_emitir):
+        from inventario.models import StockProducto
+        mock_emitir.side_effect = self._emitir_mock
+        r = self.api.post(reverse('facturacion:comprobante-list'),
+                          self._payload(sucursal_stock=self.sucursal.id), format='json')
+        self.assertEqual(r.status_code, 201)
+        # El marcado ya no tiene renglon propio, pero descuenta igual: el stock
+        # se calcula con la lista ORIGINAL, no con la fusionada.
+        self.assertEqual(
+            StockProducto.objects.get(producto=self.marcado, sucursal=self.sucursal).cantidad, 3)
+        self.assertEqual(
+            StockProducto.objects.get(producto=self.normal, sucursal=self.sucursal).cantidad, 4)
+
+    @patch('facturacion.views.servicio.emitir')
+    def test_factura_sin_marcados_sale_igual_que_siempre(self, mock_emitir):
+        mock_emitir.side_effect = self._emitir_mock
+        r = self.api.post(reverse('facturacion:comprobante-list'), {
+            'emisor': self.emisor.id,
+            'cliente_nombre': 'Cliente',
+            'cliente_condicion': 'consumidor_final',
+            'items': [{'descripcion': 'Cable comun', 'cantidad': 1,
+                       'precio_unitario': 50, 'producto': self.normal.id}],
+        }, format='json')
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(mock_emitir.call_args.args[1]['items'][0]['descripcion'], 'Cable comun')
+
+    def test_la_preferencia_se_lee_y_se_guarda_por_la_api(self):
+        url = reverse('comun:preferencia', args=[CLAVE_PREFERENCIA])
+        self.assertEqual(self.api.get(url).data['valor'], '')
+        self.assertEqual(
+            self.api.put(url, {'valor': 'Otro texto'}, format='json').status_code, 200)
+        self.assertEqual(self.api.get(url).data['valor'], 'Otro texto')

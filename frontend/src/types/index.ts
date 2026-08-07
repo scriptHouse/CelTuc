@@ -478,6 +478,11 @@ export interface ItemPrecioService {
   seccion: number
   etiqueta: string
   nota: string
+  /**
+   * En la factura esta fila NO figura por su nombre: se agrupa con los demás
+   * marcados en un renglón con el mensaje configurado en Facturación.
+   */
+  concepto_generico_factura: boolean
   /** Ids de los DispositivoService a los que aplica esta fila. */
   dispositivos: number[]
   orden: number
@@ -527,6 +532,11 @@ export interface ProductoCatalogo {
   nota: string
   a_pedido: boolean
   nuevo: boolean
+  /**
+   * En la factura este producto NO figura por su nombre: se agrupa con los
+   * demás marcados en un renglón con el mensaje configurado en Facturación.
+   */
+  concepto_generico_factura: boolean
   /** Equipos vinculados (para la Ficha): el que ES o con los que es compatible. */
   dispositivos: number[]
   /** Costo de reposición (USD). El backend solo se lo manda a administradores. */

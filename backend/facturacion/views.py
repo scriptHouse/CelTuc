@@ -25,6 +25,7 @@ from usuarios.permissions import (
 from .arca import servicio
 from .arca.errores import ErrorARCA
 from .clientes import registrar_cliente_desde_comprobante
+from .concepto import aplicar_concepto_generico
 from .email import EmailNoConfigurado, enviar_comprobante
 from .limites import estado_limites_del_anio, guardar_limites, verificar_limite_mensual
 from .models import Cliente, Comprobante, Emisor
@@ -192,12 +193,17 @@ class ComprobanteListCreateView(generics.ListCreateAPIView):
         confirmar_limite = datos.pop('confirmar_limite', False)
         # Venta de mostrador que origina esta factura (opcional, viene de Caja).
         venta_origen = datos.pop('venta', None)
-        items_limpios, productos_stock = [], []
+        items_limpios, productos_stock, items_service = [], [], []
         for item in datos['items']:
             item = dict(item)
             productos_stock.append(item.pop('producto', None))
+            items_service.append(item.pop('item_service', None))
             items_limpios.append(item)
-        datos['items'] = items_limpios
+        # Los renglones marcados como concepto generico se fusionan en uno solo
+        # con el mensaje configurado. Solo cambia el DETALLE que se guarda y se
+        # imprime: los totales se calculan despues, sobre esta lista, y ARCA no
+        # recibe renglones. `items_limpios` queda intacto para el stock.
+        datos['items'] = aplicar_concepto_generico(items_limpios, productos_stock, items_service)
         usuario = request.user if request.user.is_authenticated else None
         # Control interno de limite mensual, ANTES de pedir el CAE (no toca la
         # logica de ARCA): si el mes queda pasado del tope se devuelve 409 y el

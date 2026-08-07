@@ -51,6 +51,8 @@ export interface ItemInput {
   seccion: number
   etiqueta: string
   nota?: string
+  /** En la factura no figura por su nombre (ver `lib/conceptoGenerico`). */
+  concepto_generico_factura?: boolean
   /** Ids de los equipos a los que aplica la fila (alimenta el selector). */
   dispositivos?: number[]
   orden?: number

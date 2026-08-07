@@ -33,8 +33,9 @@ class CategoriaProductoAdmin(ModeloBaseAdminMixin, ModelAdmin):
 @admin.register(Producto)
 class ProductoAdmin(ModeloBaseAdminMixin, ModelAdmin):
     list_display = ('nombre', 'categoria', 'marca', 'calidad', 'precio_lista_usd',
-                    'a_pedido', 'activo', 'borrado', 'actualizado')
-    list_filter = ('categoria', 'marca', 'a_pedido', 'nuevo', 'activo', 'borrado')
+                    'a_pedido', 'concepto_generico_factura', 'activo', 'borrado', 'actualizado')
+    list_filter = ('categoria', 'marca', 'a_pedido', 'nuevo', 'concepto_generico_factura',
+                   'activo', 'borrado')
     search_fields = ('nombre', 'marca', 'calidad', 'nota')
     filter_horizontal = ('dispositivos',)
     readonly_fields = _AUDITORIA

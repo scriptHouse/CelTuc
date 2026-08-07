@@ -107,7 +107,8 @@ class ItemServiceSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ItemService
-        fields = ('id', 'seccion', 'etiqueta', 'nota', 'dispositivos', 'orden', 'activo', 'precios')
+        fields = ('id', 'seccion', 'etiqueta', 'nota', 'concepto_generico_factura',
+                  'dispositivos', 'orden', 'activo', 'precios')
 
     def validate_etiqueta(self, value):
         value = value.strip()

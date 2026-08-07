@@ -132,8 +132,14 @@ export interface NuevoComprobante {
   estado_cobro?: EstadoCobro
   items: Array<
     Pick<ItemComprobante, 'descripcion' | 'cantidad' | 'precio_unitario'> & {
-      /** Producto del catálogo: junto con `sucursal_stock`, descuenta stock. */
+      /**
+       * Producto del catálogo. Sirve para dos cosas: junto con `sucursal_stock`
+       * descuenta stock, y le dice al backend si el ítem lleva concepto
+       * genérico (ver `lib/conceptoGenerico`).
+       */
       producto?: number
+      /** Fila de la lista del taller. Solo concepto genérico: NO toca stock. */
+      item_service?: number
     }
   >
   /** Sucursal de la que descontar el stock de los ítems con `producto`. */

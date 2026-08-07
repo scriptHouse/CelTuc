@@ -68,6 +68,11 @@ import {
   type AbrirCajaInput,
 } from '@/services/caja'
 import { tomarBorradorFacturaVenta, type BorradorFacturaVenta } from '@/lib/borradorFactura'
+import {
+  CLAVE_CONCEPTO_GENERICO,
+  MAX_LARGO_CONCEPTO,
+  MENSAJE_CONCEPTO_POR_DEFECTO,
+} from '@/lib/conceptoGenerico'
 import { AperturaModal, type AperturaValues } from '@/components/caja/AperturaModal'
 import { CuentaCard } from '@/components/facturacion/CuentaCard'
 import { LimiteUsoBar } from '@/components/facturacion/LimiteUsoBar'
@@ -241,14 +246,24 @@ export function FacturacionPage() {
           id: String(p.id),
           nombre: [p.nombre, p.calidad].filter(Boolean).join(' · '),
           precio: Number(p.efectivo.lista_ars),
+          conceptoGenerico: p.concepto_generico_factura,
         })),
     [catalogo],
   )
+
+  // Texto que reemplaza al detalle de los productos marcados. Vacío = sin
+  // personalizar, y se usa el de fábrica (el mismo que aplica el backend).
+  const { data: prefConcepto } = useQuery({
+    queryKey: ['pref', CLAVE_CONCEPTO_GENERICO],
+    queryFn: () => obtenerPreferencia(CLAVE_CONCEPTO_GENERICO),
+  })
+  const mensajeConcepto = prefConcepto?.valor?.trim() || MENSAJE_CONCEPTO_POR_DEFECTO
 
   const [facturaModal, setFacturaModal] = useState(false)
   const [emisorModal, setEmisorModal] = useState(false)
   const [emisorEdit, setEmisorEdit] = useState<Emisor | null>(null)
   const [limitesModal, setLimitesModal] = useState(false)
+  const [conceptoModal, setConceptoModal] = useState(false)
   const [detalleId, setDetalleId] = useState<number | null>(null)
 
   // --- Facturar una venta de mostrador (viene de Caja) -----------------------
@@ -288,6 +303,9 @@ export function FacturacionPage() {
         precioUnitario: esRI
           ? Math.round((i.precioFinal / (1 + IVA_RATE)) * 100) / 100
           : i.precioFinal,
+        productoId: i.productoId,
+        itemServiceId: i.itemServiceId,
+        conceptoGenerico: i.conceptoGenerico,
       })),
       observaciones: borrador.observaciones,
       pagada: true, // la venta de mostrador ya se cobró
@@ -622,6 +640,10 @@ export function FacturacionPage() {
                       Límites
                     </Button>
                   )}
+                  <Button variant="outline" size="sm" onClick={() => setConceptoModal(true)}>
+                    <FileText className="h-4 w-4" />
+                    Concepto
+                  </Button>
                   {soySuper && (
                     <Button variant="outline" size="sm" onClick={abrirEditarCuenta}>
                       <Pencil className="h-4 w-4" />
@@ -728,6 +750,7 @@ export function FacturacionPage() {
           open={facturaModal}
           emisor={emisor}
           productos={productos}
+          mensajeConcepto={mensajeConcepto}
           limites={limitesAnio?.limites}
           anioLimites={limitesAnio?.anio}
           prefill={prefill}
@@ -747,6 +770,8 @@ export function FacturacionPage() {
           onClose={() => setLimitesModal(false)}
         />
       )}
+
+      <ConceptoGenericoModal open={conceptoModal} onClose={() => setConceptoModal(false)} />
 
       <EmisorModal
         open={emisorModal}
@@ -823,11 +848,100 @@ export function FacturacionPage() {
   )
 }
 
+// ===== Concepto genérico (texto configurable) =====
+
+/**
+ * Configura el texto que reemplaza al detalle de los productos marcados con
+ * «No detallar en la factura». Es una preferencia GLOBAL: vale para todas las
+ * cuentas emisoras, todos los usuarios y todos los dispositivos.
+ */
+function ConceptoGenericoModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const toast = useToast()
+  const queryClient = useQueryClient()
+  const [texto, setTexto] = useState('')
+
+  const { data: pref } = useQuery({
+    queryKey: ['pref', CLAVE_CONCEPTO_GENERICO],
+    queryFn: () => obtenerPreferencia(CLAVE_CONCEPTO_GENERICO),
+    enabled: open,
+  })
+
+  // Al abrir se muestra lo guardado; sin personalizar, el texto de fábrica.
+  useEffect(() => {
+    if (open) setTexto(pref?.valor?.trim() || MENSAJE_CONCEPTO_POR_DEFECTO)
+  }, [open, pref])
+
+  const guardar = useMutation({
+    // Guardar el texto de fábrica equivale a «sin personalizar»: se manda vacío.
+    mutationFn: (valor: string) =>
+      guardarPreferencia(
+        CLAVE_CONCEPTO_GENERICO,
+        valor.trim() === MENSAJE_CONCEPTO_POR_DEFECTO ? '' : valor.trim(),
+      ),
+    onSuccess: (guardada) => {
+      queryClient.setQueryData(['pref', CLAVE_CONCEPTO_GENERICO], guardada)
+      toast.success('Concepto guardado', 'Vale para todas las cuentas y usuarios.')
+      onClose()
+    },
+    onError: (e) => toast.error('No se pudo guardar', e instanceof ApiError ? e.message : undefined),
+  })
+
+  const limpio = texto.trim()
+
+  return (
+    <Modal open={open} onClose={onClose} size="md">
+      <div className="border-b border-line px-5 py-4">
+        <h2 className="text-lg font-semibold text-ink-950">Concepto de la factura</h2>
+        <p className="text-xs text-ink-400">
+          Qué dice la factura en lugar del nombre de los productos marcados
+        </p>
+      </div>
+      <div className="px-5 py-5">
+        <Campo label="Mensaje">
+          <Input
+            value={texto}
+            onChange={(e) => setTexto(e.target.value.slice(0, MAX_LARGO_CONCEPTO))}
+            placeholder={MENSAJE_CONCEPTO_POR_DEFECTO}
+            autoFocus
+          />
+        </Campo>
+        <p className="mt-2 text-xs leading-relaxed text-ink-400">
+          Los productos marcados con «No detallar en la factura» (parlantes, consolas,
+          equipos Xiaomi/Samsung/Apple y los repuestos del taller) no figuran con su
+          nombre: se agrupan en un solo renglón que dice este texto, por la suma de sus
+          importes. El total de la factura y el stock no cambian. Se marcan uno por uno
+          desde Productos y desde Precios de Service.
+        </p>
+        <p className="mt-2 text-xs text-ink-400">{limpio.length}/{MAX_LARGO_CONCEPTO} caracteres</p>
+      </div>
+      <div className="flex justify-end gap-2 border-t border-line px-5 py-4">
+        <Button variant="ghost" onClick={onClose}>
+          Cancelar
+        </Button>
+        <Button
+          onClick={() => guardar.mutate(texto)}
+          disabled={!limpio || guardar.isPending}
+        >
+          {guardar.isPending ? 'Guardando…' : 'Guardar'}
+        </Button>
+      </div>
+    </Modal>
+  )
+}
+
 /** Precarga del modal de emisión cuando la factura nace de una venta de Caja. */
 interface PrefillFactura {
   /** Venta de mostrador que se está facturando (se liga al emitir). */
   ventaId: number
-  items: Array<{ descripcion: string; cantidad: number; precioUnitario: number }>
+  items: Array<{
+    descripcion: string
+    cantidad: number
+    precioUnitario: number
+    /** Origen del ítem: solo para el concepto genérico (el stock ya se movió). */
+    productoId?: number
+    itemServiceId?: number
+    conceptoGenerico?: boolean
+  }>
   observaciones: string
   pagada: boolean
   /** Cliente cargado en el mostrador (si la venta lo tenía). */
@@ -1149,6 +1263,10 @@ interface BorradorItem {
   cantidad: number
   precioUnitario: number
   productoId?: string
+  /** Fila de la lista del taller, si el ítem vino de una venta de Caja. */
+  itemServiceId?: number
+  /** El ítem no va a figurar por su nombre (ver `lib/conceptoGenerico`). */
+  conceptoGenerico?: boolean
 }
 
 let _k = 0
@@ -1158,6 +1276,7 @@ function NuevaFacturaModal({
   open,
   emisor,
   productos,
+  mensajeConcepto,
   limites,
   anioLimites,
   prefill,
@@ -1167,7 +1286,9 @@ function NuevaFacturaModal({
 }: {
   open: boolean
   emisor: Emisor
-  productos: { id: string; nombre: string; precio: number }[]
+  productos: { id: string; nombre: string; precio: number; conceptoGenerico: boolean }[]
+  /** Texto que reemplaza al detalle de los productos marcados. */
+  mensajeConcepto: string
   /** Límites mensuales del año en curso de la cuenta (para avisar antes de emitir). */
   limites?: LimiteMes[]
   anioLimites?: number
@@ -1250,6 +1371,12 @@ function NuevaFacturaModal({
             descripcion: i.descripcion,
             cantidad: i.cantidad,
             precioUnitario: i.precioUnitario,
+            // OJO: `productoId` acá NO descuenta stock (la venta ya lo hizo:
+            // el selector de sucursal queda en «No descontar stock»). Viaja
+            // solo para que el backend sepa si el ítem lleva concepto genérico.
+            productoId: i.productoId != null ? String(i.productoId) : undefined,
+            itemServiceId: i.itemServiceId,
+            conceptoGenerico: i.conceptoGenerico,
           }))
         : [{ key: nextKey(), descripcion: '', cantidad: 1, precioUnitario: 0 }],
     )
@@ -1359,7 +1486,14 @@ function NuevaFacturaModal({
     if (!prod) return
     setItems((list) => [
       ...list,
-      { key: nextKey(), descripcion: prod.nombre, cantidad: 1, precioUnitario: prod.precio, productoId: prod.id },
+      {
+        key: nextKey(),
+        descripcion: prod.nombre,
+        cantidad: 1,
+        precioUnitario: prod.precio,
+        productoId: prod.id,
+        conceptoGenerico: prod.conceptoGenerico,
+      },
     ])
   }
   function removeItem(key: string) {
@@ -1367,7 +1501,8 @@ function NuevaFacturaModal({
   }
 
   const toast = useToast()
-  function submit() {
+  const confirm = useConfirm()
+  async function submit() {
     if (!nombre.trim()) {
       toast.error('Falta el cliente', 'Ingresá el nombre o razón social.')
       return
@@ -1376,18 +1511,40 @@ function NuevaFacturaModal({
       toast.error('Falta el CUIT', 'La Factura A requiere el CUIT del cliente.')
       return
     }
-    const validos = items
-      .filter((i) => i.descripcion.trim() && i.cantidad > 0)
-      .map((i) => ({
-        descripcion: i.descripcion.trim(),
-        cantidad: i.cantidad,
-        precio_unitario: i.precioUnitario,
-        // Con sucursal elegida, los ítems del catálogo descuentan stock.
-        producto: sucursalStock && i.productoId ? Number(i.productoId) : undefined,
-      }))
+    const cargados = items.filter((i) => i.descripcion.trim() && i.cantidad > 0)
+    const validos = cargados.map((i) => ({
+      descripcion: i.descripcion.trim(),
+      cantidad: i.cantidad,
+      precio_unitario: i.precioUnitario,
+      // El origen del ítem viaja SIEMPRE: dice si descuenta stock (solo si
+      // además se eligió sucursal) y si lleva concepto genérico.
+      producto: i.productoId ? Number(i.productoId) : undefined,
+      item_service: i.itemServiceId,
+    }))
     if (validos.length === 0) {
       toast.error('Sin ítems', 'Agregá al menos un ítem con descripción y cantidad.')
       return
+    }
+    // Aviso: los ítems marcados no van a figurar por su nombre. El reemplazo lo
+    // hace el backend; acá solo se muestra qué va a pasar antes de emitir.
+    const genericos = cargados.filter((i) => i.conceptoGenerico)
+    if (genericos.length > 0) {
+      const monto = genericos.reduce((acc, i) => acc + i.cantidad * i.precioUnitario, 0)
+      const ok = await confirm({
+        title: `Se cambiará el concepto por el mensaje «${mensajeConcepto}»`,
+        icon: FileText,
+        confirmLabel: 'Emitir así',
+        cancelLabel: 'Volver',
+        description:
+          (genericos.length === 1
+            ? `El ítem «${genericos[0].descripcion.trim()}» no va a figurar con su nombre en la factura. `
+            : `Estos ${genericos.length} ítems no van a figurar con su nombre en la factura: ` +
+              `${genericos.map((i) => `«${i.descripcion.trim()}»`).join(', ')}. `) +
+          `Se agrupan en un solo renglón que dice «${mensajeConcepto}», por ${money(monto)}. ` +
+          'El total de la factura no cambia y el stock se descuenta igual. ' +
+          'El texto se configura en Facturación.',
+      })
+      if (!ok) return
     }
     // Un Consumidor Final al que se le empezó a cargar el documento y después se
     // borró vuelve a viajar como "CF": ARCA no acepta un DNI/CUIT con número 0.
@@ -1405,7 +1562,10 @@ function NuevaFacturaModal({
       observaciones: observaciones.trim() || undefined,
       estado_cobro: pagada ? 'pagada' : 'pendiente',
       items: validos,
-      sucursal_stock: sucursalStock ? Number(sucursalStock) : undefined,
+      // Con ítems de una venta el stock YA se movió en el mostrador: la sucursal
+      // nunca viaja (el selector ni se muestra), así nada se descuenta dos veces.
+      sucursal_stock:
+        prefill?.items.length || !sucursalStock ? undefined : Number(sucursalStock),
       // Si la factura nace de una venta de mostrador, se manda su id: la venta
       // queda ligada y esa plata no se cuenta dos veces en el cliente.
       venta: prefill?.ventaId,
@@ -1651,7 +1811,10 @@ function NuevaFacturaModal({
             onChange={(v) => v && addFromProducto(v)}
           />
 
-          {opcionesSucursalStock.length > 1 && (
+          {/* Con ítems precargados desde una venta el selector NO se muestra:
+              esa venta ya descontó el stock en el mostrador y volver a elegir
+              sucursal acá lo descontaría dos veces. */}
+          {opcionesSucursalStock.length > 1 && !prefill?.items.length && (
             <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
               <Select
                 options={opcionesSucursalStock}

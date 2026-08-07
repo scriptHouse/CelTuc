@@ -14,6 +14,7 @@ from decimal import Decimal
 from rest_framework import serializers
 
 from inventario.models import Sucursal, Venta
+from precios_service.models import ItemService
 from productos.models import Producto
 
 from .arca import qr
@@ -107,13 +108,20 @@ class ItemComprobanteSerializer(serializers.ModelSerializer):
     )
     # Producto del catalogo (opcional, solo entrada): si ademas viene
     # `sucursal_stock` en el comprobante, el item descuenta stock al emitir.
+    # Tambien dice si el renglon lleva concepto generico (ver `concepto.py`).
     producto = serializers.PrimaryKeyRelatedField(
         queryset=Producto.objects.all(), required=False, allow_null=True, write_only=True,
+    )
+    # Fila de la lista del taller, si el renglon salio de ahi (viene de Caja).
+    # No mueve stock: solo sirve para saber si lleva concepto generico.
+    item_service = serializers.PrimaryKeyRelatedField(
+        queryset=ItemService.objects.all(), required=False, allow_null=True, write_only=True,
     )
 
     class Meta:
         model = ItemComprobante
-        fields = ('id', 'descripcion', 'cantidad', 'precio_unitario', 'subtotal', 'producto')
+        fields = ('id', 'descripcion', 'cantidad', 'precio_unitario', 'subtotal',
+                  'producto', 'item_service')
         read_only_fields = ('id', 'subtotal')
 
     def validate_descripcion(self, value):

@@ -244,6 +244,15 @@ class ItemService(ModeloBase):
         verbose_name='dispositivos',
         help_text='Equipos a los que aplica esta fila (alimenta el selector de la pagina).',
     )
+    concepto_generico_factura = models.BooleanField(
+        'concepto generico en factura',
+        default=False,
+        help_text=(
+            'En la factura esta fila NO figura por su nombre: se agrupa en un '
+            'renglon con el mensaje configurado en Facturacion. Marcado en los '
+            'repuestos (baterias, modulos, camaras, flex, placas, tapas).'
+        ),
+    )
     orden = models.PositiveSmallIntegerField('orden', default=0)
     activo = models.BooleanField('activo', default=True)
 

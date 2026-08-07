@@ -40,6 +40,7 @@ export interface ProductoCatalogoInput {
   nota?: string
   a_pedido?: boolean
   nuevo?: boolean
+  concepto_generico_factura?: boolean
   dispositivos?: number[]
   precio_lista_usd?: number | null
   precio_cash_usd?: number | null

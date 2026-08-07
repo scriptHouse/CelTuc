@@ -160,6 +160,38 @@ La app sigue los patrones del proyecto:
 > Estas reglas están **espejadas** en el front (`lib/afip.ts`) para que el tipo y los
 > totales coincidan de los dos lados.
 
+### `concepto.py` — el concepto genérico
+
+Algunos artículos **no se detallan por su nombre** en la factura: parlantes, consolas,
+equipos Xiaomi/Samsung/Apple (`productos.Producto`) y los repuestos del taller —
+baterías, placas, Face ID, cámaras, flex, glass de cámara, módulos, tapas
+(`precios_service.ItemService`). Cada fila lo decide con su flag
+**`concepto_generico_factura`**; el marcado inicial lo hacen dos migraciones de datos, por
+categoría/sección (no por nombre: la planilla se actualiza seguido).
+
+Al emitir, `aplicar_concepto_generico()` **fusiona todos los renglones marcados en uno
+solo**, ubicado donde estaba el primero, con `cantidad = 1` y precio igual a la suma de
+sus subtotales. El texto sale de la preferencia global
+**`facturacion.concepto_generico`** (`comun.Preferencia`); vacía = el de fábrica,
+`'Accesorios y repuestos para telefonía celular'`.
+
+Lo que **no** cambia, y es la razón de que esto sea seguro:
+
+- **ARCA no se entera.** El WSFEv1 solo recibe importes (`ImpTotal`, `ImpNeto`, `ImpIVA`,
+  `DocTipo`…): el detalle de los renglones nunca viaja. Cambiar descripciones no puede
+  alterar un CAE.
+- **El total no se mueve.** Los totales se calculan **después** de fusionar, sobre la
+  lista final, así que la factura siempre cierra consigo misma (que es lo que ARCA
+  valida contra `ImpTotal`).
+- **El stock se descuenta aparte**, con la lista de ítems **original**
+  (`views._descontar_stock`): fusionar no le saca el descuento a ningún producto.
+- Una factura **sin** productos marcados sale exactamente igual que antes.
+
+El front (`lib/conceptoGenerico.ts`) solo **avisa** antes de emitir, con el mismo texto;
+quien realmente reemplaza es el backend, así que no se puede saltear desde la API.
+Se marcan más productos desde Productos y desde Precios de Service (casilla «No detallar
+en la factura»), o desde el admin de Django.
+
 ### `permissions.py`
 
 - **`PuedeFacturar`**: cuenta autenticada que sea `es_administrador` **o** tenga el

@@ -18,7 +18,16 @@ export interface BorradorFacturaVenta {
   /** Cuenta puntual elegida en el mostrador (si no está, se usa la primera). */
   emisorId?: number
   /** Ítems con el precio FINAL cobrado en el mostrador (IVA incluido si aplica). */
-  items: Array<{ descripcion: string; cantidad: number; precioFinal: number }>
+  items: Array<{
+    descripcion: string
+    cantidad: number
+    precioFinal: number
+    /** Origen del ítem: dice si en la factura lleva concepto genérico. NO
+     *  descuenta stock (esta venta ya lo descontó en el mostrador). */
+    productoId?: number
+    itemServiceId?: number
+    conceptoGenerico?: boolean
+  }>
   observaciones: string
   /** Cliente elegido en el mostrador: precarga los datos del receptor. */
   cliente?: {

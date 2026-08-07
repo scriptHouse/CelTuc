@@ -75,8 +75,9 @@ class PrecioItemServiceInline(TabularInline):
 
 @admin.register(ItemService)
 class ItemServiceAdmin(ModeloBaseAdminMixin, ModelAdmin):
-    list_display = ('etiqueta', 'seccion', 'activo', 'borrado', 'orden', 'actualizado')
-    list_filter = ('seccion', 'activo', 'borrado')
+    list_display = ('etiqueta', 'seccion', 'concepto_generico_factura', 'activo', 'borrado',
+                    'orden', 'actualizado')
+    list_filter = ('seccion', 'concepto_generico_factura', 'activo', 'borrado')
     search_fields = ('etiqueta', 'nota')
     inlines = (PrecioItemServiceInline,)
     readonly_fields = _AUDITORIA
