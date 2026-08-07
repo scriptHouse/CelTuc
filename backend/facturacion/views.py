@@ -191,6 +191,10 @@ class ComprobanteListCreateView(generics.ListCreateAPIView):
         # Datos de stock: se separan ANTES de emitir (ARCA no los conoce).
         sucursal_stock = datos.pop('sucursal_stock', None)
         confirmar_limite = datos.pop('confirmar_limite', False)
+        # El usuario pidio, para ESTA factura, dejar los productos marcados con su
+        # nombre real. Lo puede hacer cualquiera que facture: no cambia nada del
+        # catalogo ni del mensaje, solo el detalle de este comprobante.
+        conservar_detalle = datos.pop('conservar_detalle', False)
         # Venta de mostrador que origina esta factura (opcional, viene de Caja).
         venta_origen = datos.pop('venta', None)
         items_limpios, productos_stock, items_service = [], [], []
@@ -200,10 +204,15 @@ class ComprobanteListCreateView(generics.ListCreateAPIView):
             items_service.append(item.pop('item_service', None))
             items_limpios.append(item)
         # Los renglones marcados como concepto generico se fusionan en uno solo
-        # con el mensaje configurado. Solo cambia el DETALLE que se guarda y se
-        # imprime: los totales se calculan despues, sobre esta lista, y ARCA no
-        # recibe renglones. `items_limpios` queda intacto para el stock.
-        datos['items'] = aplicar_concepto_generico(items_limpios, productos_stock, items_service)
+        # con el mensaje configurado, salvo que se pida conservar el detalle.
+        # Solo cambia el DETALLE que se guarda y se imprime: los totales se
+        # calculan despues, sobre esta lista, y ARCA no recibe renglones.
+        # `items_limpios` queda intacto para el stock.
+        datos['items'] = (
+            items_limpios
+            if conservar_detalle
+            else aplicar_concepto_generico(items_limpios, productos_stock, items_service)
+        )
         usuario = request.user if request.user.is_authenticated else None
         # Control interno de limite mensual, ANTES de pedir el CAE (no toca la
         # logica de ARCA): si el mes queda pasado del tope se devuelve 409 y el

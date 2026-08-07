@@ -170,6 +170,10 @@ class CrearComprobanteSerializer(serializers.Serializer):
     # True = el usuario ya vio el aviso de limite mensual superado y confirmo que
     # quiere emitir igual (la vista saltea el chequeo). No viaja a ARCA.
     confirmar_limite = serializers.BooleanField(default=False)
+    # True = para ESTA factura los productos marcados van con su nombre real, sin
+    # agrupar (el usuario lo eligio en el aviso). Decision por comprobante: no
+    # toca el flag de los productos ni el mensaje configurado. No viaja a ARCA.
+    conservar_detalle = serializers.BooleanField(default=False)
 
     def validate_cliente_nombre(self, value):
         value = value.strip()

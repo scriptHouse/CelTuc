@@ -152,6 +152,12 @@ export interface NuevoComprobante {
   venta?: number
   /** True = el usuario ya confirmó emitir aunque se pase el límite mensual. */
   confirmar_limite?: boolean
+  /**
+   * True = en ESTA factura los productos marcados salen con su nombre real, sin
+   * agrupar. Decisión por comprobante: no toca el flag de los productos ni el
+   * mensaje configurado.
+   */
+  conservar_detalle?: boolean
 }
 
 /** Emite el comprobante: el backend pide el CAE a ARCA y lo guarda. */

@@ -187,6 +187,12 @@ Lo que **no** cambia, y es la razón de que esto sea seguro:
   (`views._descontar_stock`): fusionar no le saca el descuento a ningún producto.
 - Una factura **sin** productos marcados sale exactamente igual que antes.
 
+El aviso previo a emitir ofrece **tres salidas**: «Volver» (no emite), «Emitir así» (agrupa)
+y **«Dejar el detalle real»**, que manda `conservar_detalle=true` y emite ESA factura con los
+nombres de siempre. Es una decisión por comprobante — no toca el flag de los productos ni el
+mensaje — y la puede tomar **cualquiera que facture** (no pide permiso extra), igual que
+`confirmar_limite` con el aviso de tope.
+
 El front (`lib/conceptoGenerico.ts`) solo **avisa** antes de emitir, con el mismo texto;
 quien realmente reemplaza es el backend, así que no se puede saltear desde la API.
 Se marcan más productos desde Productos y desde Precios de Service (casilla «No detallar

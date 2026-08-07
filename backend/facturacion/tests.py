@@ -910,6 +910,49 @@ class EmitirConConceptoGenericoTests(TestCase):
             StockProducto.objects.get(producto=self.normal, sucursal=self.sucursal).cantidad, 4)
 
     @patch('facturacion.views.servicio.emitir')
+    def test_conservar_detalle_deja_los_nombres_reales(self, mock_emitir):
+        mock_emitir.side_effect = self._emitir_mock
+        r = self.api.post(reverse('facturacion:comprobante-list'),
+                          self._payload(conservar_detalle=True), format='json')
+        self.assertEqual(r.status_code, 201)
+        enviados = mock_emitir.call_args.args[1]['items']
+        # Los dos renglones quedan como se cargaron, sin fusionar ni renombrar.
+        self.assertEqual([i['descripcion'] for i in enviados], ['Parlante JBL', 'Cable comun'])
+        # El flag es interno: no viaja a la emision.
+        self.assertNotIn('conservar_detalle', mock_emitir.call_args.args[1])
+        # Y la plata es la misma de siempre.
+        self.assertEqual(Comprobante.objects.get(pk=r.data['id']).total, Decimal('250.00'))
+
+    @patch('facturacion.views.servicio.emitir')
+    def test_conservar_detalle_no_toca_el_flag_del_producto(self, mock_emitir):
+        mock_emitir.side_effect = self._emitir_mock
+        self.api.post(reverse('facturacion:comprobante-list'),
+                      self._payload(conservar_detalle=True), format='json')
+        self.marcado.refresh_from_db()
+        # Es una decision de ESA factura: el producto sigue marcado para las proximas.
+        self.assertTrue(self.marcado.concepto_generico_factura)
+
+    @patch('facturacion.views.servicio.emitir')
+    def test_conservar_detalle_sigue_descontando_stock(self, mock_emitir):
+        from inventario.models import StockProducto
+        mock_emitir.side_effect = self._emitir_mock
+        r = self.api.post(
+            reverse('facturacion:comprobante-list'),
+            self._payload(conservar_detalle=True, sucursal_stock=self.sucursal.id),
+            format='json',
+        )
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(
+            StockProducto.objects.get(producto=self.marcado, sucursal=self.sucursal).cantidad, 3)
+
+    @patch('facturacion.views.servicio.emitir')
+    def test_sin_el_flag_se_sigue_agrupando(self, mock_emitir):
+        mock_emitir.side_effect = self._emitir_mock
+        self.api.post(reverse('facturacion:comprobante-list'), self._payload(), format='json')
+        self.assertEqual(
+            mock_emitir.call_args.args[1]['items'][0]['descripcion'], MENSAJE_POR_DEFECTO)
+
+    @patch('facturacion.views.servicio.emitir')
     def test_factura_sin_marcados_sale_igual_que_siempre(self, mock_emitir):
         mock_emitir.side_effect = self._emitir_mock
         r = self.api.post(reverse('facturacion:comprobante-list'), {

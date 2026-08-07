@@ -7,11 +7,21 @@ import { cn } from '@/lib/utils'
 
 export type ConfirmTone = 'brand' | 'danger' | 'warning'
 
+/**
+ * Resultado del diálogo: confirmar (`true`), cancelar (`false`) o la acción
+ * SECUNDARIA (`'secundaria'`), que solo existe si se pasó `secundariaLabel`.
+ * Quien no la usa nunca la recibe, así que el clásico `if (!ok) return` sigue
+ * valiendo tal cual en todos los llamadores de siempre.
+ */
+export type ConfirmResult = boolean | 'secundaria'
+
 export interface ConfirmOptions {
   title: string
   description?: ReactNode
   confirmLabel?: string
   cancelLabel?: string
+  /** Tercera opción, discreta: otra forma de seguir, no de cancelar. */
+  secundariaLabel?: string
   tone?: ConfirmTone
   icon?: LucideIcon
 }
@@ -26,7 +36,7 @@ const tones: Record<ConfirmTone, { chip: string; defaultIcon: LucideIcon }> = {
 interface ConfirmDialogProps {
   open: boolean
   options?: ConfirmOptions
-  onResolve: (result: boolean) => void
+  onResolve: (result: ConfirmResult) => void
 }
 
 export function ConfirmDialog({ open, options, onResolve }: ConfirmDialogProps) {
@@ -79,20 +89,32 @@ export function ConfirmDialog({ open, options, onResolve }: ConfirmDialogProps) 
           </div>
         </div>
 
-        <div className="mt-6 flex flex-col-reverse gap-2.5 sm:flex-row sm:justify-end">
+        {/* `flex-wrap` + `whitespace-nowrap`: con la opción secundaria son tres
+            botones y en el modal angosto conviene que salte el que no entra
+            antes que se parta una etiqueta al medio. */}
+        <div className="mt-6 flex flex-col-reverse gap-2.5 sm:flex-row sm:flex-wrap sm:justify-end">
           <button
             type="button"
             data-autofocus={autofocusConfirm ? undefined : ''}
             onClick={() => onResolve(false)}
-            className="inline-flex h-11 items-center justify-center rounded-xl border border-line-strong px-5 text-sm font-medium text-ink-700 transition-colors hover:bg-ink-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 sm:h-10"
+            className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-xl border border-line-strong px-5 text-sm font-medium text-ink-700 transition-colors hover:bg-ink-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 sm:h-10"
           >
             {cancelLabel}
           </button>
+          {opts.secundariaLabel && (
+            <button
+              type="button"
+              onClick={() => onResolve('secundaria')}
+              className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-xl border border-line-strong px-5 text-sm font-medium text-ink-700 transition-colors hover:bg-ink-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 sm:h-10"
+            >
+              {opts.secundariaLabel}
+            </button>
+          )}
           <button
             type="button"
             data-autofocus={autofocusConfirm ? '' : undefined}
             onClick={() => onResolve(true)}
-            className="inline-flex h-11 items-center justify-center rounded-xl bg-ink-950 px-5 text-sm font-semibold text-on-ink transition-colors hover:bg-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 focus-visible:ring-offset-2 sm:h-10"
+            className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-xl bg-ink-950 px-5 text-sm font-semibold text-on-ink transition-colors hover:bg-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 focus-visible:ring-offset-2 sm:h-10"
           >
             {confirmLabel}
           </button>

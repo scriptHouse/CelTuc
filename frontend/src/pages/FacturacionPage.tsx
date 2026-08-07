@@ -1526,15 +1526,18 @@ function NuevaFacturaModal({
       return
     }
     // Aviso: los ítems marcados no van a figurar por su nombre. El reemplazo lo
-    // hace el backend; acá solo se muestra qué va a pasar antes de emitir.
+    // hace el backend; acá solo se muestra qué va a pasar antes de emitir. Con
+    // «Dejar el detalle real» se emite SIN agrupar, solo por esta vez.
     const genericos = cargados.filter((i) => i.conceptoGenerico)
+    let conservarDetalle = false
     if (genericos.length > 0) {
       const monto = genericos.reduce((acc, i) => acc + i.cantidad * i.precioUnitario, 0)
-      const ok = await confirm({
+      const respuesta = await confirm({
         title: `Se cambiará el concepto por el mensaje «${mensajeConcepto}»`,
         icon: FileText,
         confirmLabel: 'Emitir así',
         cancelLabel: 'Volver',
+        secundariaLabel: 'Dejar el detalle real',
         description:
           (genericos.length === 1
             ? `El ítem «${genericos[0].descripcion.trim()}» no va a figurar con su nombre en la factura. `
@@ -1542,9 +1545,11 @@ function NuevaFacturaModal({
               `${genericos.map((i) => `«${i.descripcion.trim()}»`).join(', ')}. `) +
           `Se agrupan en un solo renglón que dice «${mensajeConcepto}», por ${money(monto)}. ` +
           'El total de la factura no cambia y el stock se descuenta igual. ' +
-          'El texto se configura en Facturación.',
+          'Con «Dejar el detalle real» esta factura sale con los nombres de siempre, ' +
+          'solo por esta vez: no cambia la configuración ni las próximas facturas.',
       })
-      if (!ok) return
+      if (!respuesta) return
+      conservarDetalle = respuesta === 'secundaria'
     }
     // Un Consumidor Final al que se le empezó a cargar el documento y después se
     // borró vuelve a viajar como "CF": ARCA no acepta un DNI/CUIT con número 0.
@@ -1566,6 +1571,8 @@ function NuevaFacturaModal({
       // nunca viaja (el selector ni se muestra), así nada se descuenta dos veces.
       sucursal_stock:
         prefill?.items.length || !sucursalStock ? undefined : Number(sucursalStock),
+      // Solo para ESTA factura: los marcados salen con su nombre real.
+      conservar_detalle: conservarDetalle || undefined,
       // Si la factura nace de una venta de mostrador, se manda su id: la venta
       // queda ligada y esa plata no se cuenta dos veces en el cliente.
       venta: prefill?.ventaId,
