@@ -1389,10 +1389,14 @@ function NuevaFacturaModal({
       toast.error('Sin ítems', 'Agregá al menos un ítem con descripción y cantidad.')
       return
     }
+    // Un Consumidor Final al que se le empezó a cargar el documento y después se
+    // borró vuelve a viajar como "CF": ARCA no acepta un DNI/CUIT con número 0.
+    const docDigitos = docNumero.replace(/\D/g, '')
+    const docTipoFinal = condicion === 'consumidor_final' && !docDigitos ? 'CF' : docTipo
     onSubmit({
       cliente_nombre: nombre.trim(),
-      cliente_doc_tipo: docTipo,
-      cliente_doc_numero: docNumero.replace(/\D/g, ''),
+      cliente_doc_tipo: docTipoFinal,
+      cliente_doc_numero: docDigitos,
       cliente_condicion: condicion,
       cliente_telefono: telefono.trim() || undefined,
       cliente_email: email.trim() || undefined,
@@ -1424,6 +1428,15 @@ function NuevaFacturaModal({
   }
 
   function handleDocChange(value: string) {
+    // A un Consumidor Final el documento NO se le exige, pero se le puede cargar.
+    // El tipo "CF" es el 99 de ARCA ("sin identificar") y viaja con número 0, así
+    // que en cuanto se escribe un número el tipo pasa solo a DNI (se ve en el
+    // selector, y desde ahí se puede cambiar a CUIT si corresponde).
+    if (docTipo === 'CF' && value.replace(/\D/g, '')) {
+      setDocTipo('DNI')
+      setDocNumero(value)
+      return
+    }
     if (formatearDoc && (docTipo === 'CUIT' || docTipo === 'CUIL')) {
       setDocNumero(formatCuit(value))
     } else {
@@ -1565,12 +1578,22 @@ function NuevaFacturaModal({
               <Select
                 options={docTipoOptions}
                 value={docTipo}
-                onChange={(v) => setDocTipo(v as DocTipo)}
+                onChange={(v) => {
+                  const d = v as DocTipo
+                  setDocTipo(d)
+                  // Volver a "CF" es decir "sin identificar": se limpia el número.
+                  if (d === 'CF') setDocNumero('')
+                }}
               />
             </Campo>
             <div>
               <div className="mb-1.5 flex items-center justify-between gap-2">
-                <label className="text-xs font-medium text-ink-500">Número de documento</label>
+                <label className="text-xs font-medium text-ink-500">
+                  Número de documento
+                  {condicion === 'consumidor_final' && (
+                    <span className="font-normal text-ink-400"> · opcional</span>
+                  )}
+                </label>
                 {(docTipo === 'CUIT' || docTipo === 'CUIL') && (
                   <button
                     type="button"
@@ -1591,8 +1614,9 @@ function NuevaFacturaModal({
               <Input
                 value={docNumero}
                 onChange={(e) => handleDocChange(e.target.value)}
-                placeholder={docTipo === 'CUIT' ? '30-12345678-9' : '12345678'}
-                disabled={docTipo === 'CF'}
+                placeholder={
+                  docTipo === 'CUIT' ? '30-12345678-9' : docTipo === 'CF' ? 'Sin documento' : '12345678'
+                }
                 inputMode="numeric"
               />
             </div>
