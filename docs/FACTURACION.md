@@ -401,6 +401,12 @@ Tipos del backend real (snake_case, ids numéricos), **conviven** con los tipos 
 `calcularTotales`, `IVA_RATE`. Lo usan también `PanelPage` y el dashboard mock, **por eso
 quedó intacto**.
 
+Único ajuste posterior: `condicionesClientePara` devuelve siempre el mismo orden
+(`consumidor_final` primero) para cualquier emisor, así la factura nueva arranca
+preseleccionada en **Consumidor Final** también con emisores Responsable Inscripto.
+No cambia qué se puede facturar: el tipo de comprobante lo sigue decidiendo
+`tipoComprobante` (RI → CF = Factura B).
+
 ### `lib/format.ts` (fix)
 
 **`fecha()`** ahora interpreta `'aaaa-mm-dd'` (DateField del backend) como fecha **local**,

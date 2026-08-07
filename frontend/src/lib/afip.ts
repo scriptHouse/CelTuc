@@ -42,12 +42,16 @@ export function tipoComprobante(
   return receptor === 'responsable_inscripto' ? 'A' : 'B'
 }
 
-/** Condiciones de cliente válidas según el emisor (las que el emisor puede facturar). */
-export function condicionesClientePara(emisor: CondicionEmisor): CondicionFiscal[] {
-  // Ambos pueden facturar a cualquiera; el tipo de comprobante se ajusta solo.
-  return emisor === 'responsable_inscripto'
-    ? ['responsable_inscripto', 'monotributista', 'consumidor_final', 'exento']
-    : ['consumidor_final', 'responsable_inscripto', 'monotributista', 'exento']
+/**
+ * Condiciones de cliente válidas según el emisor (las que el emisor puede facturar).
+ *
+ * Ambos pueden facturar a cualquiera; el tipo de comprobante se ajusta solo.
+ * El orden importa: la primera es la que queda preseleccionada al abrir una
+ * factura nueva, y siempre es Consumidor Final (el caso más común del mostrador),
+ * tanto para emisores Monotributistas como Responsables Inscriptos.
+ */
+export function condicionesClientePara(_emisor: CondicionEmisor): CondicionFiscal[] {
+  return ['consumidor_final', 'responsable_inscripto', 'monotributista', 'exento']
 }
 
 export interface Totales {

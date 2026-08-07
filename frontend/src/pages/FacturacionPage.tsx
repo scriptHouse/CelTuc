@@ -1224,7 +1224,8 @@ function NuevaFacturaModal({
   useEffect(() => {
     if (!open) return
     // Con una venta precargada que ya tenía cliente, se respeta esa condición
-    // fiscal si el emisor la puede facturar; si no, la primera válida.
+    // fiscal si el emisor la puede facturar; si no, la primera válida
+    // (Consumidor Final, para cualquier emisor).
     const condsValidas = condicionesClientePara(emisor.condicion)
     const condCliente = prefill?.cliente?.condicion
     const cond = condCliente && condsValidas.includes(condCliente) ? condCliente : condsValidas[0]
