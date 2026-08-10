@@ -147,6 +147,21 @@ export interface Factura {
 // Estos tipos reflejan la API real (snake_case, ids numéricos). Conviven con los
 // tipos mock de arriba (Cuenta/Factura), que todavía alimentan el dashboard.
 
+/**
+ * Un texto del banco de conceptos: lo que dice la factura en vez del detalle.
+ *
+ * Emitir «con concepto» junta TODOS los renglones en uno solo con este texto.
+ * Los administradores arman el banco y marcan uno como `predeterminado` (el que
+ * arranca elegido); quien factura elige entre los activos.
+ */
+export interface ConceptoFactura {
+  id: number
+  texto: string
+  predeterminado: boolean
+  orden: number
+  activo: boolean
+}
+
 /** Una cuenta que factura ante ARCA, con su punto de venta y credenciales. */
 export interface Emisor {
   id: number

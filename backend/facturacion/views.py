@@ -25,10 +25,10 @@ from usuarios.permissions import (
 from .arca import servicio
 from .arca.errores import ErrorARCA
 from .clientes import registrar_cliente_desde_comprobante
-from .concepto import aplicar_concepto_generico
+from .concepto import agrupar_en_concepto
 from .email import EmailNoConfigurado, enviar_comprobante
 from .limites import estado_limites_del_anio, guardar_limites, verificar_limite_mensual
-from .models import Cliente, Comprobante, Emisor
+from .models import Cliente, Comprobante, ConceptoFactura, Emisor
 from .permissions import PuedeFacturar
 from .serializers import (
     ActualizarComprobanteSerializer,
@@ -37,6 +37,7 @@ from .serializers import (
     ClienteWriteSerializer,
     ComprobanteDetailSerializer,
     ComprobanteListSerializer,
+    ConceptoFacturaSerializer,
     CrearComprobanteSerializer,
     EmisorSerializer,
     EnviarEmailSerializer,
@@ -111,6 +112,34 @@ class EmisorListCreateView(_EmisoresVisiblesMixin, AuditoriaMixin, generics.List
 class EmisorDetailView(_EmisoresVisiblesMixin, AuditoriaMixin, generics.RetrieveUpdateDestroyAPIView):
     serializer_class = EmisorSerializer
     permission_classes = [LecturaConPermisoEscrituraSuperadmin]
+    permiso_requerido = 'ver_facturacion'
+
+
+# ===== Banco de conceptos =====
+
+class _ConceptosVisiblesMixin:
+    """Quien factura ve solo los conceptos ACTIVOS (los que puede elegir); el
+    administrador ve todos, para poder editarlos y reactivarlos."""
+
+    def get_queryset(self):
+        qs = ConceptoFactura.objects.all()
+        if not getattr(self.request.user, 'es_administrador', False):
+            qs = qs.filter(activo=True)
+        return qs
+
+
+class ConceptoListCreateView(_ConceptosVisiblesMixin, AuditoriaMixin, generics.ListCreateAPIView):
+    """Banco de conceptos: leer para elegir uno al facturar, escribir es de admins."""
+
+    serializer_class = ConceptoFacturaSerializer
+    permission_classes = [LecturaConPermisoEscrituraAdmin]
+    permiso_requerido = 'ver_facturacion'
+
+
+class ConceptoDetailView(_ConceptosVisiblesMixin, AuditoriaMixin,
+                         generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = ConceptoFacturaSerializer
+    permission_classes = [LecturaConPermisoEscrituraAdmin]
     permiso_requerido = 'ver_facturacion'
 
 
@@ -191,27 +220,23 @@ class ComprobanteListCreateView(generics.ListCreateAPIView):
         # Datos de stock: se separan ANTES de emitir (ARCA no los conoce).
         sucursal_stock = datos.pop('sucursal_stock', None)
         confirmar_limite = datos.pop('confirmar_limite', False)
-        # El usuario pidio, para ESTA factura, dejar los productos marcados con su
-        # nombre real. Lo puede hacer cualquiera que facture: no cambia nada del
-        # catalogo ni del mensaje, solo el detalle de este comprobante.
-        conservar_detalle = datos.pop('conservar_detalle', False)
+        # Concepto elegido para ESTA factura (o None = detalle real). Lo elige
+        # quien factura en el modal; no cambia nada del banco de conceptos.
+        concepto = datos.pop('concepto_generico', None)
         # Venta de mostrador que origina esta factura (opcional, viene de Caja).
         venta_origen = datos.pop('venta', None)
-        items_limpios, productos_stock, items_service = [], [], []
+        items_limpios, productos_stock = [], []
         for item in datos['items']:
             item = dict(item)
             productos_stock.append(item.pop('producto', None))
-            items_service.append(item.pop('item_service', None))
+            item.pop('item_service', None)  # solo trazabilidad; no viaja a emitir
             items_limpios.append(item)
-        # Los renglones marcados como concepto generico se fusionan en uno solo
-        # con el mensaje configurado, salvo que se pida conservar el detalle.
-        # Solo cambia el DETALLE que se guarda y se imprime: los totales se
-        # calculan despues, sobre esta lista, y ARCA no recibe renglones.
-        # `items_limpios` queda intacto para el stock.
+        # Con concepto elegido, TODOS los renglones se juntan en uno solo. Cambia
+        # el DETALLE que se guarda y se imprime, nada mas: los totales se calculan
+        # despues, sobre esta lista, y ARCA no recibe renglones. `items_limpios`
+        # queda intacto para el stock.
         datos['items'] = (
-            items_limpios
-            if conservar_detalle
-            else aplicar_concepto_generico(items_limpios, productos_stock, items_service)
+            agrupar_en_concepto(items_limpios, concepto.texto) if concepto else items_limpios
         )
         usuario = request.user if request.user.is_authenticated else None
         # Control interno de limite mensual, ANTES de pedir el CAE (no toca la

@@ -3,7 +3,27 @@ from unfold.admin import ModelAdmin, TabularInline
 
 from comun.admin import ModeloBaseAdminMixin
 
-from .models import Cliente, Comprobante, Emisor, ItemComprobante, LimiteMensual, TicketAcceso
+from .models import (
+    Cliente,
+    Comprobante,
+    ConceptoFactura,
+    Emisor,
+    ItemComprobante,
+    LimiteMensual,
+    TicketAcceso,
+)
+
+
+@admin.register(ConceptoFactura)
+class ConceptoFacturaAdmin(ModeloBaseAdminMixin, ModelAdmin):
+    list_display = ('texto', 'predeterminado', 'activo', 'orden', 'borrado', 'actualizado')
+    list_filter = ('predeterminado', 'activo', 'borrado')
+    search_fields = ('texto',)
+    readonly_fields = (
+        'creado', 'actualizado', 'creado_por', 'actualizado_por',
+        'fecha_borrado', 'borrado_por',
+    )
+    actions = ('restaurar',)
 
 
 @admin.register(Emisor)

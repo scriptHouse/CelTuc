@@ -18,9 +18,6 @@ from .models import Preferencia
 CLAVES_PREFERENCIAS = {
     'facturacion.mensaje_whatsapp': 'ver_facturacion',
     'cotizaciones.mensaje_whatsapp': 'ver_cotizaciones',
-    # Texto que reemplaza al detalle de los productos marcados con
-    # `concepto_generico_factura` (ver `facturacion/concepto.py`).
-    'facturacion.concepto_generico': 'ver_facturacion',
 }
 
 # Tope holgado para plantillas de texto; corta un mal uso, no un uso real.

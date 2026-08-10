@@ -780,9 +780,6 @@ export function ProductoForm({
   const [nota, setNota] = useState(producto?.nota ?? '')
   const [aPedido, setAPedido] = useState(producto?.a_pedido ?? false)
   const [nuevo, setNuevo] = useState(producto?.nuevo ?? false)
-  const [conceptoGenerico, setConceptoGenerico] = useState(
-    producto?.concepto_generico_factura ?? false,
-  )
   const [equipos, setEquipos] = useState<number[]>(producto?.dispositivos ?? [])
   const [lu, setLu] = useState(aTexto(producto?.precio_lista_usd))
   const [cu, setCu] = useState(aTexto(producto?.precio_cash_usd))
@@ -796,7 +793,6 @@ export function ProductoForm({
     setNota(producto?.nota ?? '')
     setAPedido(producto?.a_pedido ?? false)
     setNuevo(producto?.nuevo ?? false)
-    setConceptoGenerico(producto?.concepto_generico_factura ?? false)
     setEquipos(producto?.dispositivos ?? [])
     setLu(aTexto(producto?.precio_lista_usd))
     setCu(aTexto(producto?.precio_cash_usd))
@@ -839,7 +835,6 @@ export function ProductoForm({
     nota.trim() !== (producto?.nota ?? '') ||
     aPedido !== (producto?.a_pedido ?? false) ||
     nuevo !== (producto?.nuevo ?? false) ||
-    conceptoGenerico !== (producto?.concepto_generico_factura ?? false) ||
     [...equipos].sort((a, b) => a - b).join(',') !==
       [...(producto?.dispositivos ?? [])].sort((a, b) => a - b).join(',') ||
     lu !== aTexto(producto?.precio_lista_usd) ||
@@ -892,7 +887,6 @@ export function ProductoForm({
       nota: nota.trim(),
       a_pedido: aPedido,
       nuevo,
-      concepto_generico_factura: conceptoGenerico,
       dispositivos: equipos,
       precio_lista_usd: valores.lu,
       precio_cash_usd: valores.cu,
@@ -947,18 +941,7 @@ export function ProductoForm({
       <div className="mt-2.5 flex flex-wrap gap-x-5 gap-y-2">
         <CampoBooleano etiqueta="A pedido (seña previa)" valor={aPedido} onChange={setAPedido} />
         <CampoBooleano etiqueta="Producto nuevo" valor={nuevo} onChange={setNuevo} />
-        <CampoBooleano
-          etiqueta="No detallar en la factura"
-          valor={conceptoGenerico}
-          onChange={setConceptoGenerico}
-        />
       </div>
-      {conceptoGenerico && (
-        <p className="mt-1.5 px-0.5 text-[0.7rem] leading-relaxed text-ink-400">
-          En la factura no va a figurar con su nombre: se agrupa con los demás productos
-          marcados en un solo renglón, con el mensaje que se configura en Facturación.
-        </p>
-      )}
 
       {/* Equipos vinculados (alimenta la Ficha de equipo) */}
       <div className="mt-3">

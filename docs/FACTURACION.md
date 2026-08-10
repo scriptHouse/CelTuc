@@ -160,43 +160,49 @@ La app sigue los patrones del proyecto:
 > Estas reglas están **espejadas** en el front (`lib/afip.ts`) para que el tipo y los
 > totales coincidan de los dos lados.
 
-### `concepto.py` — el concepto genérico
+### `concepto.py` — el concepto de factura
 
-Algunos artículos **no se detallan por su nombre** en la factura: parlantes, consolas,
-equipos Xiaomi/Samsung/Apple (`productos.Producto`) y los repuestos del taller —
-baterías, placas, Face ID, cámaras, flex, glass de cámara, módulos, tapas
-(`precios_service.ItemService`). Cada fila lo decide con su flag
-**`concepto_generico_factura`**; el marcado inicial lo hacen dos migraciones de datos, por
-categoría/sección (no por nombre: la planilla se actualiza seguido).
+Una factura se puede emitir **«con concepto»**: en vez de un renglón por producto, sale
+**UN solo renglón** con un texto del banco, por el total. Quien factura lo decide en el
+propio modal de emisión, con un check:
 
-Al emitir, `aplicar_concepto_generico()` **fusiona todos los renglones marcados en uno
-solo**, ubicado donde estaba el primero, con `cantidad = 1` y precio igual a la suma de
-sus subtotales. El texto sale de la preferencia global
-**`facturacion.concepto_generico`** (`comun.Preferencia`); vacía = el de fábrica,
-`'Accesorios y repuestos para telefonía celular'`.
+- Emisor **Monotributista** → el check arranca **tildado**. Si lo destildan, aparece una
+  advertencia de que la factura va a mostrar el nombre de cada producto.
+- Emisor **Responsable Inscripto** → arranca **destildado** (detalle real).
+
+El texto sale del **banco de conceptos** (`ConceptoFactura`, tabla
+`facturacion_conceptos`): los administradores crean, editan, desactivan y marcan cuál es
+el **predeterminado** (el que arranca elegido); quien factura elige entre los **activos**.
+Desactivar no borra: las facturas ya emitidas con ese texto no se tocan.
+
+Permisos: leer el banco alcanza con `ver_facturacion` (para poder elegir al facturar);
+crear/editar/desactivar es de administradores (`LecturaConPermisoEscrituraAdmin`). Además,
+quien factura solo ve los activos; el administrador ve todos, para reactivarlos.
+
+Al emitir, el front manda `concepto_generico` (el id elegido) o nada. Con id,
+`agrupar_en_concepto()` junta todos los renglones en uno con `cantidad = 1` y precio igual
+a la suma de los subtotales.
 
 Lo que **no** cambia, y es la razón de que esto sea seguro:
 
 - **ARCA no se entera.** El WSFEv1 solo recibe importes (`ImpTotal`, `ImpNeto`, `ImpIVA`,
   `DocTipo`…): el detalle de los renglones nunca viaja. Cambiar descripciones no puede
   alterar un CAE.
-- **El total no se mueve.** Los totales se calculan **después** de fusionar, sobre la
+- **El total no se mueve.** Los totales se calculan **después** de agrupar, sobre la
   lista final, así que la factura siempre cierra consigo misma (que es lo que ARCA
   valida contra `ImpTotal`).
 - **El stock se descuenta aparte**, con la lista de ítems **original**
-  (`views._descontar_stock`): fusionar no le saca el descuento a ningún producto.
-- Una factura **sin** productos marcados sale exactamente igual que antes.
+  (`views._descontar_stock`): agrupar no le saca el descuento a ningún producto.
+- Una factura emitida **sin** concepto sale exactamente igual que siempre.
 
-El aviso previo a emitir ofrece **tres salidas**: «Volver» (no emite), «Emitir así» (agrupa)
-y **«Dejar el detalle real»**, que manda `conservar_detalle=true` y emite ESA factura con los
-nombres de siempre. Es una decisión por comprobante — no toca el flag de los productos ni el
-mensaje — y la puede tomar **cualquiera que facture** (no pide permiso extra), igual que
-`confirmar_limite` con el aviso de tope.
+Quien realmente agrupa es el backend, así que no se puede saltear desde la API, y un
+concepto desactivado se rechaza con 400.
 
-El front (`lib/conceptoGenerico.ts`) solo **avisa** antes de emitir, con el mismo texto;
-quien realmente reemplaza es el backend, así que no se puede saltear desde la API.
-Se marcan más productos desde Productos y desde Precios de Service (casilla «No detallar
-en la factura»), o desde el admin de Django.
+> **Historia.** Antes esto se decidía por producto (flag `concepto_generico_factura` en
+> `productos.Producto` y `precios_service.ItemService`) con UN texto global guardado como
+> preferencia. Se reemplazó por el check por factura + banco de textos. La columna del flag
+> y sus datos **siguen en la base** (migraciones `productos.0004/0005` y
+> `precios_service.0007/0008`), pero hoy no la lee nadie.
 
 ### `permissions.py`
 

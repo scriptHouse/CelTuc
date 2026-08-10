@@ -102,6 +102,61 @@ class Emisor(ModeloBase):
         return bool(self.certificado.strip() and self.clave_privada.strip())
 
 
+class ConceptoFactura(ModeloBase):
+    """Un texto del banco de conceptos: que dice la factura en vez del detalle.
+
+    Cuando una factura se emite "con concepto", TODOS sus renglones se juntan en
+    uno solo que dice este texto (ver ``concepto.py``). Los administradores arman
+    el banco (crear, editar, desactivar) y marcan uno como ``predeterminado``: ese
+    es el que aparece elegido al abrir una factura nueva. Quien factura puede
+    cambiarlo por cualquier otro ACTIVO, o no usar concepto.
+
+    NO tiene efecto fiscal: ARCA solo recibe importes, nunca el detalle de los
+    renglones. Cambiar estos textos no toca ningun CAE ni ningun total.
+    """
+
+    texto = models.CharField(
+        'texto',
+        max_length=200,
+        help_text='Lo que se lee en la factura. Maximo 200 caracteres (un renglon).',
+    )
+    predeterminado = models.BooleanField(
+        'predeterminado',
+        default=False,
+        help_text='El que aparece elegido al abrir una factura nueva. Solo uno.',
+    )
+    orden = models.PositiveSmallIntegerField('orden', default=0)
+    activo = models.BooleanField(
+        'activo',
+        default=True,
+        help_text='Los inactivos no se pueden elegir en facturas nuevas.',
+    )
+
+    class Meta:
+        db_table = 'facturacion_conceptos'
+        verbose_name = 'concepto de factura'
+        verbose_name_plural = 'conceptos de factura'
+        ordering = ('orden', 'id')
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        # Un solo predeterminado vivo: marcar este destapa a los demas. Se hace
+        # despues de guardar para que la fila nueva ya tenga pk que excluir.
+        if self.predeterminado:
+            ConceptoFactura.todos.filter(predeterminado=True).exclude(pk=self.pk).update(
+                predeterminado=False,
+            )
+
+    @classmethod
+    def por_defecto(cls):
+        """El concepto que arranca elegido: el predeterminado, o el primero activo."""
+        vivos = cls.objects.filter(activo=True)
+        return vivos.filter(predeterminado=True).first() or vivos.first()
+
+    def __str__(self):
+        return self.texto
+
+
 class LimiteMensual(ModeloBase):
     """Tope de facturacion de un emisor para un mes calendario (1 al ultimo dia).
 

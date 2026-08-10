@@ -1,4 +1,12 @@
-import type { Cliente, ClienteDetalle, Comprobante, Emisor, EstadoCobro, ItemComprobante } from '@/types'
+import type {
+  Cliente,
+  ClienteDetalle,
+  Comprobante,
+  ConceptoFactura,
+  Emisor,
+  EstadoCobro,
+  ItemComprobante,
+} from '@/types'
 import { api } from '@/lib/api'
 import { useAuth } from '@/store/auth'
 
@@ -153,11 +161,10 @@ export interface NuevoComprobante {
   /** True = el usuario ya confirmó emitir aunque se pase el límite mensual. */
   confirmar_limite?: boolean
   /**
-   * True = en ESTA factura los productos marcados salen con su nombre real, sin
-   * agrupar. Decisión por comprobante: no toca el flag de los productos ni el
-   * mensaje configurado.
+   * Concepto del banco con el que emitir: si viene, TODOS los renglones se
+   * juntan en uno solo con ese texto. Vacío = factura con el detalle real.
    */
-  conservar_detalle?: boolean
+  concepto_generico?: number | null
 }
 
 /** Emite el comprobante: el backend pide el CAE a ARCA y lo guarda. */
@@ -222,4 +229,34 @@ export function enviarComprobanteEmail(
     { email, pdf_base64: pdfBase64, mensaje },
     token(),
   )
+}
+
+// ===== Banco de conceptos =====
+// Textos con los que se puede emitir una factura sin detallar los productos.
+// Leerlos alcanza con poder facturar; crearlos/editarlos es de administradores.
+
+export interface ConceptoFacturaInput {
+  texto: string
+  predeterminado?: boolean
+  orden?: number
+  activo?: boolean
+}
+
+export function listarConceptos(): Promise<ConceptoFactura[]> {
+  return api.get<ConceptoFactura[]>('/facturacion/conceptos/', token())
+}
+
+export function crearConcepto(input: ConceptoFacturaInput): Promise<ConceptoFactura> {
+  return api.post<ConceptoFactura>('/facturacion/conceptos/', input, token())
+}
+
+export function actualizarConcepto(
+  id: number,
+  input: Partial<ConceptoFacturaInput>,
+): Promise<ConceptoFactura> {
+  return api.patch<ConceptoFactura>(`/facturacion/conceptos/${id}/`, input, token())
+}
+
+export function eliminarConcepto(id: number): Promise<void> {
+  return api.del<void>(`/facturacion/conceptos/${id}/`, token())
 }

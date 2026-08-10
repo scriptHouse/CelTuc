@@ -32,7 +32,6 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { CampoBooleano } from '@/components/ui/CampoBooleano'
 import { AyudaInfo } from '@/components/ui/AyudaInfo'
 import { AyudaServiceManager } from '@/components/AyudaContenidos'
 import { GestorDolar } from '@/components/GestorDolar'
@@ -803,16 +802,12 @@ function ItemForm({
 
   const [etiqueta, setEtiqueta] = useState(item?.etiqueta ?? '')
   const [nota, setNota] = useState(item?.nota ?? '')
-  const [conceptoGenerico, setConceptoGenerico] = useState(
-    item?.concepto_generico_factura ?? false,
-  )
   const [equipos, setEquipos] = useState<number[]>(item?.dispositivos ?? [])
   const [precios, setPrecios] = useState<PreciosDraft>(() => aDraft(item))
 
   useEffect(() => {
     setEtiqueta(item?.etiqueta ?? '')
     setNota(item?.nota ?? '')
-    setConceptoGenerico(item?.concepto_generico_factura ?? false)
     setEquipos(item?.dispositivos ?? [])
     setPrecios(aDraft(item))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -865,7 +860,6 @@ function ItemForm({
     modoCreacion ||
     etiqueta.trim() !== (item?.etiqueta ?? '') ||
     nota.trim() !== (item?.nota ?? '') ||
-    conceptoGenerico !== (item?.concepto_generico_factura ?? false) ||
     [...equipos].sort((a, b) => a - b).join(',') !==
       [...(item?.dispositivos ?? [])].sort((a, b) => a - b).join(',') ||
     firma(precios) !== firma(aDraft(item))
@@ -934,7 +928,6 @@ function ItemForm({
         : {}),
       etiqueta: etiqueta.trim(),
       nota: nota.trim(),
-      concepto_generico_factura: conceptoGenerico,
       dispositivos: equipos,
       precios: filas,
     })
@@ -966,19 +959,6 @@ function ItemForm({
           placeholder="Nota de la fila (opcional)"
           className="h-10 text-sm"
         />
-      </div>
-      <div className="mt-2.5">
-        <CampoBooleano
-          etiqueta="No detallar en la factura"
-          valor={conceptoGenerico}
-          onChange={setConceptoGenerico}
-        />
-        {conceptoGenerico && (
-          <p className="mt-1.5 px-0.5 text-[0.7rem] leading-relaxed text-ink-400">
-            En la factura no va a figurar con su nombre: se agrupa con los demás ítems
-            marcados en un solo renglón, con el mensaje que se configura en Facturación.
-          </p>
-        )}
       </div>
 
       {/* Equipos que abarca (alimenta el selector de la página) */}

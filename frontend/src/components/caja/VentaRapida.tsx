@@ -78,11 +78,6 @@ interface Linea {
   producto?: ProductoCatalogo
   /** Fila de la lista de precios del taller, si el service salió de ahí. */
   itemServiceId?: number
-  /**
-   * El ítem no figura por su nombre si esta venta se factura (repuestos del
-   * taller). En mercadería el dato sale del propio `producto`.
-   */
-  conceptoGenerico?: boolean
   /** Lo que se cobra, en texto. Editable en los ítems libres. */
   descripcion: string
   cantidad: number
@@ -110,7 +105,6 @@ function ubicarService(
   descripcion: string
   lista: number | null
   cash: number | null
-  conceptoGenerico: boolean
 } | null {
   for (const seccion of secciones) {
     const item = seccion.items.find((i) => String(i.id) === idItem)
@@ -122,7 +116,6 @@ function ubicarService(
       descripcion: [seccion.nombre, item.etiqueta, variante].filter(Boolean).join(' · '),
       lista: precio?.efectivo.lista_ars ?? null,
       cash: precio?.efectivo.cash_ars ?? null,
-      conceptoGenerico: item.concepto_generico_factura,
     }
   }
   return null
@@ -865,7 +858,6 @@ function VentaModal({
     agregarLinea({
       tipo: 'service',
       itemServiceId: ubicado.itemId,
-      conceptoGenerico: ubicado.conceptoGenerico,
       descripcion: ubicado.descripcion,
       cantidad: 1,
       precio: precioServicePara(ubicado.lista, ubicado.cash, formaPago),
@@ -1094,12 +1086,10 @@ function VentaModal({
                   descripcion: l.descripcion.trim() || l.producto?.nombre || 'Ítem',
                   cantidad: l.cantidad,
                   precioFinal: Number.isFinite(l.precio) ? l.precio : 0,
-                  // El origen viaja a la factura para saber si el ítem lleva
-                  // concepto genérico (el stock ya lo descontó esta venta).
+                  // El origen viaja a la factura solo por trazabilidad: el
+                  // stock ya lo descontó esta venta.
                   productoId: l.producto?.id,
                   itemServiceId: l.itemServiceId,
-                  conceptoGenerico:
-                    l.producto?.concepto_generico_factura ?? l.conceptoGenerico ?? false,
                 })),
             observaciones: `Venta de mostrador #${venta.id}`,
             // El cliente del mostrador viaja a la factura: no se retipea nada.

@@ -18,7 +18,7 @@ from precios_service.models import ItemService
 from productos.models import Producto
 
 from .arca import qr
-from .models import Cliente, Comprobante, Emisor, ItemComprobante
+from .models import Cliente, Comprobante, ConceptoFactura, Emisor, ItemComprobante
 
 
 def _solo_digitos(valor: str) -> str:
@@ -170,10 +170,13 @@ class CrearComprobanteSerializer(serializers.Serializer):
     # True = el usuario ya vio el aviso de limite mensual superado y confirmo que
     # quiere emitir igual (la vista saltea el chequeo). No viaja a ARCA.
     confirmar_limite = serializers.BooleanField(default=False)
-    # True = para ESTA factura los productos marcados van con su nombre real, sin
-    # agrupar (el usuario lo eligio en el aviso). Decision por comprobante: no
-    # toca el flag de los productos ni el mensaje configurado. No viaja a ARCA.
-    conservar_detalle = serializers.BooleanField(default=False)
+    # Concepto del banco con el que emitir: si viene, TODOS los renglones se
+    # juntan en uno solo con ese texto. Vacio = factura con el detalle real.
+    # Decision por comprobante; no toca el banco. No viaja a ARCA.
+    concepto_generico = serializers.PrimaryKeyRelatedField(
+        queryset=ConceptoFactura.objects.filter(activo=True),
+        required=False, allow_null=True,
+    )
 
     def validate_cliente_nombre(self, value):
         value = value.strip()
@@ -357,3 +360,19 @@ class ClienteWriteSerializer(serializers.ModelSerializer):
 
     def validate_email(self, value):
         return (value or '').strip().lower()
+
+
+# ===== Banco de conceptos =====
+
+class ConceptoFacturaSerializer(serializers.ModelSerializer):
+    """Un texto del banco. Lo lee cualquiera que facture; lo escribe un admin."""
+
+    class Meta:
+        model = ConceptoFactura
+        fields = ('id', 'texto', 'predeterminado', 'orden', 'activo')
+
+    def validate_texto(self, value):
+        value = ' '.join((value or '').split())
+        if not value:
+            raise serializers.ValidationError('El texto del concepto es obligatorio.')
+        return value
