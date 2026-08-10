@@ -719,3 +719,330 @@ class SeedInventarioTests(TestCase):
         self.assertEqual(fila_centro.cantidad, 32)
         # Los tipeados a mano al final de la hoja Solar existen como productos.
         self.assertTrue(Producto.objects.filter(nombre__iexact='alexa echo show 10').exists())
+
+
+# ===== Importacion de stock por sucursal =====
+
+def _planilla(filas, encabezado=None):
+    """Un .xlsx en memoria con la forma de la planilla del negocio.
+
+    `filas` son tuplas (seccion, producto, lista_usd, stock, minimo); un None en
+    `producto` genera una fila de sub-encabezado (la que en MODULOS reusa la
+    columna STOCK para los precios CO/AO).
+    """
+    import io
+
+    import openpyxl
+
+    libro = openpyxl.Workbook()
+    hoja = libro.active
+    hoja.append(encabezado or [
+        None, 'PRODUCTOS', 'COSTO USD', 'COSTO $', 'PRECIO DE LISTA USD',
+        'PRECIO CASH USD (20% OFF)', 'PRECIO DE LISTA CREDITO', '$/DEBITO/TRANSF',
+        'STOCK', 'STOCK MINIMO',
+    ])
+    for seccion, producto, lista, stock, minimo in filas:
+        hoja.append([seccion, producto, None, None, lista, None, None, None, stock, minimo])
+    buffer = io.BytesIO()
+    libro.save(buffer)
+    buffer.seek(0)
+    buffer.name = 'StockPorSucursal.xlsx'
+    return buffer
+
+
+class PlanillaImportacionTests(TestCase):
+    """La lectura del archivo: que fila es un producto y que celda es un conteo."""
+
+    def setUp(self):
+        from .importacion import analizar
+
+        self.analizar = analizar
+        self.sucursal = Sucursal.objects.create(nombre='Import test', orden=90)
+        categoria = CategoriaProducto.objects.create(nombre='Zetatest accesorios')
+        self.producto = Producto.objects.create(
+            categoria=categoria, nombre='Zetatest Cable 1M',
+            calidad='Calidad original', precio_lista_usd=Decimal('10'),
+        )
+
+    def _filas(self, planilla):
+        return {f['fila']: f for f in self.analizar(planilla, self.sucursal)['filas']}
+
+    def test_celda_vacia_no_es_cero(self):
+        """Sin cantidad en la planilla el stock NO se toca (si no, borraria todo)."""
+        filas = self._filas(_planilla([
+            ('ZETATEST ACCESORIOS', 'Zetatest Cable 1M - CO', 10, None, None),
+        ]))
+        fila = filas[2]
+        self.assertEqual(fila['estado'], 'sin_valor')
+        self.assertFalse(fila['sugerido'])
+        self.assertIsNone(fila['cantidad_nueva'])
+
+    def test_cero_explicito_si_se_importa(self):
+        filas = self._filas(_planilla([
+            ('ZETATEST ACCESORIOS', 'Zetatest Cable 1M - CO', 10, 0, None),
+        ]))
+        self.assertEqual(filas[2]['estado'], 'actualiza')
+        self.assertEqual(filas[2]['cantidad_nueva'], 0)
+
+    def test_valor_que_no_es_conteo_queda_invalido(self):
+        filas = self._filas(_planilla([
+            ('ZETATEST ACCESORIOS', 'Zetatest Cable 1M - CO', 10, 88800, None),
+        ]))
+        self.assertEqual(filas[2]['estado'], 'invalida')
+        self.assertIn('precio', filas[2]['motivo'])
+
+    def test_texto_de_error_de_excel_queda_invalido(self):
+        filas = self._filas(_planilla([
+            ('ZETATEST ACCESORIOS', 'Zetatest Cable 1M - CO', 10, '#VALUE!', None),
+        ]))
+        self.assertEqual(filas[2]['estado'], 'invalida')
+
+    def test_seccion_que_reusa_la_columna_stock(self):
+        """Como MODULOS: un sub-encabezado avisa que ahi van precios, no unidades."""
+        filas = self._filas(_planilla([
+            ('ZETATEST ACCESORIOS', 'Zetatest Cable 1M - CO', 10, 3, None),
+            (None, None, None, 'CO', 'AO'),
+            ('MODULOS ZETATEST', 'Zetatest Cable 1M - CO', 10, 5, None),
+        ]))
+        self.assertEqual(filas[2]['estado'], 'actualiza')
+        self.assertEqual(filas[4]['estado'], 'invalida')
+        self.assertIn('CO/AO', filas[4]['motivo'])
+
+    def test_sin_encabezado_error_legible(self):
+        from django.core.exceptions import ValidationError
+
+        planilla = _planilla([('X', 'Y', 1, 1, None)], encabezado=['a', 'b', 'c'])
+        with self.assertRaises(ValidationError) as ctx:
+            self.analizar(planilla, self.sucursal)
+        self.assertIn('PRODUCTOS', ' '.join(ctx.exception.messages))
+
+
+class MatcheoImportacionTests(TestCase):
+    """El cruce con el catalogo: exacto, aproximado y lo que se manda a revisar."""
+
+    def setUp(self):
+        from .importacion import analizar
+
+        self.analizar = analizar
+        self.sucursal = Sucursal.objects.create(nombre='Match test', orden=91)
+        self.categoria = CategoriaProducto.objects.create(nombre='Zetatest cables')
+        self.cable = Producto.objects.create(
+            categoria=self.categoria, nombre='Zetatest Cable 1M',
+            calidad='Calidad original', precio_lista_usd=Decimal('10'),
+        )
+
+    def _fila(self, nombre, stock=1, seccion='ZETATEST CABLES', lista=10):
+        planilla = _planilla([(seccion, nombre, lista, stock, None)])
+        return self.analizar(planilla, self.sucursal)['filas'][0]
+
+    def test_nombre_con_calidad_abreviada(self):
+        """La planilla escribe "- CO" lo que el catalogo guarda como calidad."""
+        fila = self._fila('Zetatest Cable 1M - CO')
+        self.assertEqual(fila['producto'], self.cable.id)
+        self.assertEqual(fila['confianza'], 'exacta')
+
+    def test_diferencia_de_numero_no_es_el_mismo_producto(self):
+        """256GB y 512GB no son el mismo producto por mas parecido que sea el texto."""
+        Producto.objects.create(
+            categoria=self.categoria, nombre='Zetatest Tablet 512GB',
+            precio_lista_usd=Decimal('100'),
+        )
+        fila = self._fila('Zetatest Tablet 256GB', lista=100)
+        self.assertIsNone(fila['producto'])
+        self.assertEqual(fila['estado'], 'nueva')
+
+    def test_erratas_dan_coincidencia_aproximada(self):
+        fila = self._fila('Zetatest Cable 1M - CO ( suelto )')
+        self.assertEqual(fila['producto'], self.cable.id)
+        self.assertEqual(fila['confianza'], 'aproximada')
+
+    def test_dos_productos_con_el_mismo_nombre_van_a_revisar(self):
+        Producto.objects.create(
+            categoria=self.categoria, nombre='Zetatest Cable 1M',
+            calidad='Calidad original', precio_lista_usd=Decimal('99'),
+        )
+        fila = self._fila('Zetatest Cable 1M - CO', lista=None)
+        self.assertEqual(fila['estado'], 'revisar')
+        self.assertEqual(len(fila['candidatos']), 2)
+        self.assertFalse(fila['sugerido'])
+
+    def test_el_precio_de_lista_desempata(self):
+        otro = Producto.objects.create(
+            categoria=self.categoria, nombre='Zetatest Cable 1M',
+            calidad='Calidad original', precio_lista_usd=Decimal('99'),
+        )
+        fila = self._fila('Zetatest Cable 1M - CO', lista=99)
+        self.assertEqual(fila['estado'], 'actualiza')
+        self.assertEqual(fila['producto'], otro.id)
+
+    def test_producto_que_no_esta_en_el_catalogo(self):
+        fila = self._fila('Zetatest Soporte Magnetico XYZ')
+        self.assertEqual(fila['estado'], 'nueva')
+        self.assertTrue(fila['puede_crear'])
+        self.assertEqual(fila['categoria_id'], self.categoria.id)
+
+    def test_antes_y_despues_de_una_fila_existente(self):
+        aplicar_ajuste(self.cable, self.sucursal, delta=4)
+        fila = self._fila('Zetatest Cable 1M - CO', stock=9)
+        self.assertEqual(fila['cantidad_actual'], 4)
+        self.assertEqual(fila['cantidad_nueva'], 9)
+        self.assertEqual(fila['estado'], 'actualiza')
+        self.assertTrue(fila['sugerido'])
+
+    def test_misma_cantidad_no_propone_nada(self):
+        aplicar_ajuste(self.cable, self.sucursal, cantidad=4)
+        fila = self._fila('Zetatest Cable 1M - CO', stock=4)
+        self.assertEqual(fila['estado'], 'igual')
+        self.assertFalse(fila['sugerido'])
+
+    def test_dos_filas_al_mismo_producto_quedan_marcadas(self):
+        """La planilla puede ser mas fina que el catalogo ("8" y "8+" = "8 / 8+")."""
+        combinado = Producto.objects.create(
+            categoria=self.categoria, nombre='Zetatest Modulo 8 / 8+',
+            precio_lista_usd=Decimal('50'),
+        )
+        planilla = _planilla([
+            ('ZETATEST CABLES', 'Zetatest Modulo 8 / 8+', 50, 3, None),
+            ('ZETATEST CABLES', 'Zetatest Modulo 8 / 8+', 50, 9, None),
+        ])
+        filas = self.analizar(planilla, self.sucursal)['filas']
+        self.assertEqual([f['producto'] for f in filas], [combinado.id, combinado.id])
+        self.assertEqual(filas[0]['duplicada_con'], [3])
+        self.assertEqual(filas[1]['duplicada_con'], [2])
+        # Ninguna viene marcada: aplicar las dos pisaria una con la otra.
+        self.assertFalse(any(f['sugerido'] for f in filas))
+        self.assertIn('mismo producto', filas[0]['motivo'])
+
+
+class ImportarStockApiTests(TestCase):
+    """Los dos endpoints: analizar (no escribe) y aplicar (todo o nada)."""
+
+    ANALIZAR = '/api/inventario/stock/importar/analizar/'
+    APLICAR = '/api/inventario/stock/importar/aplicar/'
+
+    def setUp(self):
+        self.sucursal = Sucursal.objects.create(nombre='Api import test', orden=92)
+        self.categoria = CategoriaProducto.objects.create(nombre='Zetatest api')
+        self.producto = Producto.objects.create(
+            categoria=self.categoria, nombre='Zetatest Api Cable',
+            precio_lista_usd=Decimal('12'),
+        )
+        self.admin = Usuario.objects.create_superuser(
+            email='admin@import.test', username='admin.import', password='x',
+        )
+        rol = Rol.objects.create(nombre='Mostrador import test')
+        rol.permisos.set(Permiso.objects.filter(codigo='ver_inventario'))
+        self.empleado = Usuario.objects.create_user(
+            email='emp@import.test', username='empleado.import', password='x', rol=rol,
+        )
+        self.pelado = Usuario.objects.create_user(
+            email='nada@import.test', username='pelado.import', password='x',
+        )
+
+    def _cliente(self, usuario):
+        cliente = APIClient()
+        cliente.force_authenticate(usuario)
+        return cliente
+
+    def _subir(self, usuario, filas):
+        return self._cliente(usuario).post(self.ANALIZAR, {
+            'sucursal': self.sucursal.id, 'archivo': _planilla(filas),
+        }, format='multipart')
+
+    def test_analizar_devuelve_el_diff_y_no_escribe(self):
+        r = self._subir(self.empleado, [('ZETATEST API', 'Zetatest Api Cable', 12, 7, 2)])
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['sucursal'], self.sucursal.id)
+        fila = r.data['filas'][0]
+        self.assertEqual(fila['producto'], self.producto.id)
+        self.assertEqual(fila['cantidad_nueva'], 7)
+        self.assertEqual(fila['minimo_nuevo'], 2)
+        self.assertEqual(r.data['resumen']['actualiza'], 1)
+        # Analizar es de solo lectura.
+        self.assertEqual(StockProducto.objects.filter(sucursal=self.sucursal).count(), 0)
+
+    def test_archivo_que_no_es_xlsx(self):
+        import io
+
+        archivo = io.BytesIO(b'no soy un excel')
+        archivo.name = 'stock.csv'
+        r = self._cliente(self.empleado).post(self.ANALIZAR, {
+            'sucursal': self.sucursal.id, 'archivo': archivo,
+        }, format='multipart')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('.xlsx', str(r.data))
+
+    def test_sin_permiso_403(self):
+        r = self._subir(self.pelado, [('ZETATEST API', 'Zetatest Api Cable', 12, 7, None)])
+        self.assertEqual(r.status_code, 403)
+
+    def test_requiere_autenticacion(self):
+        self.assertEqual(APIClient().post(self.ANALIZAR, {}).status_code, 401)
+
+    def test_aplicar_fija_stock_y_deja_kardex(self):
+        cliente = self._cliente(self.empleado)
+        r = cliente.post(self.APLICAR, {
+            'sucursal': self.sucursal.id,
+            'archivo': 'StockPorSucursal.xlsx',
+            'items': [{'producto': self.producto.id, 'cantidad': 7, 'stock_minimo': 2}],
+        }, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['actualizados'], 1)
+        self.assertEqual(r.data['creados'], 0)
+        fila = StockProducto.objects.get(producto=self.producto, sucursal=self.sucursal)
+        self.assertEqual(fila.cantidad, 7)
+        self.assertEqual(fila.stock_minimo, 2)
+        self.assertFalse(fila.sin_dato)
+        movimiento = MovimientoStock.objects.get(producto=self.producto, sucursal=self.sucursal)
+        self.assertEqual(movimiento.delta, 7)
+        self.assertIn('StockPorSucursal.xlsx', movimiento.nota)
+        self.assertEqual(movimiento.creado_por, self.empleado)
+
+    def test_aplicar_sin_items_da_400(self):
+        r = self._cliente(self.empleado).post(self.APLICAR, {
+            'sucursal': self.sucursal.id, 'items': [],
+        }, format='json')
+        self.assertEqual(r.status_code, 400)
+
+    def test_crear_productos_es_solo_admin(self):
+        alta = {
+            'crear': {'nombre': 'Zetatest Nuevo', 'categoria': self.categoria.id, 'lista_usd': '15'},
+            'cantidad': 3,
+        }
+        r = self._cliente(self.empleado).post(self.APLICAR, {
+            'sucursal': self.sucursal.id, 'items': [alta],
+        }, format='json')
+        self.assertEqual(r.status_code, 403)
+        self.assertFalse(Producto.objects.filter(nombre='Zetatest Nuevo').exists())
+
+        r = self._cliente(self.admin).post(self.APLICAR, {
+            'sucursal': self.sucursal.id, 'items': [alta],
+        }, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['creados'], 1)
+        creado = Producto.objects.get(nombre='Zetatest Nuevo')
+        self.assertEqual(creado.categoria, self.categoria)
+        self.assertEqual(creado.precio_lista_usd, Decimal('15'))
+        self.assertEqual(creado.stocks.get(sucursal=self.sucursal).cantidad, 3)
+
+    def test_una_fila_invalida_no_aplica_ninguna(self):
+        """Todo o nada: el stock no queda a medio importar."""
+        r = self._cliente(self.empleado).post(self.APLICAR, {
+            'sucursal': self.sucursal.id,
+            'items': [
+                {'producto': self.producto.id, 'cantidad': 5},
+                {'producto': 999999, 'cantidad': 2},
+            ],
+        }, format='json')
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(StockProducto.objects.filter(sucursal=self.sucursal).count(), 0)
+
+    def test_producto_repetido_da_400(self):
+        r = self._cliente(self.empleado).post(self.APLICAR, {
+            'sucursal': self.sucursal.id,
+            'items': [
+                {'producto': self.producto.id, 'cantidad': 5},
+                {'producto': self.producto.id, 'cantidad': 9},
+            ],
+        }, format='json')
+        self.assertEqual(r.status_code, 400)

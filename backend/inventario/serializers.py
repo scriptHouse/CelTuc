@@ -4,8 +4,9 @@ from rest_framework import serializers
 
 from facturacion.models import Cliente, Emisor
 from precios_service.models import ItemService
-from productos.models import Producto
+from productos.models import CategoriaProducto, Producto
 
+from .importacion import MAX_UNIDADES
 from .models import ItemVenta, MovimientoStock, PagoVenta, StockProducto, Sucursal, Venta
 
 
@@ -250,6 +251,99 @@ class TransferenciaStockSerializer(serializers.Serializer):
         if data['origen'].pk == data['destino'].pk:
             raise serializers.ValidationError('La sucursal de origen y la de destino son la misma.')
         return data
+
+
+# ===== Importacion de stock por sucursal =====
+
+# La planilla del negocio ronda 1 MB; el techo deja margen de sobra sin dejar
+# que una subida enorme ocupe memoria del servidor.
+MAX_MB_PLANILLA = 10
+
+
+class AnalizarImportacionSerializer(serializers.Serializer):
+    """Entrada de POST /stock/importar/analizar/: la planilla de una sucursal."""
+
+    sucursal = _campo_sucursal()
+    archivo = serializers.FileField()
+
+    def validate_archivo(self, value):
+        if not value.name.lower().endswith('.xlsx'):
+            raise serializers.ValidationError(
+                'El archivo tiene que ser un Excel .xlsx. Si es un .xls o un Google '
+                'Sheets, guardalo como .xlsx y volvé a subirlo.'
+            )
+        if value.size > MAX_MB_PLANILLA * 1024 * 1024:
+            raise serializers.ValidationError(
+                f'El archivo pesa demasiado (máximo {MAX_MB_PLANILLA} MB).'
+            )
+        return value
+
+
+class ProductoNuevoImportacionSerializer(serializers.Serializer):
+    """El alta de catalogo de una fila que la planilla trae y no existe todavia."""
+
+    nombre = serializers.CharField(max_length=200)
+    categoria = serializers.PrimaryKeyRelatedField(
+        queryset=CategoriaProducto.objects.filter(activo=True),
+    )
+    lista_usd = serializers.DecimalField(
+        max_digits=12, decimal_places=2, min_value=Decimal('0'),
+        required=False, allow_null=True,
+    )
+
+    def validate_nombre(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError('El producto necesita un nombre.')
+        return value
+
+
+class ItemImportacionSerializer(serializers.Serializer):
+    """Una fila elegida para aplicar: producto existente o alta + cantidad."""
+
+    # Numero de fila en el Excel: solo informativo, para poder rastrear.
+    fila = serializers.IntegerField(required=False)
+    producto = serializers.PrimaryKeyRelatedField(
+        queryset=Producto.objects.all(), required=False, allow_null=True,
+    )
+    crear = ProductoNuevoImportacionSerializer(required=False, allow_null=True)
+    cantidad = serializers.IntegerField(min_value=0, max_value=MAX_UNIDADES)
+    stock_minimo = serializers.IntegerField(required=False, allow_null=True, min_value=0)
+
+    def validate(self, data):
+        if not data.get('producto') and not data.get('crear'):
+            raise serializers.ValidationError(
+                'Cada fila tiene que apuntar a un producto del catálogo o traer el alta.'
+            )
+        if data.get('producto') and data.get('crear'):
+            raise serializers.ValidationError(
+                'Una fila no puede ser a la vez un producto existente y uno nuevo.'
+            )
+        return data
+
+
+class AplicarImportacionSerializer(serializers.Serializer):
+    """Entrada de POST /stock/importar/aplicar/: las filas que se confirmaron."""
+
+    sucursal = _campo_sucursal()
+    # Queda en la nota del kardex: de que planilla salio cada movimiento.
+    archivo = serializers.CharField(required=False, allow_blank=True, max_length=120)
+    items = ItemImportacionSerializer(many=True)
+
+    def validate_items(self, value):
+        if not value:
+            raise serializers.ValidationError('No hay ninguna fila marcada para aplicar.')
+        vistos = set()
+        for item in value:
+            producto = item.get('producto')
+            if producto is None:
+                continue
+            if producto.pk in vistos:
+                raise serializers.ValidationError(
+                    f'El producto "{producto.nombre}" viene repetido: dejá una sola fila.'
+                )
+            vistos.add(producto.pk)
+        return value
 
 
 class IngresoCompraventaSerializer(serializers.Serializer):

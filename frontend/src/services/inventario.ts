@@ -105,6 +105,142 @@ export function transferirStock(
   return api.post('/inventario/stock/transferir/', input, token())
 }
 
+// ===== Importar stock por sucursal =====
+
+/**
+ * Qué pasaría con una fila de la planilla si se aplicara la importación:
+ * - `actualiza`: el producto está en el catálogo y la cantidad cambia.
+ * - `igual`: ya tiene esa misma cantidad — no hay nada para hacer.
+ * - `nueva`: no está en el catálogo (se puede dar de alta, solo admin).
+ * - `revisar`: hay más de un producto con ese nombre; hay que elegir cuál.
+ * - `sin_valor`: la planilla no informó cantidad — NO se toca el stock.
+ * - `invalida`: la celda no tiene un conteo (un precio, un `#VALUE!`…).
+ */
+export type EstadoFilaImportacion =
+  | 'actualiza'
+  | 'igual'
+  | 'nueva'
+  | 'revisar'
+  | 'sin_valor'
+  | 'invalida'
+
+/** Un candidato del catálogo para una fila que quedó en `revisar`. */
+export interface CandidatoImportacion {
+  id: number
+  nombre: string
+  detalle: string
+  categoria: string
+}
+
+export interface FilaImportacion {
+  /** Número de fila REAL en el Excel, para poder ir a buscarla. */
+  fila: number
+  seccion: string
+  nombre_planilla: string
+  estado: EstadoFilaImportacion
+  /** Por qué quedó así (vacío cuando no hace falta explicar nada). */
+  motivo: string
+  /** Cómo se encontró el producto: exacta, aproximada (revisala) o ninguna. */
+  confianza: 'exacta' | 'aproximada' | null
+  producto: number | null
+  producto_nombre: string
+  producto_detalle: string
+  categoria: string
+  categoria_id: number | null
+  /** Lo que hay hoy en la sucursal (null si el producto no está en el catálogo). */
+  cantidad_actual: number | null
+  /** Hoy figura como "(no informado)": el 0 no es un conteo. */
+  sin_dato_actual: boolean
+  /** Lo que dice la planilla (null si no informó nada). */
+  cantidad_nueva: number | null
+  minimo_actual: number | null
+  minimo_nuevo: number | null
+  lista_usd: string | null
+  candidatos: CandidatoImportacion[]
+  /**
+   * Otras filas de la planilla que caen en el MISMO producto del catálogo (la
+   * planilla puede ser más fina: "8" y "8+" son un solo producto "8 / 8+").
+   * Solo se puede aplicar una: si no, una pisaría a la otra sin que se vea.
+   */
+  duplicada_con: number[]
+  /** Viene marcada por defecto (solo lo que cambia algo y no necesita decisión). */
+  sugerido: boolean
+  /** Se puede dar de alta: es nueva y su sección tiene categoría. */
+  puede_crear: boolean
+}
+
+export interface ResumenImportacion {
+  filas: number
+  actualiza: number
+  sube: number
+  baja: number
+  /** Misma cantidad, pero deja de figurar "(no informado)". */
+  confirma: number
+  igual: number
+  nueva: number
+  revisar: number
+  /** Filas que comparten producto con otra fila de la misma planilla. */
+  duplicada: number
+  sin_valor: number
+  invalida: number
+  unidades_antes: number
+  unidades_despues: number
+  /** Productos del catálogo que la planilla no menciona: quedan como están. */
+  catalogo_sin_planilla: number
+}
+
+export interface AnalisisImportacion {
+  sucursal: number
+  sucursal_nombre: string
+  archivo: string
+  resumen: ResumenImportacion
+  filas: FilaImportacion[]
+}
+
+export interface ItemImportacionInput {
+  fila?: number
+  /** Producto del catálogo al que se le fija la cantidad. */
+  producto?: number
+  /** O el alta de un producto que la planilla trae y no existe (solo admin). */
+  crear?: { nombre: string; categoria: number; lista_usd?: string | null }
+  cantidad: number
+  /** null borra la alerta; omitido no la toca. */
+  stock_minimo?: number | null
+}
+
+export interface ResultadoImportacion {
+  sucursal: number
+  /** Filas cuya cantidad cambió (las que dejaron movimiento en el kardex). */
+  actualizados: number
+  creados: number
+  sin_cambio: number
+  unidades_delta: number
+  detalle: Array<{ producto: number; nombre: string; cantidad: number; delta: number }>
+}
+
+/**
+ * Sube la planilla de una sucursal y devuelve el diff fila por fila. NO escribe
+ * nada: es el paso de revisión previo a `aplicarImportacionStock`.
+ */
+export function analizarImportacionStock(input: {
+  sucursal: number
+  archivo: File
+}): Promise<AnalisisImportacion> {
+  const form = new FormData()
+  form.append('sucursal', String(input.sucursal))
+  form.append('archivo', input.archivo)
+  return api.post<AnalisisImportacion>('/inventario/stock/importar/analizar/', form, token())
+}
+
+/** Aplica las filas confirmadas (todo o nada, con movimiento en el kardex). */
+export function aplicarImportacionStock(input: {
+  sucursal: number
+  archivo?: string
+  items: ItemImportacionInput[]
+}): Promise<ResultadoImportacion> {
+  return api.post<ResultadoImportacion>('/inventario/stock/importar/aplicar/', input, token())
+}
+
 /** El equipo usado de un contrato de compraventa, para darlo de alta. */
 export interface IngresoCompraventaInput {
   marca?: string

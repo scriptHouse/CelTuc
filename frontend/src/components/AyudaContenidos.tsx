@@ -411,6 +411,7 @@ export function AyudaInventario() {
             [<><b>Transferir</b> ⇄</>, <>Mueve unidades de este producto a otra sucursal: sale de la que estás mirando y entra en la que elijas.</>],
             [<><b>Editar</b> ✎</>, <>Abre el detalle: cantidad exacta, stock mínimo y los últimos movimientos.</>],
             [<><b>Nuevo producto</b></>, <>(Solo administradores) Da de alta un producto del catálogo sin salir de acá. Nace sin unidades: después se las cargás con el <b>+</b>.</>],
+            [<><b>Importar por sucursal</b></>, <>Sube la planilla de un local y actualiza su stock de una vez, mostrándote antes qué cambia en cada fila.</>],
           ]}
         />
       </AyudaSeccion>
@@ -444,6 +445,38 @@ export function AyudaInventario() {
           <p className="tnum">
             Pestaña Solar → buscar «vidrio 15» → ⇄ Transferir → destino Centro → 3 → Transferir.
             Solar queda con 3 menos y Centro con 3 más.
+          </p>
+        </AyudaEjemplo>
+      </AyudaSeccion>
+
+      <AyudaSeccion titulo="Importar la planilla de una sucursal">
+        <p>
+          Cuando cada local hace su conteo en el Excel del negocio, no hace falta cargarlo fila
+          por fila: <b>Importar por sucursal</b> lo sube todo junto. Nada se toca hasta que vos
+          lo confirmás.
+        </p>
+        <AyudaPasos
+          pasos={[
+            <>Elegí <b>de qué local</b> es la planilla (solo se toca el stock de esa sucursal).</>,
+            <>Arrastrá el archivo <b>.xlsx</b> y tocá <b>Analizar planilla</b>.</>,
+            <>Revisá el resultado: cada fila muestra <b>lo que hay hoy → lo que dice la planilla</b> y cuánto sube o baja. Los filtros de arriba separan las que suben, las que bajan, las nuevas y las que hay que revisar.</>,
+            <><b>Destildá</b> lo que no quieras tocar (o usá «Desmarcar» y marcá solo lo que va) y tocá <b>Aplicar</b>.</>,
+          ]}
+        />
+        <AyudaCampos
+          campos={[
+            [<>Celda vacía</>, <>Si la planilla no puso cantidad, esa fila <b>no se toca</b>: un vacío no es un cero. Aparecen en «Fuera de la importación».</>],
+            [<><b>Nuevo</b></>, <>Ese producto no está en el catálogo. Marcarlo lo da de alta con el precio de lista de la planilla (solo administradores).</>],
+            [<><b>Revisar</b></>, <>Hay más de un producto con ese nombre: elegís cuál es en el desplegable de la misma fila.</>],
+            [<><b>Repetido</b></>, <>Dos filas de la planilla apuntan al mismo producto (ej: «8» y «8+» son un solo «8 / 8+»): dejás marcada una sola.</>],
+            [<><b>Aproximado</b></>, <>El nombre no era idéntico y se buscó el más parecido. Chequeá que sea el correcto antes de aplicar.</>],
+          ]}
+        />
+        <AyudaEjemplo titulo="Solar hizo el conteo del mes">
+          <p className="tnum">
+            Importar por sucursal → Solar → subir «Stock Solar.xlsx» → analizar → 201 suben, 57
+            bajan, 2 nuevos → Aplicar. Cada cambio queda en el historial del producto con el
+            nombre de la planilla.
           </p>
         </AyudaEjemplo>
       </AyudaSeccion>

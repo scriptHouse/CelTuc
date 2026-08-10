@@ -16,6 +16,7 @@ import {
   Search,
   Store,
   Trash2,
+  Upload,
 } from 'lucide-react'
 import type { CategoriaCatalogo, ProductoCatalogo } from '@/types'
 import { listarCategorias, listarProductos } from '@/services/productos'
@@ -51,6 +52,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { AyudaInfo } from '@/components/ui/AyudaInfo'
 import { AyudaInventario } from '@/components/AyudaContenidos'
 import { ProductoForm } from '@/components/ProductosManager'
+import { ImportarStockModal } from '@/components/inventario/ImportarStockModal'
 import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
 
@@ -272,6 +274,20 @@ export function InventarioPage() {
   const [transferencia, setTransferencia] = useState<Contexto | null>(null)
   const [gestionarSucursales, setGestionarSucursales] = useState(false)
   const [nuevoProducto, setNuevoProducto] = useState(false)
+  const [importar, setImportar] = useState(false)
+
+  /** Foto de cada sucursal para el primer paso de la importación. */
+  const resumenPorSucursal = useMemo(() => {
+    const mapa: Record<number, { productos: number; unidades: number }> = {}
+    for (const s of activas) mapa[s.id] = { productos: 0, unidades: 0 }
+    for (const fila of stock) {
+      const foto = mapa[fila.sucursal]
+      if (!foto || fila.cantidad <= 0) continue
+      foto.productos += 1
+      foto.unidades += fila.cantidad
+    }
+    return mapa
+  }, [activas, stock])
 
   const opcionesCategoria = [
     { value: '', label: 'Todas las categorías' },
@@ -294,6 +310,10 @@ export function InventarioPage() {
                 Nuevo producto
               </Button>
             )}
+            <Button variant="outline" onClick={() => setImportar(true)} disabled={!activas.length}>
+              <Upload className="h-4 w-4" />
+              Importar por sucursal
+            </Button>
             {admin && (
               <Button variant="outline" onClick={() => setGestionarSucursales(true)}>
                 <Store className="h-4 w-4" />
@@ -457,6 +477,27 @@ export function InventarioPage() {
         filaDe={filaDe}
         onCerrar={() => setTransferencia(null)}
         onListo={refrescarStock}
+      />
+      <ImportarStockModal
+        abierto={importar}
+        sucursales={activas}
+        sucursalInicial={sel === 'todas' ? null : sel}
+        resumenPorSucursal={resumenPorSucursal}
+        admin={admin}
+        onCerrar={() => setImportar(false)}
+        onAplicado={(resultado) => {
+          // El stock cambió en bloque: se recarga entero (y el catálogo, por si
+          // la importación dio de alta productos nuevos).
+          queryClient.invalidateQueries({ queryKey: ['inv-stock'] })
+          queryClient.invalidateQueries({ queryKey: ['inv-movimientos'] })
+          if (resultado.creados > 0) {
+            queryClient.invalidateQueries({ queryKey: ['productos-items'] })
+          }
+          toast.success(
+            'Importación aplicada',
+            `${num(resultado.actualizados)} productos actualizados en la sucursal.`,
+          )
+        }}
       />
       {admin && (
         <SucursalesModal open={gestionarSucursales} onClose={() => setGestionarSucursales(false)} />

@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Max
 from rest_framework import generics
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -12,6 +13,8 @@ from productos.models import CategoriaProducto, ConfiguracionProductos, Producto
 from productos.serializers import ProductoSerializer
 from usuarios.permissions import LecturaConPermisoEscrituraAdmin, LecturaYEscrituraConPermiso
 
+from .importacion import analizar as analizar_planilla
+from .importacion import aplicar as aplicar_planilla
 from .models import (
     MovimientoStock,
     StockProducto,
@@ -23,6 +26,8 @@ from .models import (
 )
 from .serializers import (
     AjusteStockSerializer,
+    AnalizarImportacionSerializer,
+    AplicarImportacionSerializer,
     CrearVentaSerializer,
     IngresoCompraventaSerializer,
     MovimientoStockSerializer,
@@ -321,6 +326,76 @@ class VentasView(_BaseInventario, APIView):
         )
         data['aviso_caja'] = aviso_caja
         return Response(data, status=201)
+
+
+class ImportarStockAnalizarView(_BaseInventario, APIView):
+    """Lee la planilla de una sucursal y devuelve el diff, SIN escribir nada.
+
+    Es el paso de revision: quien importa ve fila por fila que habia y que
+    quedaria, y recien despues confirma. Lo puede usar cualquier cuenta con
+    `ver_inventario` (es el mismo trabajo de mostrador que ajustar stock).
+    """
+
+    permission_classes = [LecturaYEscrituraConPermiso]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        entrada = AnalizarImportacionSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        datos = entrada.validated_data
+        archivo = datos['archivo']
+        try:
+            resultado = analizar_planilla(archivo, datos['sucursal'])
+        except ValidationError as e:
+            return Response({'detail': ' '.join(e.messages)}, status=400)
+        except Exception:
+            logger.exception('No se pudo analizar la planilla de stock')
+            return Response(
+                {'detail': 'No se pudo leer la planilla. Revisá que sea el archivo correcto.'},
+                status=400,
+            )
+        resultado['sucursal'] = datos['sucursal'].id
+        resultado['sucursal_nombre'] = datos['sucursal'].nombre
+        resultado['archivo'] = archivo.name
+        return Response(resultado)
+
+
+class ImportarStockAplicarView(_BaseInventario, APIView):
+    """Aplica las filas confirmadas de la planilla (todo o nada).
+
+    Ajustar cantidades es trabajo de mostrador; CREAR productos en el catalogo
+    no: esas filas solo las puede aplicar un administrador, igual que en el
+    resto del catalogo.
+    """
+
+    permission_classes = [LecturaYEscrituraConPermiso]
+
+    def post(self, request):
+        entrada = AplicarImportacionSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        datos = entrada.validated_data
+        items = datos['items']
+
+        altas = [i for i in items if i.get('crear')]
+        if altas and not request.user.es_administrador:
+            return Response(
+                {'detail': (
+                    f'{len(altas)} filas darían de alta productos nuevos en el catálogo y '
+                    'eso lo hace un administrador. Desmarcalas y volvé a aplicar.'
+                )},
+                status=403,
+            )
+
+        archivo = (datos.get('archivo') or '').strip()
+        nota = f'Importación · {archivo}' if archivo else 'Importación por sucursal'
+        try:
+            resultado = aplicar_planilla(
+                datos['sucursal'], items, usuario=request.user, nota=nota,
+            )
+        except ValidationError as e:
+            return Response({'detail': ' '.join(e.messages)}, status=400)
+        resultado['sucursal'] = datos['sucursal'].id
+        return Response(resultado)
 
 
 class MovimientoListView(_BaseInventario, generics.ListAPIView):
