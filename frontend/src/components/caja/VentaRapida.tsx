@@ -31,6 +31,7 @@ import type {
   ProductoCatalogo,
   SeccionPreciosService,
 } from '@/types'
+import { MEDIOS_PAGO_CAJA } from '@/types'
 import { buscarClientes, listarEmisores, obtenerLimites } from '@/services/facturacion'
 import { listarSecciones } from '@/services/preciosService'
 import { listarProductos } from '@/services/productos'
@@ -42,7 +43,13 @@ import {
   type FormaPago,
   type TipoItemVenta,
 } from '@/services/inventario'
-import { FACTURACIONES, cajaParaFacturacion } from '@/components/caja/medios'
+import {
+  FACTURACIONES,
+  FORMAS_POR_FACTURACION,
+  cajaParaFacturacion,
+  facturacionSugerida,
+  formasPara,
+} from '@/components/caja/medios'
 import { CuentaCard } from '@/components/facturacion/CuentaCard'
 import { LimiteUsoBar } from '@/components/facturacion/LimiteUsoBar'
 import { guardarBorradorFacturaVenta } from '@/lib/borradorFactura'
@@ -445,12 +452,20 @@ const OPCIONES_FACTURACION = FACTURACIONES.map((f) => ({
   label: `${f.label} · ${f.hint}`,
 }))
 
-const FORMAS: Array<{ value: FormaPago; label: string }> = [
-  { value: 'efectivo', label: 'Efectivo' },
-  { value: 'transferencia', label: 'Transferencia' },
-  { value: 'tarjeta', label: 'Tarjeta' },
-  { value: 'otro', label: 'Otro' },
-]
+/**
+ * El monotributo NO cobra por transferencia comun sino por FINANCIERA (y al
+ * reves con Factura A/B), asi que las formas de pago dependen de como se
+ * factura esa parte. `medioValido` corrige el medio cuando se cambia la
+ * facturacion, para que no quede uno que ya no corresponde.
+ */
+function medioValido(medio: FormaPago, facturacion: FacturacionVenta): FormaPago {
+  const permitidos = FORMAS_POR_FACTURACION[facturacion]
+  if (permitidos.includes(medio)) return medio
+  // La transferencia que ya no aplica se pasa a la otra; el resto, a efectivo.
+  if (medio === 'transferencia') return 'transf_financiera'
+  if (medio === 'transf_financiera') return 'transferencia'
+  return 'efectivo'
+}
 
 export function VentaRapida({
   cajaId,
@@ -606,6 +621,9 @@ function VentaModal({
     }>
   >([])
   const [facturacion, setFacturacion] = useState<FacturacionVenta>('sin_factura')
+  // True = la facturacion la sugirio el medio de pago (no la eligio el usuario).
+  // Sirve para AVISARLO abajo de los pills: que el cambio automatico se vea.
+  const [sugeridoPorMedio, setSugeridoPorMedio] = useState(false)
   const [lineas, setLineas] = useState<Linea[]>([])
   const [nota, setNota] = useState('')
   const [buscar, setBuscar] = useState('')
@@ -663,6 +681,7 @@ function VentaModal({
     setDividido(false)
     setPagos([])
     setFacturacion('sin_factura')
+    setSugeridoPorMedio(false)
     setLineas([])
     setNota('')
     setBuscar('')
@@ -903,7 +922,7 @@ function VentaModal({
 
   function agregarPago() {
     const usados = new Set(pagos.map((p) => p.medio))
-    const libre = FORMAS.find((f) => !usados.has(f.value))?.value ?? 'otro'
+    const libre = formasPara('sin_factura').find((f) => !usados.has(f.value))?.value ?? 'otro'
     setPagos((ps) => [
       ...ps,
       {
@@ -1190,13 +1209,23 @@ function VentaModal({
               {dividido ? 'Medio principal' : 'Forma de pago'}
             </label>
             <Select
-              options={FORMAS}
+              options={formasPara(dividido ? (pagos[0]?.facturacion ?? facturacion) : facturacion)}
               value={formaPago}
               onChange={(v) => {
                 const medio = v as FormaPago
                 setFormaPago(medio)
+                // El medio SUGIERE como se factura (efectivo sin factura,
+                // transferencia con Factura A/B, etc.). Es preseleccion: si
+                // despues tocan el pill, manda lo que eligieron ahi.
+                const sugerida = facturacionSugerida(medio, facturacion)
+                setFacturacion(sugerida)
+                setSugeridoPorMedio(true)
                 // Con cobro dividido, este selector es la primera parte.
-                setPagos((ps) => (ps.length ? [{ ...ps[0], medio }, ...ps.slice(1)] : ps))
+                setPagos((ps) =>
+                  ps.length
+                    ? [{ ...ps[0], medio, facturacion: sugerida, emisorId: null }, ...ps.slice(1)]
+                    : ps,
+                )
               }}
             />
             <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
@@ -1245,14 +1274,28 @@ function VentaModal({
                   <div className="flex flex-wrap items-center gap-2">
                     <div className="min-w-0 basis-full sm:basis-0 sm:flex-1">
                       <Select
-                        options={FORMAS}
+                        options={formasPara(p.facturacion)}
                         value={p.medio}
                         onChange={(v) => {
                           const medio = v as FormaPago
                           setPagos((ps) =>
-                            ps.map((x) => (x.key === p.key ? { ...x, medio } : x)),
+                            ps.map((x) =>
+                              x.key === p.key
+                                ? {
+                                    ...x,
+                                    medio,
+                                    // El medio sugiere como se factura ESTA parte.
+                                    facturacion: facturacionSugerida(medio, x.facturacion),
+                                    emisorId: null,
+                                  }
+                                : x,
+                            ),
                           )
-                          if (i === 0) setFormaPago(medio)
+                          if (i === 0) {
+                            setFormaPago(medio)
+                            setFacturacion((f) => facturacionSugerida(medio, f))
+                            setSugeridoPorMedio(true)
+                          }
                         }}
                       />
                     </div>
@@ -1294,15 +1337,22 @@ function VentaModal({
                       <Select
                         options={OPCIONES_FACTURACION}
                         value={p.facturacion}
-                        onChange={(v) =>
+                        onChange={(v) => {
+                          const fact = v as FacturacionVenta
                           setPagos((ps) =>
                             ps.map((x) =>
                               x.key === p.key
-                                ? { ...x, facturacion: v as FacturacionVenta, emisorId: null }
+                                ? {
+                                    ...x,
+                                    facturacion: fact,
+                                    emisorId: null,
+                                    medio: medioValido(x.medio, fact),
+                                  }
                                 : x,
                             ),
                           )
-                        }
+                          if (i === 0) setFormaPago((m) => medioValido(m, fact))
+                        }}
                       />
                     </div>
                   </div>
@@ -1331,7 +1381,7 @@ function VentaModal({
                 size="sm"
                 variant="outline"
                 onClick={agregarPago}
-                disabled={pagos.length >= FORMAS.length}
+                disabled={pagos.length >= MEDIOS_PAGO_CAJA.length}
               >
                 <Plus className="h-4 w-4" />
                 Agregar medio
@@ -1350,7 +1400,14 @@ function VentaModal({
 
         {/* Cómo se factura: decide sola a qué caja entra la plata. */}
         <div>
-          <label className="mb-1.5 block text-xs font-medium text-ink-500">¿Cómo se factura?</label>
+          <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-x-3">
+            <label className="text-xs font-medium text-ink-500">¿Cómo se factura?</label>
+            {sugeridoPorMedio && (
+              <span className="text-[0.68rem] text-ink-400">
+                Sugerido por la forma de pago · cambialo si hace falta
+              </span>
+            )}
+          </div>
           <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Cómo se factura">
             {FACTURACIONES.map((f) => {
               const activa = facturacion === f.value
@@ -1363,9 +1420,18 @@ function VentaModal({
                   aria-checked={activa}
                   onClick={() => {
                     setFacturacion(f.value)
+                    setSugeridoPorMedio(false)
                     // Con cobro dividido, elegir acá aplica a TODAS las partes;
-                    // después cada una se puede cambiar por separado.
-                    setPagos((ps) => ps.map((p) => ({ ...p, facturacion: f.value })))
+                    // después cada una se puede cambiar por separado. El medio
+                    // se corrige solo si el que había ya no corresponde.
+                    setPagos((ps) =>
+                      ps.map((p) => ({
+                        ...p,
+                        facturacion: f.value,
+                        medio: medioValido(p.medio, f.value),
+                      })),
+                    )
+                    setFormaPago((m) => medioValido(m, f.value))
                   }}
                   className={cn(
                     'flex flex-col items-start gap-0.5 rounded-2xl border px-3 py-2.5 text-left transition-all duration-150',

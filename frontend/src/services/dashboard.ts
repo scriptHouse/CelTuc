@@ -50,8 +50,17 @@ export interface ResumenDashboard {
     monoMes: number
     monoCount: number
   }
-  /** Ventas de mostrador del mes cobradas por transferencia. */
+  /**
+   * Ventas de mostrador del mes cobradas por transferencia, SEPARADAS por riel:
+   * la común (la del Responsable Inscripto) y la financiera (la del
+   * monotributo). Son plata distinta y se concilian aparte, así que en el panel
+   * también van aparte.
+   */
   transferencias: {
+    totalMes: number
+    operacionesMes: number
+  }
+  transferenciasFinancieras: {
     totalMes: number
     operacionesMes: number
   }
@@ -194,13 +203,26 @@ export async function obtenerResumen(): Promise<ResumenDashboard> {
   }
 
   // --- Ventas de mostrador cobradas por transferencia (mes en curso) ---
+  // Las dos transferencias se cuentan POR SEPARADO: la común es la del
+  // Responsable Inscripto y la financiera la del monotributo. Sumarlas
+  // escondería de qué riel vino la plata, que es justo lo que se quiere ver.
   const transferencias = { totalMes: 0, operacionesMes: 0 }
+  const transferenciasFinancieras = { totalMes: 0, operacionesMes: 0 }
   try {
     const ventas = await listarVentas({ limite: 500 })
     for (const v of ventas) {
-      if (v.forma_pago !== 'transferencia' || !mismoMes(v.creado, hoy)) continue
-      transferencias.totalMes += Number(v.total)
-      transferencias.operacionesMes += 1
+      if (!mismoMes(v.creado, hoy)) continue
+      // `forma_pago` es el medio PRINCIPAL de la venta (el de mayor monto):
+      // con cobro dividido, una venta cuenta una sola vez, por ese medio.
+      const destino =
+        v.forma_pago === 'transferencia'
+          ? transferencias
+          : v.forma_pago === 'transf_financiera'
+            ? transferenciasFinancieras
+            : null
+      if (!destino) continue
+      destino.totalMes += Number(v.total)
+      destino.operacionesMes += 1
     }
   } catch {
     /* sin permiso o sin conexión: contadores en 0 */
@@ -221,5 +243,6 @@ export async function obtenerResumen(): Promise<ResumenDashboard> {
     empleados,
     facturacionReal,
     transferencias,
+    transferenciasFinancieras,
   }
 }

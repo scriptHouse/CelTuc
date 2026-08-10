@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   ArrowRightLeft,
   Boxes,
+  Building2,
   Landmark,
   LayoutDashboard,
   PackageSearch,
@@ -26,6 +27,7 @@ import { Card } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Button } from '@/components/ui/Button'
 import { FacturaEstadoBadge } from '@/components/ui/StatusBadge'
+import { operacionesLabel } from '@/components/caja/medios'
 import { Cartelera } from '@/components/Cartelera'
 import { GestorDolar } from '@/components/GestorDolar'
 import { useToast } from '@/components/ToastProvider'
@@ -134,8 +136,10 @@ export function PanelPage() {
             />
           </div>
 
-          {/* Facturación real (ARCA) del mes por condición fiscal + transferencias */}
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+          {/* Facturación real (ARCA) del mes por condición fiscal + las dos
+              transferencias, separadas: la común (Resp. Inscripto) y la
+              financiera (monotributo) son plata de rieles distintos. */}
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatCard
               className="ct-stagger-item"
               style={ctStagger(4)}
@@ -163,14 +167,26 @@ export function PanelPage() {
             <StatCard
               className="ct-stagger-item"
               style={ctStagger(6)}
-              label="Transferencias (mes)"
+              label="Transferencia (mes)"
               value={moneyCompact(data.transferencias.totalMes)}
               hint={
                 data.transferencias.operacionesMes > 0
-                  ? `${num(data.transferencias.operacionesMes)} ventas de mostrador`
+                  ? `${operacionesLabel(data.transferencias.operacionesMes)} de mostrador`
                   : 'Sin ventas por transferencia'
               }
               icon={ArrowRightLeft}
+            />
+            <StatCard
+              className="ct-stagger-item"
+              style={ctStagger(7)}
+              label="Financiera (mes)"
+              value={moneyCompact(data.transferenciasFinancieras.totalMes)}
+              hint={
+                data.transferenciasFinancieras.operacionesMes > 0
+                  ? `${operacionesLabel(data.transferenciasFinancieras.operacionesMes)} de mostrador`
+                  : 'Sin ventas por financiera'
+              }
+              icon={Building2}
             />
           </div>
 

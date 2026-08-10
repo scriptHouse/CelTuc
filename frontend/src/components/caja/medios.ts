@@ -3,6 +3,7 @@ import {
   ArrowRightLeft,
   ArrowUpFromLine,
   Banknote,
+  Building2,
   CircleDollarSign,
   CreditCard,
   FileCheck2,
@@ -27,8 +28,59 @@ import { MEDIOS_PAGO_CAJA } from '@/types'
 export const MEDIO_ICONO: Record<MedioPagoCaja, LucideIcon> = {
   efectivo: Banknote,
   transferencia: ArrowRightLeft,
+  transf_financiera: Building2,
   tarjeta: CreditCard,
   otro: CircleDollarSign,
+}
+
+/**
+ * Qué transferencia se ofrece según cómo se factura esa parte de la venta.
+ *
+ * El monotributo NO usa la transferencia común: usa la financiera. Con Factura
+ * A/B es al revés. En «Sin factura» quedan las dos, porque ahí la plata puede
+ * haber entrado por cualquiera de los dos rieles y lo sabe quien cobra.
+ */
+export const FORMAS_POR_FACTURACION: Record<FacturacionVenta, MedioPagoCaja[]> = {
+  factura_ri: ['efectivo', 'transferencia', 'tarjeta', 'otro'],
+  factura_c: ['efectivo', 'transf_financiera', 'tarjeta', 'otro'],
+  sin_factura: ['efectivo', 'transferencia', 'transf_financiera', 'tarjeta', 'otro'],
+}
+
+/** Las formas de pago elegibles para una facturación, con su etiqueta. */
+export function formasPara(facturacion: FacturacionVenta) {
+  const permitidos = FORMAS_POR_FACTURACION[facturacion]
+  return MEDIOS_PAGO_CAJA.filter((m) => permitidos.includes(m.value))
+}
+
+/**
+ * Cómo se factura habitualmente cada medio, para SUGERIRLO al elegirlo.
+ *
+ * Es solo una preselección: quien cobra puede cambiar el pill después y queda
+ * lo que él eligió. `null` = ese medio no sugiere nada (deja lo que haya).
+ *
+ * El flujo del mostrador:
+ *  - Efectivo → sin factura.
+ *  - Transferencia (la del Responsable Inscripto) → Factura A/B.
+ *  - Transferencia financiera (la del monotributo) → sin factura.
+ *  - Tarjeta → Factura C. Es el ÚNICO medio que no dice con qué cuenta va
+ *    (la usan las dos), así que se sugiere la más frecuente y se cambia a mano
+ *    cuando esa venta va con el RI.
+ *  - Otro → no sugiere: es el cajón de sastre.
+ */
+export const FACTURACION_SUGERIDA: Record<MedioPagoCaja, FacturacionVenta | null> = {
+  efectivo: 'sin_factura',
+  transferencia: 'factura_ri',
+  transf_financiera: 'sin_factura',
+  tarjeta: 'factura_c',
+  otro: null,
+}
+
+/** La facturación que sugiere un medio, o la actual si ese medio no sugiere. */
+export function facturacionSugerida(
+  medio: MedioPagoCaja,
+  actual: FacturacionVenta,
+): FacturacionVenta {
+  return FACTURACION_SUGERIDA[medio] ?? actual
 }
 
 /** Nombre visible de cada medio. */

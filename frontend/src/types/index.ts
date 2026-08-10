@@ -589,12 +589,26 @@ export interface SeccionPreciosService {
 /** Medio de pago con el que entra plata a la caja.
  *  Es EL MISMO vocabulario que la venta de mostrador (`FormaPago` de
  *  inventario): así una venta cae en el arqueo sin mapeos. */
-export type MedioPagoCaja = 'efectivo' | 'transferencia' | 'tarjeta' | 'otro'
+/**
+ * Con qué se cobró. Cada uno se concilia por separado en el arqueo.
+ *
+ * Hay DOS transferencias porque no es la misma plata ni el mismo riel: la común
+ * entra a la cuenta del Responsable Inscripto y se factura A/B; la FINANCIERA es
+ * la del monotributo. En el mostrador se ofrece una u otra según cómo se factura
+ * esa parte de la venta, nunca las dos (ver `FORMAS_POR_FACTURACION`).
+ */
+export type MedioPagoCaja =
+  | 'efectivo'
+  | 'transferencia'
+  | 'transf_financiera'
+  | 'tarjeta'
+  | 'otro'
 
 /** Catálogo de medios para selectores y desgloses (orden de la UI). */
 export const MEDIOS_PAGO_CAJA: { value: MedioPagoCaja; label: string }[] = [
   { value: 'efectivo', label: 'Efectivo' },
   { value: 'transferencia', label: 'Transferencia' },
+  { value: 'transf_financiera', label: 'Transferencia financiera' },
   { value: 'tarjeta', label: 'Tarjeta' },
   { value: 'otro', label: 'Otro' },
 ]

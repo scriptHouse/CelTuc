@@ -12,6 +12,7 @@ from .models import (
     Caja,
     CierreCaja,
     ConfiguracionCaja,
+    MedioPago,
     MovimientoCaja,
     SesionCaja,
     abrir_caja,
@@ -24,7 +25,9 @@ from .models import (
 
 
 def _contado(**kwargs):
-    base = {'efectivo': 0, 'transferencia': 0, 'tarjeta': 0, 'otro': 0}
+    # Se arma desde los medios REALES: al sumar uno nuevo (p. ej. la
+    # transferencia financiera) los tests no se quedan viejos.
+    base = {medio: 0 for medio in MedioPago.values}
     base.update(kwargs)
     return base
 
@@ -563,3 +566,47 @@ class CajasFiscalesTests(TestCase):
         r = cliente.post('/api/caja/cajas/', {'nombre': 'Service'}, format='json')
         self.assertEqual(r.status_code, 201)
         self.assertEqual(r.data['canal'], '')
+
+
+class TransferenciaFinancieraTests(TestCase):
+    """La transferencia financiera (monotributo) se concilia APARTE de la comun.
+
+    Son dos rieles distintos: si se sumaran juntas no se podria cuadrar ninguna
+    de las dos por separado en el cierre.
+    """
+
+    def setUp(self):
+        self.caja = Caja.objects.create(nombre='Caja financiera test')
+        self.sesion = abrir_caja(self.caja, fondo_inicial=0)
+
+    def test_es_un_medio_valido_y_distinto(self):
+        self.assertIn('transf_financiera', MedioPago.values)
+        self.assertNotEqual(MedioPago.TRANSFERENCIA, MedioPago.TRANSF_FINANCIERA)
+
+    def test_no_se_suma_con_la_transferencia_comun(self):
+        registrar_movimiento(
+            self.sesion, tipo=MovimientoCaja.Tipo.VENTA, medio='transferencia',
+            monto=8000, motivo='Venta RI',
+        )
+        registrar_movimiento(
+            self.sesion, tipo=MovimientoCaja.Tipo.VENTA, medio='transf_financiera',
+            monto=5000, motivo='Venta monotributo',
+        )
+        r = resumen_sesion(self.sesion)
+        self.assertEqual(r['ventas_por_medio']['transferencia'], Decimal('8000'))
+        self.assertEqual(r['ventas_por_medio']['transf_financiera'], Decimal('5000'))
+        self.assertEqual(r['esperado_por_medio']['transf_financiera'], Decimal('5000'))
+        self.assertEqual(r['operaciones_por_medio']['transf_financiera'], 1)
+
+    def test_el_cierre_la_cuadra_por_separado(self):
+        registrar_movimiento(
+            self.sesion, tipo=MovimientoCaja.Tipo.VENTA, medio='transf_financiera',
+            monto=5000, motivo='Venta monotributo',
+        )
+        cierre = cerrar_caja(
+            self.sesion,
+            contado_por_medio=_contado(transf_financiera=5000),
+            fondo_siguiente=0,
+        )
+        self.assertEqual(cierre.diferencia_por_medio['transf_financiera'], 0)
+        self.assertEqual(cierre.diferencia_total, 0)

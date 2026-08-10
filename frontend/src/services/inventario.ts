@@ -1,4 +1,4 @@
-import type { FacturacionVenta, ProductoCatalogo } from '@/types'
+import type { FacturacionVenta, MedioPagoCaja, ProductoCatalogo } from '@/types'
 import { api } from '@/lib/api'
 import { useAuth } from '@/store/auth'
 
@@ -137,7 +137,12 @@ export function ingresarCompraventa(
   return api.post('/inventario/compraventa/ingresar/', input, token())
 }
 
-export type FormaPago = 'efectivo' | 'transferencia' | 'tarjeta' | 'otro'
+/**
+ * Con qué se cobró la venta. Es el MISMO juego de valores que los medios de la
+ * caja (`MedioPagoCaja`): la venta de mostrador y el arqueo tienen que hablar
+ * el mismo idioma, así que se reexporta en vez de repetir la lista.
+ */
+export type FormaPago = MedioPagoCaja
 
 /**
  * Cómo se factura la venta: separa la plata por caja (lo del RI a su caja;

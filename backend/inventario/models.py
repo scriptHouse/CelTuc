@@ -154,8 +154,17 @@ class Venta(ModeloBase):
     """
 
     class FormaPago(models.TextChoices):
+        """Con que se cobro. Cada uno se concilia por separado en el arqueo.
+
+        Hay DOS transferencias porque no es la misma plata ni el mismo riel:
+        la comun entra a la cuenta del Responsable Inscripto y se factura A/B;
+        la FINANCIERA es la del monotributo. En el mostrador se ofrece una u
+        otra segun como se facture esa parte de la venta, nunca las dos.
+        """
+
         EFECTIVO = 'efectivo', 'Efectivo'
         TRANSFERENCIA = 'transferencia', 'Transferencia'
+        TRANSF_FINANCIERA = 'transf_financiera', 'Transferencia financiera'
         TARJETA = 'tarjeta', 'Tarjeta'
         OTRO = 'otro', 'Otro'
 
