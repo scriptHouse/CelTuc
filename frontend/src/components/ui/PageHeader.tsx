@@ -61,7 +61,14 @@ export function PageHeader({
         </div>
       </div>
 
-      {actions && <div className="flex shrink-0 items-center gap-2 sm:pt-0.5">{actions}</div>}
+      {/* `flex-wrap`: con varias acciones (y sobre todo en el celular, donde
+          esta fila ocupa todo el ancho) los botones bajan de renglón en vez de
+          empujar la página a lo ancho. Cuando entran en una línea, no cambia nada. */}
+      {actions && (
+        <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end sm:pt-0.5">
+          {actions}
+        </div>
+      )}
     </header>
   )
 }

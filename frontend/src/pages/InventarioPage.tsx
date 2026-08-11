@@ -303,21 +303,38 @@ export function InventarioPage() {
         subtitle="El stock real de cada sucursal, conectado al catálogo de productos (precios siempre vivos)."
         className="ct-rise"
         actions={
+          /* Los rótulos crecen en dos escalones para que las tres acciones entren
+             en un renglón sin ahogar al título: cortos en el celular (y
+             "Sucursales" como ícono, es lo menos usado y solo de admin), enteros
+             en escritorio y el de importar completo recién en pantalla ancha. */
           <>
             {admin && (
-              <Button onClick={() => setNuevoProducto(true)}>
+              <Button onClick={() => setNuevoProducto(true)} className="px-3.5 lg:px-5">
                 <PackagePlus className="h-4 w-4" />
-                Nuevo producto
+                <span className="lg:hidden">Nuevo</span>
+                <span className="hidden lg:inline">Nuevo producto</span>
               </Button>
             )}
-            <Button variant="outline" onClick={() => setImportar(true)} disabled={!activas.length}>
+            <Button
+              variant="outline"
+              onClick={() => setImportar(true)}
+              disabled={!activas.length}
+              className="px-3.5 lg:px-5"
+            >
               <Upload className="h-4 w-4" />
-              Importar por sucursal
+              <span className="xl:hidden">Importar</span>
+              <span className="hidden xl:inline">Importar por sucursal</span>
             </Button>
             {admin && (
-              <Button variant="outline" onClick={() => setGestionarSucursales(true)}>
+              <Button
+                variant="outline"
+                onClick={() => setGestionarSucursales(true)}
+                aria-label="Sucursales"
+                title="Sucursales"
+                className="px-3.5 lg:px-5"
+              >
                 <Store className="h-4 w-4" />
-                Sucursales
+                <span className="hidden lg:inline">Sucursales</span>
               </Button>
             )}
             <AyudaInfo titulo="Cómo usar el inventario">
