@@ -6,6 +6,7 @@ import {
   ArrowRight,
   Boxes,
   ClipboardList,
+  Download,
   Loader2,
   Minus,
   Package,
@@ -53,6 +54,7 @@ import { AyudaInfo } from '@/components/ui/AyudaInfo'
 import { AyudaInventario } from '@/components/AyudaContenidos'
 import { ProductoForm } from '@/components/ProductosManager'
 import { ImportarStockModal } from '@/components/inventario/ImportarStockModal'
+import { ExportarInventarioModal } from '@/components/inventario/exportar/ExportarInventarioModal'
 import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
 
@@ -275,6 +277,28 @@ export function InventarioPage() {
   const [gestionarSucursales, setGestionarSucursales] = useState(false)
   const [nuevoProducto, setNuevoProducto] = useState(false)
   const [importar, setImportar] = useState(false)
+  const [exportar, setExportar] = useState(false)
+
+  // Lo que el exportador necesita saber de la pantalla para poder ofrecer
+  // «exportar lo que estoy viendo»: qué productos quedaron a la vista y con qué
+  // filtros, en castellano, para dejarlo escrito en el archivo.
+  const idsVisibles = useMemo(() => visibles.map((p) => p.id), [visibles])
+  const contextoVista = useMemo(() => {
+    const partes: string[] = []
+    const termino = q.trim()
+    if (termino) partes.push(`Búsqueda: «${termino}»`)
+    const raiz = cat ? raices.find((c) => String(c.id) === cat) : undefined
+    if (raiz) partes.push(`Categoría: ${raiz.nombre}`)
+    if (!termino && vista !== 'todos') {
+      const elegida = VISTAS.find((v) => v.id === vista)
+      if (elegida) partes.push(`Vista: ${elegida.label}`)
+    }
+    if (sel !== null && sel !== 'todas') {
+      const sucursal = activas.find((s) => s.id === sel)
+      if (sucursal) partes.push(`Sucursal: ${sucursal.nombre}`)
+    }
+    return partes
+  }, [q, cat, vista, raices, sel, activas])
 
   /** Foto de cada sucursal para el primer paso de la importación. */
   const resumenPorSucursal = useMemo(() => {
@@ -303,8 +327,8 @@ export function InventarioPage() {
         subtitle="El stock real de cada sucursal, conectado al catálogo de productos (precios siempre vivos)."
         className="ct-rise"
         actions={
-          /* Los rótulos crecen en dos escalones para que las tres acciones entren
-             en un renglón sin ahogar al título: cortos en el celular (y
+          /* Los rótulos crecen en dos escalones para que las acciones entren en
+             un renglón sin ahogar al título: cortos en el celular (y
              "Sucursales" como ícono, es lo menos usado y solo de admin), enteros
              en escritorio y el de importar completo recién en pantalla ancha. */
           <>
@@ -324,6 +348,15 @@ export function InventarioPage() {
               <Upload className="h-4 w-4" />
               <span className="xl:hidden">Importar</span>
               <span className="hidden xl:inline">Importar por sucursal</span>
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setExportar(true)}
+              disabled={!productos.length}
+              className="px-3.5 lg:px-5"
+            >
+              <Download className="h-4 w-4" />
+              Exportar
             </Button>
             {admin && (
               <Button
@@ -515,6 +548,19 @@ export function InventarioPage() {
             `${num(resultado.actualizados)} productos actualizados en la sucursal.`,
           )
         }}
+      />
+      <ExportarInventarioModal
+        abierto={exportar}
+        onCerrar={() => setExportar(false)}
+        productos={productos}
+        categorias={categorias}
+        stock={stock}
+        sucursales={activas}
+        admin={admin}
+        usuario={usuario?.username ?? ''}
+        idsVisibles={idsVisibles}
+        contextoVista={contextoVista}
+        seleccion={sel}
       />
       {admin && (
         <SucursalesModal open={gestionarSucursales} onClose={() => setGestionarSucursales(false)} />
