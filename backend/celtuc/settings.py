@@ -125,6 +125,7 @@ INSTALLED_APPS = [
     'comunicados',
     'documentos',
     'auditoria',
+    'asistencia',
 ]
 
 MIDDLEWARE = [
@@ -238,6 +239,9 @@ REST_FRAMEWORK = {
         'anon': '30/min',
         'user': '120/min',
         'login': '10/min',
+        # Agentes de asistencia (maquina a maquina): sincronizan seguido y en
+        # rafagas al recuperar historico; por eso un limite propio mas alto.
+        'agente': '300/min',
     },
 }
 

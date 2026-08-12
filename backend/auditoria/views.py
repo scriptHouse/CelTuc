@@ -30,6 +30,7 @@ MODULOS = {
     'comunicados': 'Comunicados',
     'documentos': 'Documentos',
     'comun': 'Preferencias',
+    'asistencia': 'Asistencia',
 }
 
 LIMITE_MAXIMO = 200

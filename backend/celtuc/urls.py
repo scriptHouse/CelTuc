@@ -27,4 +27,5 @@ urlpatterns = [
     path('api/documentos/', include('documentos.urls')),
     path('api/preferencias/', include('comun.urls')),
     path('api/auditoria/', include('auditoria.urls')),
+    path('api/asistencia/', include('asistencia.urls')),
 ]

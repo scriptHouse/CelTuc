@@ -798,3 +798,192 @@ export interface PaginaAuditoria {
   /** Usernames que aparecen en el historial (para el filtro). Solo en la primera página. */
   usuarios?: string[]
 }
+
+// ===== Asistencia (solo superadministrador) =====
+
+/** Un reloj Hikvision instalado en una sucursal. */
+export interface RelojAsistencia {
+  id: number
+  sucursal: number
+  sucursal_nombre: string
+  nombre: string
+  activo: boolean
+  /** IP del reloj dentro de la LAN de la sucursal (la usa el agente). */
+  host: string
+  puerto: number
+  usar_https: boolean
+  usuario_isapi: string
+  poll_seconds: number
+  overlap_seconds: number
+  timeout_seconds: number
+  backfill_dias: number
+  zona_horaria: string
+  /** Identidad reportada por el propio reloj vía heartbeat. */
+  modelo: string
+  numero_serie: string
+  firmware: string
+  agentes_activos: number
+  creado: string
+}
+
+export type RelojAsistenciaInput = Omit<
+  RelojAsistencia,
+  'id' | 'sucursal_nombre' | 'modelo' | 'numero_serie' | 'firmware' | 'agentes_activos' | 'creado'
+>
+
+/** El servicio que corre en la notebook de la sucursal. */
+export interface AgenteAsistencia {
+  id: number
+  dispositivo: number
+  dispositivo_nombre: string
+  sucursal_nombre: string
+  nombre: string
+  activo: boolean
+  /** Primeros caracteres del token (el token completo se muestra una sola vez). */
+  token_prefijo: string
+  sync_seconds: number
+  batch_size: number
+  heartbeat_seconds: number
+  nivel_log: string
+  version: string
+  hostname: string
+  ultimo_heartbeat: string | null
+  iniciado_en: string | null
+  reloj_alcanzable: boolean | null
+  reloj_error: string
+  eventos_pendientes: number
+  eventos_error: number
+  ultima_sync_reloj: string | null
+  en_linea: boolean
+  creado: string
+}
+
+export interface AgenteAsistenciaInput {
+  dispositivo: number
+  nombre: string
+  activo?: boolean
+  sync_seconds?: number
+  batch_size?: number
+  heartbeat_seconds?: number
+  nivel_log?: string
+}
+
+/** Estados de asistencia que reporta el reloj (serie MinMoe). */
+export type TipoFichada =
+  | 'check_in'
+  | 'check_out'
+  | 'break_out'
+  | 'break_in'
+  | 'overtime_in'
+  | 'overtime_out'
+  | 'unknown'
+
+export type MetodoFichada = 'face' | 'card' | 'fingerprint' | 'password' | 'remote' | 'unknown'
+
+export interface FichadaAsistencia {
+  id: number
+  dispositivo: { id: number; nombre: string }
+  sucursal: { id: number; nombre: string }
+  /** Número del empleado tal como está cargado en el reloj. */
+  numero_reloj: string
+  nombre_reloj: string
+  empleado: { id: number; nombre: string } | null
+  estado_mapeo: 'mapeada' | 'sin_mapear'
+  ocurrida_en: string
+  tipo: TipoFichada
+  metodo: MetodoFichada
+  origen_id: string
+}
+
+export interface FichadaDetalle extends FichadaAsistencia {
+  recibida_en: string
+  agente: string | null
+  /** Payload ISAPI original, para diagnóstico. */
+  raw_payload: Record<string, unknown>
+}
+
+export interface PaginaFichadas {
+  total: number
+  resultados: FichadaAsistencia[]
+  /** Solo en la primera página. */
+  resumen?: { hoy: number; sin_mapear: number }
+  dispositivos?: { id: number; nombre: string; sucursal: string }[]
+  sucursales?: { id: number; nombre: string }[]
+}
+
+/** Estado en vivo de un agente para el panel. */
+export interface AgentePanelAsistencia {
+  id: number
+  nombre: string
+  en_linea: boolean
+  ultimo_heartbeat: string | null
+  iniciado_en: string | null
+  version: string
+  hostname: string
+  reloj_alcanzable: boolean | null
+  reloj_error: string
+  eventos_pendientes: number
+  eventos_error: number
+  ultima_sync_reloj: string | null
+}
+
+export interface RelojPanelAsistencia {
+  id: number
+  nombre: string
+  activo: boolean
+  modelo: string
+  numero_serie: string
+  firmware: string
+  host: string
+  sucursal: { id: number; nombre: string }
+  agentes: AgentePanelAsistencia[]
+  en_linea: boolean
+  reloj_en_linea: boolean | null
+  ultima_fichada: string | null
+  fichadas_hoy: number
+  sin_mapear: number
+}
+
+export interface PanelAsistencia {
+  generado_en: string
+  dispositivos: RelojPanelAsistencia[]
+  totales: {
+    fichadas_hoy: number
+    sin_mapear: number
+    agentes_en_linea: number
+    agentes_total: number
+    eventos_pendientes: number
+  }
+}
+
+/** Número del reloj → empleado del sistema. */
+export interface MapeoAsistencia {
+  id: number
+  /** null = vale para todos los relojes. */
+  dispositivo: number | null
+  dispositivo_nombre: string | null
+  numero_reloj: string
+  empleado: number
+  empleado_nombre: string
+  creado: string
+}
+
+export interface NumeroSinMapear {
+  dispositivo: { id: number; nombre: string }
+  numero_reloj: string
+  nombre_reloj: string
+  cantidad: number
+  ultima: string
+}
+
+export interface ResumenDiaAsistencia {
+  fecha: string
+  empleado: { id: number; nombre: string } | null
+  numero_reloj: string
+  nombre: string
+  sin_mapear: boolean
+  primera: string
+  ultima: string | null
+  fichadas: number
+  presencia_minutos: number
+}

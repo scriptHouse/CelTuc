@@ -1,0 +1,22 @@
+# Configuración de arranque (bootstrap) del agente de asistencia CelTuc.
+# La versión real de este archivo se DESCARGA desde CelTuc → Asistencia →
+# Configuración → Agentes (viene con el token ya cargado).
+#
+# Todo lo demás (intervalos, backfill, nivel de log, incluso la IP del reloj)
+# se administra desde la interfaz web y llega al agente en cada heartbeat.
+
+[agent]
+id = "salta-notebook-01"
+
+[backend]
+base_url = "https://celtuc.scripthouse.com.ar"
+# Token del agente. Alternativa más segura: guardarlo cifrado con
+#   hikvision-agent.exe secrets set
+# (si está en secrets.dat, este valor se ignora)
+token = "asist_PEGAR_TOKEN_ACA"
+
+[hikvision]
+host = "192.168.1.50"
+username = "admin"
+# La contraseña del reloj NUNCA va en este archivo:
+#   hikvision-agent.exe secrets set

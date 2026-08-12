@@ -1,0 +1,56 @@
+{
+  "_nota": "Fixture con la FORMA ESPERADA de una página AcsEvent (baseline ISAPI Access Control). NO es una captura real del DS-K1A340WX: reemplazarlo con `hikvision-agent diag --save-fixture tests/fixtures/hikvision_event_sample.json --anonymize` apenas se tenga acceso al reloj (spec §12).",
+  "AcsEvent": {
+    "searchID": "muestra-1",
+    "responseStatusStrg": "OK",
+    "numOfMatches": 4,
+    "totalMatches": 4,
+    "InfoList": [
+      {
+        "major": 5,
+        "minor": 75,
+        "time": "2026-08-10T08:01:22-03:00",
+        "cardNo": "",
+        "cardType": 1,
+        "name": "EMPLEADO",
+        "cardReaderNo": 1,
+        "doorNo": 1,
+        "employeeNoString": "145",
+        "serialNo": 118,
+        "userType": "normal",
+        "currentVerifyMode": "face",
+        "attendanceStatus": "checkIn",
+        "mask": "no"
+      },
+      {
+        "major": 5,
+        "minor": 75,
+        "time": "2026-08-10T17:03:41-03:00",
+        "name": "EMPLEADO",
+        "employeeNoString": "145",
+        "serialNo": 131,
+        "userType": "normal",
+        "currentVerifyMode": "face",
+        "attendanceStatus": "checkOut"
+      },
+      {
+        "major": 5,
+        "minor": 75,
+        "time": "2026-08-10T08:14:05-03:00",
+        "name": "EMPLEADO DOS",
+        "employeeNoString": "23",
+        "serialNo": 119,
+        "userType": "normal",
+        "currentVerifyMode": "card",
+        "attendanceStatus": "breakOut"
+      },
+      {
+        "major": 5,
+        "minor": 21,
+        "time": "2026-08-10T09:00:00-03:00",
+        "serialNo": 120,
+        "remark": "evento de puerta sin empleado: el parser debe ignorarlo"
+      }
+    ]
+  }
+}

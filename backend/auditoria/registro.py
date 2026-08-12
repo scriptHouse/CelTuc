@@ -24,7 +24,7 @@ CAMPOS_IGNORADOS = {
 }
 
 # Campos secretos: se registra QUE cambiaron, nunca su valor.
-CAMPOS_ENMASCARADOS = {'password', 'certificado', 'clave_privada'}
+CAMPOS_ENMASCARADOS = {'password', 'certificado', 'clave_privada', 'token_hash', 'token_prefijo'}
 
 MASCARA = '••••••••'
 
@@ -62,6 +62,11 @@ AUDITADOS = {
     'comunicados.Comunicado': {},
     'documentos.DocumentoGenerado': {},
     'comun.Preferencia': {},
+    # Asistencia: se audita la configuracion (relojes, agentes, asignaciones),
+    # NUNCA las fichadas (las escriben los agentes, sin usuario y en volumen).
+    'asistencia.Dispositivo': {},
+    'asistencia.Agente': {},
+    'asistencia.MapeoEmpleado': {},
 }
 
 

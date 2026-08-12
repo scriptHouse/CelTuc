@@ -1,0 +1,18 @@
+# Entornos y build
+.venv*/
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec
+*.egg-info/
+.pytest_cache/
+
+# Datos y secretos locales (NUNCA commitear)
+config.toml
+secrets.dat
+.env
+*.db
+*.db-wal
+*.db-shm
+logs/
