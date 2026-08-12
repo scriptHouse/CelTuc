@@ -14,6 +14,13 @@ import type { MayoristaData } from './mayoristaContent'
 import type { ExtensionData } from './extensionContent'
 import type { SenaData } from './senaContent'
 import type { CompraventaData } from './compraventaContent'
+import {
+  totalesEquipo,
+  totalesService,
+  type PresupuestoEquipoData,
+  type PresupuestoServiceData,
+} from './presupuestoComun'
+import { montoDe } from './montos'
 
 /** Los campos con los que se archiva e indexa un documento generado. */
 export interface ResumenDocumento {
@@ -35,37 +42,9 @@ function juntar(...partes: (string | undefined | null)[]): string {
     .join(' · ')
 }
 
-/**
- * Lee un importe escrito a mano y lo normaliza a `"1234.50"`.
- *
- * Los campos de plata son texto libre, así que llegan como `$ 1.500.000`,
- * `1500000`, `1.500,50` o incluso con una nota al lado. La regla: el último
- * separador cuenta como decimal solo si le siguen una o dos cifras; el resto
- * son separadores de miles. Si no hay un número legible, devuelve undefined y
- * el documento se archiva sin importe (nunca con uno inventado).
- */
-export function montoDe(texto: string | undefined | null): string | undefined {
-  if (!texto) return undefined
-  const limpio = String(texto).replace(/[^\d.,]/g, '')
-  if (!/\d/.test(limpio)) return undefined
-
-  const corte = Math.max(limpio.lastIndexOf(','), limpio.lastIndexOf('.'))
-  let parteEntera = limpio
-  let decimales = ''
-  if (corte >= 0) {
-    const cola = limpio.slice(corte + 1)
-    if (cola.length >= 1 && cola.length <= 2 && /^\d+$/.test(cola)) {
-      parteEntera = limpio.slice(0, corte)
-      decimales = cola
-    }
-  }
-
-  const digitos = parteEntera.replace(/\D/g, '')
-  // El backend guarda hasta 12 enteros + 2 decimales: más que eso no es un precio.
-  if (!digitos || digitos.length > 12) return undefined
-  const valor = Number(`${digitos}.${decimales || '0'}`)
-  return Number.isFinite(valor) ? valor.toFixed(2) : undefined
-}
+// El lector de importes vive en `montos.ts` (lo comparten el historial y los
+// presupuestos); se reexporta acá porque este módulo era su lugar original.
+export { montoDe }
 
 /** Une las partes no vacías con un espacio: una frase corta, no una lista. */
 function frase(...partes: (string | undefined | null)[]): string {
@@ -156,6 +135,36 @@ export function resumenCompraventa(d: CompraventaData): ResumenDocumento {
       d.bateria.trim() ? `Batería ${d.bateria.trim()}%` : '',
     ),
     total: montoDe(d.precioNum),
+  }
+}
+
+/**
+ * Presupuesto de equipo. El importe que se archiva es el TOTAL EN PESOS (lo que
+ * el cliente termina pagando), no el precio de lista en dólares: es el número
+ * con el que después se busca el presupuesto en el historial.
+ */
+export function resumenPresupuestoEquipo(d: PresupuestoEquipoData): ResumenDocumento {
+  const { totalUsd, totalPesos } = totalesEquipo(d)
+  return {
+    referencia: d.numero,
+    cliente: d.cliente,
+    detalle: juntar(
+      frase(d.equipo, d.condicion ? `(${d.condicion})` : ''),
+      d.entrega.trim() ? `entrega ${d.entrega.trim()}` : '',
+      totalUsd ? `US$ ${totalUsd}` : '',
+    ),
+    total: totalPesos ? totalPesos.toFixed(2) : undefined,
+  }
+}
+
+/** Presupuesto de service: se archiva por el precio de LISTA. */
+export function resumenPresupuestoService(d: PresupuestoServiceData): ResumenDocumento {
+  const { lista } = totalesService(d)
+  return {
+    referencia: d.numero,
+    cliente: d.cliente,
+    detalle: juntar(d.equipo, d.reparacion),
+    total: lista ? lista.toFixed(2) : montoDe(d.precioContado),
   }
 }
 

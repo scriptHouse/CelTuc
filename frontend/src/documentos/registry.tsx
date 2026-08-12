@@ -15,11 +15,24 @@ import { CompraventaPaper } from './CompraventaPaper'
 import { CV_H, CV_W, compraventaVacia, type CompraventaData } from './compraventaContent'
 import { GarantiaAccPaper } from './GarantiaAccPaper'
 import { GACC_H, GACC_W, gAccVacia, type GAccData } from './garantiaAccContent'
+import { PresupuestoEquipoPaper, PresupuestoServicePaper } from './PresupuestoPaper'
+import {
+  EQUIPO_H,
+  EQUIPO_W,
+  SERVICE_H,
+  SERVICE_W,
+  presupuestoEquipoVacio,
+  presupuestoServiceVacio,
+  type PresupuestoEquipoData,
+  type PresupuestoServiceData,
+} from './presupuestoComun'
 import {
   resumenCompra,
   resumenCompraventa,
   resumenExtension,
   resumenMayorista,
+  resumenPresupuestoEquipo,
+  resumenPresupuestoService,
   resumenRecepcion,
   resumenReparacion,
   resumenSena,
@@ -154,6 +167,38 @@ export const garantiaAccModule: DocModule<GAccData> = {
   loadPos80: async () => (await import('./GarantiaAccPos80Pdf')).GarantiaAccPos80Pdf,
 }
 
+export const presupuestoEquipoModule: DocModule<PresupuestoEquipoData> = {
+  id: 'presupuesto-equipo',
+  nombre: 'Presupuesto de equipo',
+  descripcion: 'Cotización de un equipo en dólares, con entrega en parte de pago y cuotas.',
+  naturalW: EQUIPO_W,
+  naturalH: EQUIPO_H,
+  crearVacio: presupuestoEquipoVacio,
+  nombreArchivo: (d) =>
+    d.numero.trim() ? `presupuesto-equipo-${d.numero.trim()}` : 'presupuesto-equipo',
+  resumen: resumenPresupuestoEquipo,
+  camposCliente: { nombre: 'cliente', telefono: 'telefono' },
+  Paper: PresupuestoEquipoPaper,
+  loadPdf: async () => (await import('./PresupuestoPdf')).PresupuestoEquipoPdf,
+  loadXlsx: async () => (await import('./presupuestoXlsx')).construirPresupuestoEquipoXlsx,
+}
+
+export const presupuestoServiceModule: DocModule<PresupuestoServiceData> = {
+  id: 'presupuesto-service',
+  nombre: 'Presupuesto de service',
+  descripcion: 'Cotización de una reparación, con precio de lista, contado y cuotas.',
+  naturalW: SERVICE_W,
+  naturalH: SERVICE_H,
+  crearVacio: presupuestoServiceVacio,
+  nombreArchivo: (d) =>
+    d.numero.trim() ? `presupuesto-service-${d.numero.trim()}` : 'presupuesto-service',
+  resumen: resumenPresupuestoService,
+  camposCliente: { nombre: 'cliente', telefono: 'telefono' },
+  Paper: PresupuestoServicePaper,
+  loadPdf: async () => (await import('./PresupuestoPdf')).PresupuestoServicePdf,
+  loadXlsx: async () => (await import('./presupuestoXlsx')).construirPresupuestoServiceXlsx,
+}
+
 /** Documentos operativos (en orden de aparición en el selector).
  *  `any` permite la colección heterogénea (cada módulo tiene su propio tipo de datos);
  *  la página los usa de forma genérica. */
@@ -162,6 +207,8 @@ export const DOC_MODULES: DocModule<any>[] = [
   // Recepción queda oculto a pedido: el módulo y sus archivos siguen intactos
   // (arriba está `recepcionModule`); para volver a mostrarlo, descomentar esta línea.
   // recepcionModule,
+  presupuestoEquipoModule,
+  presupuestoServiceModule,
   reparacionModule,
   compraModule,
   mayoristaModule,

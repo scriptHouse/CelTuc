@@ -93,6 +93,7 @@ export function put(
 export const ALIGN = {
   left: { horizontal: 'left' as const, vertical: 'middle' as const },
   center: { horizontal: 'center' as const, vertical: 'middle' as const },
+  right: { horizontal: 'right' as const, vertical: 'middle' as const },
   leftTop: { horizontal: 'left' as const, vertical: 'top' as const, wrapText: true },
   justify: { horizontal: 'justify' as const, vertical: 'top' as const, wrapText: true },
 }
