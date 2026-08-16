@@ -459,6 +459,33 @@ h6 {
   cursor: default;
 }
 
+/* Tacho para sacar una fila de la tabla de cuotas del presupuesto. Discreto
+   mientras no se lo necesita; se enciende en rojo al apuntarlo. Solo existe en
+   el papel rellenable: el PDF y el Excel se arman aparte. */
+.ct-quitar-cuota {
+  opacity: 0.35;
+  transition:
+    opacity 0.12s ease,
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+.ct-quitar-cuota:hover,
+.ct-quitar-cuota:focus-visible {
+  opacity: 1;
+  background-color: rgba(220, 38, 38, 0.1);
+  color: #dc2626;
+}
+
+.ct-restaurar-cuotas {
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease;
+}
+.ct-restaurar-cuotas:hover {
+  background-color: rgba(10, 10, 11, 0.05);
+  border-color: rgba(10, 10, 11, 0.35);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-in,
   .ct-rise,

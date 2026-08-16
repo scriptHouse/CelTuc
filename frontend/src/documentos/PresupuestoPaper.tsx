@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { Trash2 } from 'lucide-react'
 import type { CategoriaTarjeta, Tarjeta } from '@/types'
 import { listarTarjetas } from '@/services/simulador'
 import { obtenerConfiguracion } from '@/services/preciosService'
@@ -24,6 +25,7 @@ import {
   SIN_PLANES,
   calcularCuotas,
   contadoDesdeLista,
+  sinOcultos,
   dolares,
   pesos,
   totalesEquipo,
@@ -192,8 +194,25 @@ function Desplegable({
   )
 }
 
-/** Tabla de financiación: una fila por plan del simulador. */
-function TablaCuotas({ base, planes }: { base: number; planes: PlanPresupuesto[] }) {
+/**
+ * Tabla de financiación: una fila por plan del simulador.
+ *
+ * En edición, cada fila trae un tacho para sacarla del papel (`onQuitar`). El
+ * botón vive SOLO acá: el PDF y el Excel se arman con `datos.planes`, así que
+ * lo que se quita no sale impreso.
+ */
+function TablaCuotas({
+  base,
+  planes,
+  onQuitar,
+  vacioTexto = SIN_PLANES,
+}: {
+  base: number
+  planes: PlanPresupuesto[]
+  onQuitar?: (indice: number) => void
+  /** Qué decir cuando no hay ninguna fila. */
+  vacioTexto?: string
+}) {
   const filas = calcularCuotas(base, planes)
   const col = { cuota: 250, total: 1, valor: 1 }
   return (
@@ -227,7 +246,7 @@ function TablaCuotas({ base, planes }: { base: number; planes: PlanPresupuesto[]
       </div>
       {filas.length === 0 ? (
         <div style={{ height: 42, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: pt(9) }}>
-          {SIN_PLANES}
+          {vacioTexto}
         </div>
       ) : (
         filas.map((fila, i) => (
@@ -238,6 +257,7 @@ function TablaCuotas({ base, planes }: { base: number; planes: PlanPresupuesto[]
               height: FILA_H,
               fontSize: pt(10),
               borderTop: i === 0 ? undefined : `1px solid ${INK}`,
+              position: 'relative',
             }}
           >
             <div style={{ width: col.cuota, display: 'flex', alignItems: 'center', padding: '0 6px' }}>
@@ -268,6 +288,34 @@ function TablaCuotas({ base, planes }: { base: number; planes: PlanPresupuesto[]
             >
               {pesos(fila.valorCuota)}
             </div>
+            {onQuitar && (
+              <button
+                type="button"
+                onClick={() => onQuitar(i)}
+                title={`Quitar «${fila.etiqueta}» de este presupuesto`}
+                aria-label={`Quitar la opción ${fila.etiqueta}`}
+                className="ct-quitar-cuota"
+                style={{
+                  position: 'absolute',
+                  right: 4,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  width: 18,
+                  height: 18,
+                  display: 'grid',
+                  placeItems: 'center',
+                  border: 'none',
+                  background: 'transparent',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  color: '#9A9AA2',
+                  padding: 0,
+                  lineHeight: 0,
+                }}
+              >
+                <Trash2 style={{ width: 12, height: 12 }} aria-hidden />
+              </button>
+            )}
           </div>
         ))
       )}
@@ -275,13 +323,22 @@ function TablaCuotas({ base, planes }: { base: number; planes: PlanPresupuesto[]
   )
 }
 
-/** Bloque de financiación completo: título, selector de tarjeta y tabla. */
+/**
+ * Bloque de financiación completo: título, selector de tarjeta y tabla.
+ *
+ * Las filas son SIEMPRE las de la tarjeta elegida en el simulador; cambiar de
+ * tarjeta recarga sus planes. En edición se puede sacar del papel las que no se
+ * le muestran al cliente, y el aviso de abajo deja volver a traerlas.
+ */
 function Financiacion({
   base,
   planes,
   tarjeta,
   tarjetas,
   onTarjeta,
+  onQuitarPlan,
+  onRestaurarPlanes,
+  faltan,
   readOnly,
 }: {
   base: number
@@ -289,6 +346,10 @@ function Financiacion({
   tarjeta: string
   tarjetas: Tarjeta[]
   onTarjeta: (nombre: string) => void
+  onQuitarPlan?: (indice: number) => void
+  onRestaurarPlanes?: () => void
+  /** Cuántos planes de la tarjeta no están en el papel. */
+  faltan?: number
   readOnly?: boolean
 }) {
   return (
@@ -307,7 +368,48 @@ function Financiacion({
           />
         </CajaCampo>
       </div>
-      <TablaCuotas base={base} planes={planes} />
+      <TablaCuotas
+        base={base}
+        planes={planes}
+        onQuitar={readOnly ? undefined : onQuitarPlan}
+        // Con tarjeta elegida y sin filas, el problema no es la tarjeta: se
+        // sacaron todas (el aviso de abajo ofrece traerlas de vuelta).
+        vacioTexto={tarjeta ? 'Sin opciones de financiación en este presupuesto.' : SIN_PLANES}
+      />
+      {!readOnly && !!faltan && onRestaurarPlanes && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            paddingTop: 3,
+            fontSize: pt(8),
+            color: '#6B6B74',
+          }}
+        >
+          <span>
+            {faltan === 1
+              ? '1 opción de esta tarjeta no se muestra en el presupuesto.'
+              : `${faltan} opciones de esta tarjeta no se muestran en el presupuesto.`}
+          </span>
+          <button
+            type="button"
+            onClick={onRestaurarPlanes}
+            className="ct-restaurar-cuotas"
+            style={{
+              border: '1px solid #C9C9D0',
+              background: 'transparent',
+              borderRadius: 6,
+              padding: '1px 7px',
+              fontSize: pt(8),
+              cursor: 'pointer',
+              color: 'inherit',
+            }}
+          >
+            Restaurar del simulador
+          </button>
+        </div>
+      )}
     </>
   )
 }
@@ -337,6 +439,144 @@ function planesDe(tarjeta: Tarjeta | undefined): PlanPresupuesto[] {
     .filter((p) => p.activo)
     .sort((a, b) => a.orden - b.orden || a.cuotas - b.cuotas)
     .map((p) => ({ etiqueta: p.etiqueta, cuotas: p.cuotas, interes: p.interes }))
+}
+
+/* ---------- Filas que no se quieren imprimir ----------
+ *
+ * La tabla del presupuesto sale del simulador, pero no todo lo que se simula se
+ * le muestra al cliente: hay planes internos (Z, Prepaga, 3 Sucredito…) que
+ * conviene dejar afuera del papel. Cada uno se quita con el tacho de su fila y
+ * la decisión se RECUERDA por tarjeta, así no hay que repetirla en cada
+ * presupuesto. El simulador no se toca: esto vive solo en este navegador y se
+ * revierte con «Restaurar del simulador».
+ */
+
+const CLAVE_OCULTOS = 'celtuc:presupuesto:planes-ocultos:v1'
+
+type PlanesOcultos = Record<string, string[]>
+
+/**
+ * La clave con la que se recuerda. Lleva la CATEGORÍA porque el mismo nombre de
+ * tarjeta existe en las dos («NARANJA, VISA y MASTERCARD BANCARIZADA» está en
+ * equipos y en accesorios, con planes distintos): sin esto, ocultar una fila en
+ * el presupuesto de equipo se la ocultaría también al de service.
+ */
+const claveTarjeta = (categoria: CategoriaTarjeta, tarjeta: string) => `${categoria}:${tarjeta}`
+
+/**
+ * Con qué arranca una tarjeta que todavía nadie configuró: las opciones que no
+ * se le muestran al cliente en el papel. «1 pago» no es financiación (ya es el
+ * total) y Z / Prepaga / 3 Sucredito son planes internos del mostrador.
+ *
+ * Es sólo el punto de partida, no una regla: cualquiera se recupera con
+ * «Restaurar del simulador», y a partir de ahí manda lo que se haya elegido.
+ * Las etiquetas que una tarjeta no tenga se ignoran solas.
+ */
+const OCULTOS_INICIALES = ['1 pago', 'Z', 'Prepaga', '3 Sucredito']
+
+function leerOcultos(): PlanesOcultos {
+  try {
+    const crudo = localStorage.getItem(CLAVE_OCULTOS)
+    const datos = crudo ? (JSON.parse(crudo) as PlanesOcultos) : {}
+    return datos && typeof datos === 'object' ? datos : {}
+  } catch {
+    return {}
+  }
+}
+
+function guardarOcultos(datos: PlanesOcultos) {
+  try {
+    localStorage.setItem(CLAVE_OCULTOS, JSON.stringify(datos))
+  } catch {
+    /* sin localStorage la fila se quita igual: sólo no se recuerda */
+  }
+}
+
+/**
+ * Las etiquetas que esa tarjeta tiene ocultas hoy. Una tarjeta que nunca se
+ * tocó arranca con `OCULTOS_INICIALES`; una que se restauró queda guardada con
+ * la lista VACÍA, que es distinto de «sin configurar» (si no, restaurar y
+ * volver a entrar traería de nuevo los iniciales).
+ */
+function ocultosDe(clave: string): string[] {
+  const guardado = leerOcultos()[clave]
+  return guardado ?? OCULTOS_INICIALES
+}
+
+function recordarOculto(clave: string, etiqueta: string) {
+  const datos = leerOcultos()
+  const actuales = datos[clave] ?? []
+  if (!actuales.includes(etiqueta)) datos[clave] = [...actuales, etiqueta]
+  guardarOcultos(datos)
+}
+
+/** «Esta tarjeta va completa»: lista vacía, no ausencia de configuración. */
+function olvidarOcultos(clave: string) {
+  const datos = leerOcultos()
+  datos[clave] = []
+  guardarOcultos(datos)
+}
+
+/** Los planes de la tarjeta, sin los que se hayan quitado antes. */
+function planesVisiblesDe(
+  tarjeta: Tarjeta | undefined,
+  categoria: CategoriaTarjeta,
+): PlanPresupuesto[] {
+  const todos = planesDe(tarjeta)
+  return tarjeta ? sinOcultos(todos, ocultosDe(claveTarjeta(categoria, tarjeta.nombre))) : todos
+}
+
+/**
+ * Todo lo que el papel necesita para manejar la financiación: la lista de
+ * tarjetas, elegir una (que recarga sus planes), quitar una fila y volver a
+ * traer lo que dice el simulador.
+ */
+function useFinanciacion(
+  categoria: CategoriaTarjeta,
+  datos: { tarjeta: string; planes: PlanPresupuesto[] },
+  onChange: (patch: { tarjeta?: string; planes?: PlanPresupuesto[] }) => void,
+) {
+  const tarjetas = useTarjetas(categoria)
+  const eligioTarjeta = useRef(false)
+
+  // La primera tarjeta se elige sola SOLO hasta que alguien toque el selector:
+  // después manda la persona, incluso si deja el presupuesto sin financiación.
+  useEffect(() => {
+    if (eligioTarjeta.current || datos.tarjeta || !tarjetas.length) return
+    onChange({
+      tarjeta: tarjetas[0].nombre,
+      planes: planesVisiblesDe(tarjetas[0], categoria),
+    })
+  }, [tarjetas, datos.tarjeta, onChange, categoria])
+
+  const elegirTarjeta = (nombre: string) => {
+    eligioTarjeta.current = true
+    onChange({
+      tarjeta: nombre,
+      planes: planesVisiblesDe(tarjetas.find((t) => t.nombre === nombre), categoria),
+    })
+  }
+
+  /** Saca una fila del papel (y se acuerda para los próximos presupuestos). */
+  const quitarPlan = (indice: number) => {
+    const plan = datos.planes[indice]
+    if (!plan) return
+    if (datos.tarjeta) recordarOculto(claveTarjeta(categoria, datos.tarjeta), plan.etiqueta)
+    onChange({ planes: datos.planes.filter((_, i) => i !== indice) })
+  }
+
+  /** Vuelve a poner TODOS los planes vigentes de la tarjeta elegida. */
+  const restaurarPlanes = () => {
+    if (datos.tarjeta) olvidarOcultos(claveTarjeta(categoria, datos.tarjeta))
+    onChange({ planes: planesDe(tarjetas.find((t) => t.nombre === datos.tarjeta)) })
+  }
+
+  // Cuántas filas de la tarjeta no están en el papel (quitadas a mano o porque
+  // el simulador sumó planes después de armar este presupuesto).
+  const enSimulador = planesDe(tarjetas.find((t) => t.nombre === datos.tarjeta)).length
+  const faltan = Math.max(0, enSimulador - datos.planes.length)
+
+  return { tarjetas, elegirTarjeta, quitarPlan, restaurarPlanes, faltan }
 }
 
 /**
@@ -380,28 +620,21 @@ export function PresupuestoEquipoPaper({
   direccion,
 }: PaperProps<PresupuestoEquipoData>) {
   const set = (k: keyof PresupuestoEquipoData) => (v: string) => onChange({ [k]: v })
-  const tarjetas = useTarjetas('equipos')
   const config = useConfiguracion()
-  const eligioTarjeta = useRef(false)
   const { totalUsd, totalPesos } = totalesEquipo(datos)
+  // Las opciones de financiación salen del simulador (categoría «equipos») y se
+  // recargan al cambiar de tarjeta; el tacho de cada fila la saca del papel.
+  const { tarjetas, elegirTarjeta, quitarPlan, restaurarPlanes, faltan } = useFinanciacion(
+    'equipos',
+    datos,
+    onChange,
+  )
 
   // El dólar del negocio se completa siempre que el campo esté vacío: sin
   // cotización el total en pesos daría $ 0, que nunca es lo que se quiere.
   useEffect(() => {
     if (!datos.dolar && config?.dolar) onChange({ dolar: String(config.dolar) })
   }, [config, datos.dolar, onChange])
-
-  // La primera tarjeta se elige sola SOLO hasta que alguien toque el selector:
-  // después manda la persona, incluso si deja el presupuesto sin financiación.
-  useEffect(() => {
-    if (eligioTarjeta.current || datos.tarjeta || !tarjetas.length) return
-    onChange({ tarjeta: tarjetas[0].nombre, planes: planesDe(tarjetas[0]) })
-  }, [tarjetas, datos.tarjeta, onChange])
-
-  const elegirTarjeta = (nombre: string) => {
-    eligioTarjeta.current = true
-    onChange({ tarjeta: nombre, planes: planesDe(tarjetas.find((t) => t.nombre === nombre)) })
-  }
 
   return (
     <Paper width={EQUIPO_W} height={EQUIPO_H}>
@@ -539,6 +772,9 @@ export function PresupuestoEquipoPaper({
           tarjeta={datos.tarjeta}
           tarjetas={tarjetas}
           onTarjeta={elegirTarjeta}
+          onQuitarPlan={quitarPlan}
+          onRestaurarPlanes={restaurarPlanes}
+          faltan={faltan}
           readOnly={readOnly}
         />
 
@@ -618,23 +854,14 @@ export function PresupuestoServicePaper({
   direccion,
 }: PaperProps<PresupuestoServiceData>) {
   const set = (k: keyof PresupuestoServiceData) => (v: string) => onChange({ [k]: v })
-  // El service es "accesorios" en el simulador: esa tabla cubre accesorios y taller.
-  const tarjetas = useTarjetas('accesorios')
   const config = useConfiguracion()
-  const eligioTarjeta = useRef(false)
   const { lista, contado } = totalesService(datos)
-
-  // Igual que en el de equipo: se sugiere la primera tarjeta hasta que alguien
-  // toque el selector; a partir de ahí, la elección es de la persona.
-  useEffect(() => {
-    if (eligioTarjeta.current || datos.tarjeta || !tarjetas.length) return
-    onChange({ tarjeta: tarjetas[0].nombre, planes: planesDe(tarjetas[0]) })
-  }, [tarjetas, datos.tarjeta, onChange])
-
-  const elegirTarjeta = (nombre: string) => {
-    eligioTarjeta.current = true
-    onChange({ tarjeta: nombre, planes: planesDe(tarjetas.find((t) => t.nombre === nombre)) })
-  }
+  // El service es "accesorios" en el simulador: esa tabla cubre accesorios y taller.
+  const { tarjetas, elegirTarjeta, quitarPlan, restaurarPlanes, faltan } = useFinanciacion(
+    'accesorios',
+    datos,
+    onChange,
+  )
 
   /** Sugerencia de contado con el descuento cash del negocio (se puede pisar). */
   const sugerido =
@@ -756,6 +983,9 @@ export function PresupuestoServicePaper({
           tarjeta={datos.tarjeta}
           tarjetas={tarjetas}
           onTarjeta={elegirTarjeta}
+          onQuitarPlan={quitarPlan}
+          onRestaurarPlanes={restaurarPlanes}
+          faltan={faltan}
           readOnly={readOnly}
         />
 

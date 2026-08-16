@@ -28,6 +28,24 @@ export interface PlanPresupuesto {
   interes: number
 }
 
+/**
+ * Los planes que van al papel: los de la tarjeta menos los que se hayan sacado
+ * a mano (por etiqueta).
+ *
+ * Si el filtro dejaría la tabla VACÍA —porque se ocultaron todos, o porque el
+ * simulador cambió y ninguna etiqueta coincide— devuelve la lista completa: un
+ * presupuesto sin financiación no le sirve a nadie, y es más fácil volver a
+ * sacar una fila que descubrir por qué no hay ninguna.
+ */
+export function sinOcultos(
+  planes: PlanPresupuesto[],
+  ocultas: string[] | undefined,
+): PlanPresupuesto[] {
+  if (!ocultas?.length) return planes
+  const visibles = planes.filter((plan) => !ocultas.includes(plan.etiqueta))
+  return visibles.length ? visibles : planes
+}
+
 /** Una fila de la tabla de financiación, ya resuelta en pesos. */
 export interface CuotaCalculada extends PlanPresupuesto {
   /** Lo que termina pagando con esa tarjeta y ese plan. */
