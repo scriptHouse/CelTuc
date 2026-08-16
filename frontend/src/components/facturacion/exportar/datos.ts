@@ -12,6 +12,7 @@
 import type {
   ComprobanteResumen,
   CorteFacturacion,
+  CuentaFacturacion,
   MedioResumen,
   ResumenFacturacion,
 } from '@/services/facturacion'
@@ -93,6 +94,8 @@ export interface DatasetFacturacion {
   filasConDatos: FilaFacturacion[]
   totales: CorteFacturacion
   comprobantes: ComprobanteResumen[]
+  /** Lo facturado por cada cuenta (CUIT), abierto por medio de cobro. */
+  porCuenta: CuentaFacturacion[]
   meta: MetaExport
   /**
    * True si las columnas de medios elegidas cubren TODA la plata del mes sin
@@ -338,6 +341,7 @@ export function construirDataset(
     filasConDatos,
     totales: resumen.totales,
     comprobantes: resumen.comprobantes,
+    porCuenta: resumen.porCuenta,
     totalCubierto,
     avisos,
     logo: config.conLogo ? extras.logo : undefined,

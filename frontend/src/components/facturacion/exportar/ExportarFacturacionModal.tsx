@@ -1043,8 +1043,14 @@ function SeccionExcel({
       <Bloque titulo="Hojas del libro">
         <div className="space-y-1.5">
           <Casilla
+            etiqueta="Por cuenta (CUIT)"
+            ayuda="Una fila por cuenta con lo que entró por efectivo, transferencia, financiera y tarjeta."
+            valor={op.hojaCuentas}
+            onChange={(v) => onXlsx({ hojaCuentas: v })}
+          />
+          <Casilla
             etiqueta="Comprobantes"
-            ayuda="Una fila por factura: número, cliente, medio, total, estado y CAE."
+            ayuda="Una fila por factura: número, CUIT, cliente, medio, total, estado y CAE."
             valor={op.hojaComprobantes}
             onChange={(v) => onXlsx({ hojaComprobantes: v })}
           />
@@ -1243,11 +1249,51 @@ function VistaPrevia({ dataset, nombre }: { dataset: DatasetFacturacion; nombre:
           </p>
         )}
         <p>
-          Hojas: Facturación{config.xlsx.hojaComprobantes ? ' · Comprobantes' : ''}
+          Hojas: Facturación
+          {config.xlsx.hojaCuentas && dataset.porCuenta.length ? ' · Por cuenta' : ''}
+          {config.xlsx.hojaComprobantes ? ' · Comprobantes' : ''}
           {config.xlsx.hojaComoSeGenero ? ' · Cómo se generó' : ''}
         </p>
         <p className="truncate">{nombre}</p>
       </div>
+
+      {/* Cada cuenta con lo suyo: es la hoja «Por cuenta» del archivo. */}
+      {config.xlsx.hojaCuentas && dataset.porCuenta.length > 0 && (
+        <div className="rounded-xl border border-line bg-surface p-3">
+          <p className="mb-2 text-[0.6rem] font-semibold uppercase tracking-[0.08em] text-ink-400">
+            Por cuenta (CUIT)
+          </p>
+          <ul className="space-y-2">
+            {dataset.porCuenta.map((cuenta) => {
+              const medios = (Object.keys(MEDIO_LABEL) as Array<keyof typeof MEDIO_LABEL>)
+                .filter((medio) => (cuenta.porMedio[medio] ?? 0) > 0)
+              return (
+                <li key={cuenta.emisor} className="border-b border-line pb-2 last:border-0 last:pb-0">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="min-w-0 truncate text-[0.7rem] font-medium text-ink-800">
+                      {cuenta.nombre}
+                    </span>
+                    <span className="tnum shrink-0 text-[0.7rem] font-semibold text-ink-900">
+                      {money0(cuenta.total)}
+                    </span>
+                  </div>
+                  <p className="tnum text-[0.6rem] text-ink-400">
+                    CUIT {cuenta.cuit} · {num(cuenta.cantidad)}{' '}
+                    {cuenta.cantidad === 1 ? 'factura' : 'facturas'}
+                  </p>
+                  <p className="mt-0.5 text-[0.6rem] leading-snug text-ink-500">
+                    {medios.length
+                      ? medios
+                          .map((medio) => `${MEDIO_LABEL[medio]} ${money0(cuenta.porMedio[medio] ?? 0)}`)
+                          .join(' · ')
+                      : 'Sin medios informados'}
+                  </p>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
 
       {/* Reparto del mes por medio: el resumen que se lleva el archivo. */}
       <div className="rounded-xl border border-line bg-surface p-3">

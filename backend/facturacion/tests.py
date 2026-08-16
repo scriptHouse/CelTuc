@@ -1147,6 +1147,67 @@ class ResumenMensualTests(TestCase):
         self.assertEqual(r['dias'][0]['por_medio']['tarjeta'], 0.0)
         self.assertEqual(r['comprobantes'][0]['medio_origen'], 'comprobante')
 
+    def test_por_cuenta_abre_los_medios_de_cada_cuit(self):
+        """Cada CUIT con su propio desglose por medio: es lo que se concilia."""
+        d1 = datetime.date(2026, 8, 5)
+        d2 = datetime.date(2026, 8, 6)
+        self._comprobante(self.ri, 'B', 1, d1, 1000, medio_pago='efectivo')
+        self._comprobante(self.ri, 'A', 2, d2, 3000, medio_pago='transferencia',
+                          estado_cobro='pagada')
+        self._comprobante(self.mono, 'C', 1, d1, 500, medio_pago='transf_financiera')
+        self._comprobante(self.mono, 'C', 2, d2, 250, medio_pago='tarjeta')
+        self._comprobante(self.mono, 'C', 3, d2, 100)  # sin medio informado
+
+        r = self.resumen_mensual(2026, 8)
+        cuentas = {c['cuit']: c for c in r['por_cuenta']}
+        self.assertEqual(len(cuentas), 2)
+
+        # Ordenadas de la que mas facturo a la que menos.
+        self.assertEqual([c['nombre'] for c in r['por_cuenta']], ['RI test', 'Mono test'])
+
+        ri = cuentas['30111111112']
+        self.assertEqual(ri['nombre'], 'RI test')
+        self.assertEqual(ri['condicion'], 'responsable_inscripto')
+        self.assertEqual(ri['cantidad'], 2)
+        self.assertEqual(ri['total'], 4000.0)
+        self.assertEqual(ri['por_medio']['efectivo'], 1000.0)
+        self.assertEqual(ri['por_medio']['transferencia'], 3000.0)
+        self.assertEqual(ri['por_medio']['tarjeta'], 0.0)
+        self.assertEqual(ri['cobrado'], 3000.0)
+        self.assertEqual(ri['pendiente'], 1000.0)
+        self.assertEqual(ri['ri'], 4000.0)
+        self.assertEqual(ri['mono'], 0.0)
+
+        mono = cuentas['20111111112']
+        self.assertEqual(mono['cantidad'], 3)
+        self.assertEqual(mono['total'], 850.0)
+        self.assertEqual(mono['por_medio']['transf_financiera'], 500.0)
+        self.assertEqual(mono['por_medio']['tarjeta'], 250.0)
+        self.assertEqual(mono['por_medio']['sin_medio'], 100.0)
+        self.assertEqual(mono['mono'], 850.0)
+
+        # La suma de las cuentas es exactamente el total del mes: ninguna plata
+        # se queda afuera ni se cuenta dos veces.
+        self.assertEqual(
+            round(sum(c['total'] for c in r['por_cuenta']), 2), r['totales']['total'],
+        )
+        for medio in r['medios']:
+            self.assertEqual(
+                round(sum(c['por_medio'][medio] for c in r['por_cuenta']), 2),
+                round(r['totales']['por_medio'][medio], 2),
+                medio,
+            )
+
+    def test_por_cuenta_vacio_sin_facturacion(self):
+        r = self.resumen_mensual(2026, 9)
+        self.assertEqual(r['por_cuenta'], [])
+
+    def test_el_detalle_trae_el_cuit_de_la_cuenta(self):
+        self._comprobante(self.mono, 'C', 1, datetime.date(2026, 8, 4), 700,
+                          medio_pago='efectivo')
+        r = self.resumen_mensual(2026, 8)
+        self.assertEqual(r['comprobantes'][0]['emisor_cuit'], '20111111112')
+
     def test_filtra_por_cuentas_y_ocultos(self):
         d = datetime.date(2026, 8, 12)
         self._comprobante(self.ri, 'B', 1, d, 100, medio_pago='efectivo')

@@ -10,7 +10,8 @@
  *  · ÍNDICE con la fórmula GANANCIA / PERDIDA contra la meta diaria, pintado
  *    con formato condicional nativo (verde / rojo), igual que el original.
  *  · Columna ESTADO en blanco a propósito: es para anotar a mano.
- *  · Hojas «Comprobantes» y «Cómo se generó», opcionales.
+ *  · Hojas opcionales: «Por cuenta» (una fila por CUIT con lo que entró por
+ *    cada medio), «Comprobantes» y «Cómo se generó».
  *
  * Este archivo NO importa nada de la app (sólo ExcelJS y el dataset): se puede
  * ejecutar y validar fuera del navegador.
@@ -104,6 +105,7 @@ export async function construirXlsx(dataset: DatasetFacturacion): Promise<Blob> 
   wb.description = [meta.subtitulo, meta.cuentasTexto].filter(Boolean).join(' · ')
 
   hojaPlanilla(wb, dataset)
+  if (config.xlsx.hojaCuentas && dataset.porCuenta.length) hojaCuentas(wb, dataset)
   if (config.xlsx.hojaComprobantes && dataset.comprobantes.length) hojaComprobantes(wb, dataset)
   if (config.xlsx.hojaComoSeGenero) hojaComoSeGenero(wb, dataset)
 
@@ -373,6 +375,149 @@ function sumaColumna(columna: ColumnaResuelta, dataset: DatasetFacturacion): num
   }, 0)
 }
 
+/* ===================== Hoja «Por cuenta» ===================== */
+
+/**
+ * Una fila por cuenta (CUIT) con lo que entró por cada medio de cobro.
+ *
+ * Es el corte de conciliación: cada CUIT rinde por separado, así que interesa
+ * ver cuánto de lo suyo fue efectivo, transferencia, financiera o tarjeta. Los
+ * totales de la última fila cierran con el TOTAL del mes de la planilla.
+ */
+function hojaCuentas(wb: ExcelJS.Workbook, dataset: DatasetFacturacion) {
+  const { porCuenta, meta } = dataset
+  const ws = wb.addWorksheet('Por cuenta', {
+    views: [{ showGridLines: false, state: 'frozen', ySplit: 2 }],
+    pageSetup: {
+      paperSize: 9,
+      orientation: 'landscape',
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+    },
+  })
+
+  const titulos: Array<{ label: string; ancho: number; tipo: 'texto' | 'entero' | 'ars' }> = [
+    { label: 'Cuenta', ancho: 26, tipo: 'texto' },
+    { label: 'CUIT', ancho: 14, tipo: 'texto' },
+    { label: 'Condición', ancho: 18, tipo: 'texto' },
+    { label: 'PV', ancho: 6, tipo: 'entero' },
+    { label: 'Facturas', ancho: 10, tipo: 'entero' },
+    { label: 'Efectivo', ancho: 15, tipo: 'ars' },
+    { label: 'Transferencia', ancho: 15, tipo: 'ars' },
+    { label: 'Transf. financiera', ancho: 16, tipo: 'ars' },
+    { label: 'Tarjeta', ancho: 15, tipo: 'ars' },
+    { label: 'Otro', ancho: 13, tipo: 'ars' },
+    { label: 'Sin informar', ancho: 14, tipo: 'ars' },
+    { label: 'TOTAL', ancho: 16, tipo: 'ars' },
+    { label: 'Cobrado', ancho: 15, tipo: 'ars' },
+    { label: 'Pendiente', ancho: 15, tipo: 'ars' },
+  ]
+
+  ws.getCell('A1').value = `Facturación por cuenta · ${meta.periodo}`
+  ws.getCell('A1').font = { name: FUENTE, size: 12, bold: true, color: { argb: INK_950 } }
+  ws.mergeCells(`A1:${letra(titulos.length)}1`)
+  ws.getRow(1).height = 20
+
+  ws.columns = titulos.map((t) => ({
+    width: t.ancho,
+    style: { font: { name: FUENTE, size: CUERPO } },
+  }))
+
+  const cabecera = ws.getRow(2)
+  cabecera.height = 24
+  titulos.forEach((t, i) => {
+    const celda = cabecera.getCell(i + 1)
+    celda.value = t.label
+    celda.font = { name: FUENTE, size: CUERPO, bold: true, color: { argb: BLANCO } }
+    // Los medios de cobro en azul, como en la planilla; el resto en negro.
+    celda.fill = fill(i >= 5 && i <= 10 ? AZUL : INK_950)
+    celda.alignment = {
+      vertical: 'middle',
+      horizontal: t.tipo === 'texto' ? 'left' : 'right',
+      wrapText: true,
+    }
+  })
+
+  const CONDICION: Record<string, string> = {
+    responsable_inscripto: 'Responsable Inscripto',
+    monotributista: 'Monotributista',
+  }
+
+  let fila = 3
+  const primera = fila
+  for (const cuenta of porCuenta) {
+    const r = ws.getRow(fila)
+    const valores: Array<string | number> = [
+      cuenta.nombre,
+      cuenta.cuit,
+      CONDICION[cuenta.condicion] ?? cuenta.condicion,
+      cuenta.punto_venta,
+      cuenta.cantidad,
+      cuenta.porMedio.efectivo ?? 0,
+      cuenta.porMedio.transferencia ?? 0,
+      cuenta.porMedio.transf_financiera ?? 0,
+      cuenta.porMedio.tarjeta ?? 0,
+      cuenta.porMedio.otro ?? 0,
+      cuenta.porMedio.sin_medio ?? 0,
+      cuenta.total,
+      cuenta.cobrado,
+      cuenta.pendiente,
+    ]
+    valores.forEach((valor, i) => {
+      const celda = r.getCell(i + 1)
+      const tipo = titulos[i].tipo
+      celda.value = valor
+      if (tipo === 'ars') celda.numFmt = FMT_ARS
+      if (tipo === 'entero') celda.numFmt = FMT_ENTERO
+      celda.alignment = { vertical: 'middle', horizontal: tipo === 'texto' ? 'left' : 'right' }
+      celda.border = { bottom: { style: 'hair', color: { argb: INK_100 } } }
+      // El CUIT es un identificador, no un número: se muestra tal cual.
+      if (i === 1) celda.numFmt = '@'
+      // El TOTAL de la cuenta, en verde como en la planilla.
+      if (i === 11) celda.fill = fill(VERDE)
+    })
+    fila += 1
+  }
+
+  /* ---- Fila TOTAL: tiene que cerrar con el total del mes ---- */
+  const r = ws.getRow(fila)
+  r.height = 18
+  titulos.forEach((t, i) => {
+    const celda = r.getCell(i + 1)
+    celda.font = { name: FUENTE, size: CUERPO, bold: true, color: { argb: INK_950 } }
+    celda.fill = fill(INK_100)
+    celda.border = { top: { style: 'double', color: { argb: NEGRO } } }
+    celda.alignment = { vertical: 'middle', horizontal: t.tipo === 'texto' ? 'left' : 'right' }
+    if (i === 0) {
+      celda.value = `TOTAL · ${porCuenta.length} ${porCuenta.length === 1 ? 'cuenta' : 'cuentas'}`
+      return
+    }
+    if (t.tipo === 'texto') return
+    const col = letra(i + 1)
+    const total = porCuenta.reduce((acc, cuenta) => {
+      const valores: Record<number, number> = {
+        3: cuenta.punto_venta,
+        4: cuenta.cantidad,
+        5: cuenta.porMedio.efectivo ?? 0,
+        6: cuenta.porMedio.transferencia ?? 0,
+        7: cuenta.porMedio.transf_financiera ?? 0,
+        8: cuenta.porMedio.tarjeta ?? 0,
+        9: cuenta.porMedio.otro ?? 0,
+        10: cuenta.porMedio.sin_medio ?? 0,
+        11: cuenta.total,
+        12: cuenta.cobrado,
+        13: cuenta.pendiente,
+      }
+      return acc + (valores[i] ?? 0)
+    }, 0)
+    // El punto de venta no se suma: es un identificador.
+    if (i === 3) return
+    celda.numFmt = t.tipo === 'ars' ? FMT_ARS : FMT_ENTERO
+    celda.value = { formula: `SUM(${col}${primera}:${col}${fila - 1})`, result: total }
+  })
+}
+
 /* ===================== Hoja «Comprobantes» ===================== */
 
 function hojaComprobantes(wb: ExcelJS.Workbook, dataset: DatasetFacturacion) {
@@ -387,6 +532,7 @@ function hojaComprobantes(wb: ExcelJS.Workbook, dataset: DatasetFacturacion) {
     { label: 'Tipo', ancho: 7, tipo: 'texto' as const },
     { label: 'Número', ancho: 15, tipo: 'texto' as const },
     { label: 'Cuenta', ancho: 24, tipo: 'texto' as const },
+    { label: 'CUIT', ancho: 14, tipo: 'texto' as const },
     { label: 'Cliente', ancho: 30, tipo: 'texto' as const },
     { label: 'Medio de cobro', ancho: 18, tipo: 'texto' as const },
     { label: 'Total', ancho: 15, tipo: 'ars' as const },
@@ -423,6 +569,7 @@ function hojaComprobantes(wb: ExcelJS.Workbook, dataset: DatasetFacturacion) {
       c.tipo,
       c.numero_formateado,
       c.emisor_nombre,
+      c.emisor_cuit,
       c.cliente_nombre,
       etiquetaMedio(c),
       c.total,
@@ -437,6 +584,7 @@ function hojaComprobantes(wb: ExcelJS.Workbook, dataset: DatasetFacturacion) {
       if (tipo === 'fecha') celda.numFmt = FMT_FECHA
       celda.alignment = { vertical: 'middle', horizontal: tipo === 'ars' ? 'right' : 'left' }
       celda.border = { bottom: { style: 'hair', color: { argb: INK_100 } } }
+      if (titulos[i].label === 'CUIT') celda.numFmt = '@'
       // Los ocultados de la lista se marcan en gris: el CAE existe igual.
       if (c.oculto) celda.font = { name: FUENTE, size: CUERPO, italic: true, color: { argb: INK_400 } }
     })
@@ -444,19 +592,23 @@ function hojaComprobantes(wb: ExcelJS.Workbook, dataset: DatasetFacturacion) {
   }
 
   if (comprobantes.length) {
+    // La columna del total es la que dice «Total» en `titulos` (así no se
+    // desacopla si mañana se agrega o saca una columna).
+    const colTotal = titulos.findIndex((t) => t.label === 'Total') + 1
     const r = ws.getRow(fila)
     r.getCell(1).value = `${comprobantes.length} comprobantes`
-    r.getCell(6).value = 'TOTAL'
-    r.getCell(7).value = {
-      formula: `SUM(G3:G${fila - 1})`,
+    r.getCell(colTotal - 1).value = 'TOTAL'
+    const letraTotal = letra(colTotal)
+    r.getCell(colTotal).value = {
+      formula: `SUM(${letraTotal}3:${letraTotal}${fila - 1})`,
       result: comprobantes.reduce((acc, c) => acc + c.total, 0),
     }
-    r.getCell(7).numFmt = FMT_ARS
+    r.getCell(colTotal).numFmt = FMT_ARS
     for (let i = 1; i <= titulos.length; i++) {
       const celda = r.getCell(i)
       celda.font = { name: FUENTE, size: CUERPO, bold: true, color: { argb: INK_950 } }
       celda.fill = fill(INK_100)
-      celda.alignment = { vertical: 'middle', horizontal: i === 7 ? 'right' : 'left' }
+      celda.alignment = { vertical: 'middle', horizontal: i === colTotal ? 'right' : 'left' }
     }
   }
 

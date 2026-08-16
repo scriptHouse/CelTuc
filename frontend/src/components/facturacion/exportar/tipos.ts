@@ -218,6 +218,12 @@ export type AlcanceFilas = 'mes_completo' | 'con_facturacion'
 export interface OpcionesXlsxFacturacion {
   /** Hoja con una fila por comprobante del mes (número, cliente, CAE, medio). */
   hojaComprobantes: boolean
+  /**
+   * Hoja «Por cuenta»: una fila por CUIT con lo que entró por cada medio
+   * (efectivo, transferencia, financiera, tarjeta). Es el corte con el que se
+   * concilia cada cuenta por separado.
+   */
+  hojaCuentas: boolean
   /** Hoja con los filtros, la cuenta y quién exportó. Trazabilidad. */
   hojaComoSeGenero: boolean
   /**
@@ -277,6 +283,7 @@ export const CONFIG_POR_DEFECTO: Omit<ConfigFacturacion, 'anio' | 'mes'> = {
   nombreArchivo: 'facturacion-{mes}-{anio}',
   xlsx: {
     hojaComprobantes: true,
+    hojaCuentas: true,
     hojaComoSeGenero: false,
     formulas: true,
     metaDiaria: 205000,
@@ -346,7 +353,7 @@ export const PLANTILLAS_FABRICA: PlantillaFacturacion[] = [
         'ri',
         'mono',
       ],
-      xlsx: { formulas: true, resaltarIndice: false, totalGeneral: true },
+      xlsx: { formulas: true, resaltarIndice: false, totalGeneral: true, hojaCuentas: true },
     },
   },
   {

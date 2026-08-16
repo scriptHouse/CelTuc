@@ -2,9 +2,10 @@
 
 Que se facturo con factura electronica en un mes calendario, agrupado POR DIA y
 POR MEDIO DE COBRO (efectivo, transferencia, transferencia financiera, tarjeta,
-otro), mas el detalle de cada comprobante. El Excel (la planilla "Facturacion"
-con Fecha / Efectivo / Transferencias / Tarjetas / TOTAL / ESTADO / INDICE) lo
-arma el front con estos numeros; aca solo se calcula, sin formato.
+otro), lo mismo abierto POR CUENTA (cada CUIT que factura), mas el detalle de
+cada comprobante. El Excel (la planilla "Facturacion" con Fecha / Efectivo /
+Transferencias / Tarjetas / TOTAL / ESTADO / INDICE, mas la hoja "Por cuenta")
+lo arma el front con estos numeros; aca solo se calcula, sin formato.
 
 Como se decide el medio de cobro de cada comprobante, en este orden:
 
@@ -164,6 +165,10 @@ def resumen_mensual(anio: int, mes: int, *, emisores=None, incluir_ocultos=False
         'ri': Decimal('0'), 'mono': Decimal('0'),
         'cobrado': Decimal('0'), 'pendiente': Decimal('0'),
     }
+    # Lo mismo, pero abierto POR CUENTA (cada CUIT que factura): cuanto entro
+    # por cada medio en cada una. Es el corte que pide la conciliacion, porque
+    # cada CUIT rinde por separado.
+    cuentas = {}
     detalle = []
     sin_medio = {'cantidad': 0, 'total': Decimal('0')}
 
@@ -190,7 +195,21 @@ def resumen_mensual(anio: int, mes: int, *, emisores=None, incluir_ocultos=False
                 'ri': Decimal('0'), 'mono': Decimal('0'),
                 'cobrado': Decimal('0'), 'pendiente': Decimal('0'),
             }
-        for acumulador in (dia, totales):
+        cuenta = cuentas.get(c.emisor_id)
+        if cuenta is None:
+            cuenta = cuentas[c.emisor_id] = {
+                'emisor': c.emisor_id,
+                'nombre': c.emisor.nombre,
+                'cuit': c.emisor.cuit,
+                'condicion': c.emisor.condicion,
+                'punto_venta': c.emisor.punto_venta,
+                'cantidad': 0, 'total': Decimal('0'),
+                'por_medio': _cero_por_medio(),
+                'ri': Decimal('0'), 'mono': Decimal('0'),
+                'cobrado': Decimal('0'), 'pendiente': Decimal('0'),
+            }
+
+        for acumulador in (dia, totales, cuenta):
             acumulador['cantidad'] += 1
             acumulador['total'] += total
             for medio, monto in por_medio.items():
@@ -211,6 +230,7 @@ def resumen_mensual(anio: int, mes: int, *, emisores=None, incluir_ocultos=False
             'numero_formateado': c.numero_formateado,
             'emisor': c.emisor_id,
             'emisor_nombre': c.emisor.nombre,
+            'emisor_cuit': c.emisor.cuit,
             'cliente_nombre': c.cliente_nombre,
             'total': float(total),
             'estado_cobro': c.estado_cobro,
@@ -246,6 +266,18 @@ def resumen_mensual(anio: int, mes: int, *, emisores=None, incluir_ocultos=False
             for clave, dia in sorted(dias.items())
         ],
         'comprobantes': detalle,
+        # Una fila por cuenta (CUIT), de la que mas facturo a la que menos.
+        'por_cuenta': [
+            {
+                'emisor': cuenta['emisor'],
+                'nombre': cuenta['nombre'],
+                'cuit': cuenta['cuit'],
+                'condicion': cuenta['condicion'],
+                'punto_venta': cuenta['punto_venta'],
+                **_serializar(cuenta),
+            }
+            for cuenta in sorted(cuentas.values(), key=lambda c: (-c['total'], c['nombre']))
+        ],
         'totales': _serializar(totales),
         'sin_medio': {'cantidad': sin_medio['cantidad'], 'total': float(sin_medio['total'])},
     }

@@ -709,8 +709,15 @@ TOTAL · ESTADO · ÍNDICE`, con los títulos de medios en azul (`FF0070C0`), el
   original). Las etiquetas van **sin tilde**, como en la planilla del negocio: el formato
   condicional las busca por texto y así los archivos se mezclan sin romperse.
 - **ESTADO**: columna vacía a propósito (se anota a mano).
-- Hojas opcionales: **Comprobantes** (una fila por factura con medio, total, estado y CAE)
-  y **Cómo se generó** (trazabilidad).
+- Hojas opcionales:
+  - **Por cuenta**: una fila por CUIT con lo que entró por cada medio (efectivo,
+    transferencia, transferencia financiera, tarjeta, otro, sin informar) + total, cobrado y
+    pendiente. Es el corte de conciliación: cada CUIT rinde por separado. La fila TOTAL va
+    con `SUM()` y cierra con el total del mes de la planilla. El CUIT se escribe con formato
+    texto (`@`) para que Excel no le coma los ceros ni lo pase a notación científica.
+  - **Comprobantes**: una fila por factura (fecha, tipo, número, cuenta, **CUIT**, cliente,
+    medio, total, estado y CAE).
+  - **Cómo se generó**: trazabilidad.
 
 ### De dónde sale el medio de cobro
 `backend/facturacion/resumen.py`, en este orden:
@@ -727,6 +734,10 @@ TOTAL · ESTADO · ÍNDICE`, con los títulos de medios en azul (`FF0070C0`), el
 
 El medio se carga al emitir (campo «Cobrado con» del modal, precargado desde la venta de
 mostrador vía `lib/borradorFactura.ts`) y se corrige desde el detalle de la factura.
+
+La respuesta trae `dias[]` (por día), **`por_cuenta[]`** (por CUIT: `nombre`, `cuit`,
+`condicion`, `punto_venta` y el mismo desglose por medio), `comprobantes[]` (cada uno con
+`emisor_cuit`), `totales` y `sin_medio`.
 
 ### Archivos
 ```

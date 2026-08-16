@@ -217,6 +217,15 @@ export interface DiaFacturacion extends CorteFacturacion {
   fecha: string
 }
 
+/** Una cuenta (CUIT) con lo que facturó en el mes, abierto por medio. */
+export interface CuentaFacturacion extends CorteFacturacion {
+  emisor: number
+  nombre: string
+  cuit: string
+  condicion: 'responsable_inscripto' | 'monotributista'
+  punto_venta: number
+}
+
 /** Un comprobante del mes, con el medio ya resuelto (ver `resumen.py`). */
 export interface ComprobanteResumen {
   id: number
@@ -225,6 +234,7 @@ export interface ComprobanteResumen {
   numero_formateado: string
   emisor: number
   emisor_nombre: string
+  emisor_cuit: string
   cliente_nombre: string
   total: number
   estado_cobro: EstadoCobro
@@ -252,6 +262,8 @@ export interface ResumenFacturacion {
   medios: MedioResumen[]
   dias: DiaFacturacion[]
   comprobantes: ComprobanteResumen[]
+  /** Una fila por cuenta (CUIT), de la que más facturó a la que menos. */
+  porCuenta: CuentaFacturacion[]
   totales: CorteFacturacion
   /** Cuánto quedó sin medio informado (para avisar que falta completarlo). */
   sinMedio: { cantidad: number; total: number }
@@ -279,6 +291,9 @@ interface ResumenApi {
   dias: Array<CorteApi & { fecha: string }>
   comprobantes: Array<
     Omit<ComprobanteResumen, 'porMedio'> & { por_medio: Partial<Record<MedioResumen, number>> }
+  >
+  por_cuenta: Array<
+    CorteApi & Pick<CuentaFacturacion, 'emisor' | 'nombre' | 'cuit' | 'condicion' | 'punto_venta'>
   >
   totales: CorteApi
   sin_medio: { cantidad: number; total: number }
@@ -332,6 +347,16 @@ export async function obtenerResumenFacturacion(
     comprobantes: r.comprobantes.map(({ por_medio, ...resto }) => ({
       ...resto,
       porMedio: por_medio,
+    })),
+    porCuenta: r.por_cuenta.map(({ por_medio, ...cuenta }) => ({
+      ...cuenta,
+      porMedio: por_medio,
+      cantidad: cuenta.cantidad,
+      total: cuenta.total,
+      ri: cuenta.ri,
+      mono: cuenta.mono,
+      cobrado: cuenta.cobrado,
+      pendiente: cuenta.pendiente,
     })),
     totales: corteDesdeApi(r.totales),
     sinMedio: r.sin_medio,
