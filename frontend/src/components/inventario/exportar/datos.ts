@@ -662,3 +662,100 @@ export function resolverNombreArchivo(
     .replace(/^-|-$/g, '')
   return `${base || 'inventario'}.${datos.extension}`
 }
+
+/* ===================== Formato «importador» ===================== */
+
+/**
+ * El archivo con el layout que espera «Importar stock»: la planilla del
+ * negocio. Es un modo aparte del resto del exportador —columnas, orden y
+ * encabezados son fijos, porque los define el importador— y su razón de ser es
+ * el viaje de ida y vuelta: se baja el stock de UNA sucursal, se corrige la
+ * columna STOCK a mano y se vuelve a subir.
+ *
+ * Los rótulos son EXACTAMENTE los que busca `backend/inventario/importacion.py`
+ * (`PRODUCTOS`, `STOCK`, `STOCK MINIMO`, `PRECIO DE LISTA USD`). Cambiarlos
+ * rompe la importación.
+ */
+export const COLUMNAS_IMPORTADOR = [
+  { id: 'categoria', label: '', ancho: 5 },
+  { id: 'producto', label: 'PRODUCTOS', ancho: 64.28 },
+  { id: 'costo_usd', label: 'COSTO USD', ancho: 21.14 },
+  { id: 'costo_ars', label: 'COSTO $', ancho: 21.14 },
+  { id: 'lista_usd', label: 'PRECIO DE LISTA USD', ancho: 21.14 },
+  { id: 'cash_usd', label: 'PRECIO CASH USD (20% OFF)', ancho: 21.14 },
+  { id: 'lista_ars', label: 'PRECIO DE LISTA CREDITO 1-3 CUOTAS  SIN INTERES', ancho: 21.14 },
+  { id: 'cash_ars', label: '$/DEBITO/TRANSF (20% OFF)', ancho: 21.14 },
+  { id: 'stock', label: 'STOCK', ancho: 21.14 },
+  { id: 'minimo', label: 'STOCK MINIMO', ancho: 21.14 },
+] as const
+
+/** Un renglón de la planilla del importador. */
+export interface FilaImportador {
+  /** Título de sección: solo va en la PRIMERA fila del grupo (como el original). */
+  categoria: string
+  nombre: string
+  costoUsd: number | null
+  costoArs: number | null
+  listaUsd: number | null
+  cashUsd: number | null
+  listaArs: number | null
+  cashArs: number | null
+  /** Unidades en la sucursal elegida. `null` = nunca se informó (celda vacía). */
+  stock: number | null
+  minimo: number | null
+}
+
+export interface GrupoImportador {
+  categoria: string
+  filas: FilaImportador[]
+}
+
+/**
+ * El nombre con el que la planilla escribe un producto.
+ *
+ * El catálogo parte el renglón en columnas (nombre + calidad + nota); acá se
+ * rearma en el mismo orden en que el importador lo espera, que es una de sus
+ * "variantes" exactas: así el archivo que se baja vuelve a entrar sin quedar
+ * en «revisar». Ver `_variantes()` en `backend/inventario/importacion.py`.
+ */
+export function nombreDePlanilla(producto: ProductoCatalogo): string {
+  return [producto.nombre, producto.calidad, producto.nota]
+    .map((parte) => (parte || '').trim())
+    .filter(Boolean)
+    .join(' ')
+}
+
+/**
+ * Arma las filas del formato importador desde el dataset ya filtrado, para la
+ * sucursal indicada. Agrupa por categoría raíz, en el orden del catálogo.
+ */
+export function filasImportador(dataset: Dataset, sucursalId: number | null): GrupoImportador[] {
+  const grupos = new Map<string, FilaImportador[]>()
+  for (const fila of dataset.filas) {
+    const producto = fila.producto
+    // Sin sucursal elegida (caso raro: ninguna activa) el stock queda vacío,
+    // que es justo lo que el importador interpreta como "no informado".
+    const stockFila = sucursalId != null ? fila.porSucursal.get(sucursalId) : undefined
+    const categoria = fila.raiz?.nombre ?? fila.categoria?.nombre ?? 'SIN CATEGORÍA'
+    const lista = producto.efectivo?.lista_usd ?? producto.precio_lista_usd
+    const cashUsd = producto.efectivo?.cash_usd ?? producto.precio_cash_usd
+    const item: FilaImportador = {
+      categoria,
+      nombre: nombreDePlanilla(producto),
+      costoUsd: producto.costo_usd ?? null,
+      costoArs: null, // la planilla lo deja vacío: se calcula aparte
+      listaUsd: lista ?? null,
+      cashUsd: cashUsd ?? null,
+      listaArs: producto.efectivo?.lista_ars ?? producto.precio_lista_ars ?? null,
+      cashArs: producto.efectivo?.cash_ars ?? producto.precio_cash_ars ?? null,
+      // «celda vacía no es cero»: una fila que nunca se contó viaja vacía, para
+      // que al reimportar no ponga el stock en cero.
+      stock: !stockFila || stockFila.sin_dato ? null : stockFila.cantidad,
+      minimo: stockFila?.stock_minimo ?? null,
+    }
+    const actual = grupos.get(categoria)
+    if (actual) actual.push(item)
+    else grupos.set(categoria, [item])
+  }
+  return [...grupos.entries()].map(([categoria, filas]) => ({ categoria, filas }))
+}

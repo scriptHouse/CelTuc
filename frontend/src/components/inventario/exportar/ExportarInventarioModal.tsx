@@ -12,6 +12,7 @@ import {
   Filter,
   GripVertical,
   Image as ImageIcon,
+  Info,
   Loader2,
   Palette,
   Plus,
@@ -50,8 +51,10 @@ import {
   type PlantillaExport,
 } from './tipos'
 import {
+  COLUMNAS_IMPORTADOR,
   construirDataset,
   definicionDe,
+  filasImportador,
   resolverNombreArchivo,
   textoCelda,
   type Dataset,
@@ -579,6 +582,7 @@ export function ExportarInventarioModal({
           {seccion === 'formato' && (
             <SeccionFormato
               config={config}
+              sucursales={sucursales.filter((s) => config.sucursales.includes(s.id))}
               actualizarXlsx={actualizarXlsx}
               actualizarPdf={actualizarPdf}
               actualizarCsv={actualizarCsv}
@@ -1028,19 +1032,61 @@ function SeccionDiseno({
 
 function SeccionFormato({
   config,
+  sucursales,
   actualizarXlsx,
   actualizarPdf,
   actualizarCsv,
 }: {
   config: ConfigExport
+  /** Las sucursales que entran en la exportación (para el modo importador). */
+  sucursales: Sucursal[]
   actualizarXlsx: (patch: Partial<ConfigExport['xlsx']>) => void
   actualizarPdf: (patch: Partial<ConfigExport['pdf']>) => void
   actualizarCsv: (patch: Partial<ConfigExport['csv']>) => void
 }) {
   if (config.formato === 'xlsx') {
     const x = config.xlsx
+    // La sucursal cuyo stock se va a completar: la elegida, o la primera.
+    const sucursalImportador = x.sucursalImportador ?? sucursales[0]?.id ?? null
     return (
       <div className="space-y-6">
+        {/* El modo «planilla del negocio»: manda sobre todo lo demás. */}
+        <Bloque
+          titulo="Formato del archivo"
+          ayuda="Cómo sale el Excel: el informe del sistema o la planilla que se vuelve a importar."
+        >
+          <div className="rounded-xl border border-line-strong bg-surface p-3.5">
+            <Casilla
+              etiqueta="Mismo formato que importador"
+              ayuda="Sale con el layout de la planilla del negocio (PRODUCTOS · precios · STOCK · STOCK MINIMO), lista para completar y volver a subir en «Importar stock»."
+              valor={x.formatoImportador}
+              onChange={(v) => actualizarXlsx({ formatoImportador: v })}
+            />
+            {x.formatoImportador && (
+              <div className="mt-3 space-y-2.5 border-t border-line pt-3">
+                <Campo etiqueta="Stock de qué sucursal">
+                  <Select
+                    options={sucursales.map((s) => ({ value: String(s.id), label: s.nombre }))}
+                    value={sucursalImportador != null ? String(sucursalImportador) : ''}
+                    onChange={(v) => actualizarXlsx({ sucursalImportador: Number(v) })}
+                  />
+                </Campo>
+                <p className="flex items-start gap-2 text-xs leading-relaxed text-ink-500">
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-400" aria-hidden />
+                  <span>
+                    El importador trabaja de a una sucursal y lee columnas fijas, así que en
+                    este modo no se eligen columnas ni hojas: el archivo sale calcado a la
+                    planilla. Una fila sin contar viaja <b>vacía</b> (vacío no es cero: al
+                    reimportar, esa fila no se toca).
+                  </span>
+                </p>
+              </div>
+            )}
+          </div>
+        </Bloque>
+
+        {x.formatoImportador ? null : (
+        <>
         <Bloque titulo="La tabla" ayuda="Lo que hace que el Excel se pueda trabajar, no solo mirar.">
           <div className="grid gap-y-2 sm:grid-cols-2">
             <Casilla etiqueta="Autofiltro en los títulos" valor={x.autofiltro} onChange={(v) => actualizarXlsx({ autofiltro: v })} />
@@ -1090,6 +1136,8 @@ function SeccionFormato({
             </div>
           )}
         </Bloque>
+        </>
+        )}
       </div>
     )
   }
@@ -1328,6 +1376,16 @@ function VistaPrevia({ dataset, nombre }: { dataset: Dataset; nombre: string }) 
   const filas = dataset.filas.slice(0, FILAS_PREVIEW)
   const hojas = config.formato === 'xlsx' ? nombresDeHojas(dataset) : []
 
+  // Modo «mismo formato que importador»: la vista previa muestra la planilla
+  // del negocio, no el informe (es lo que se va a bajar).
+  if (config.formato === 'xlsx' && config.xlsx.formatoImportador) {
+    return (
+      <Marco titulo="Vista previa" pie={<PieVistaPrevia dataset={dataset} nombre={nombre} />}>
+        <PreviewImportador dataset={dataset} />
+      </Marco>
+    )
+  }
+
   if (config.formato === 'csv') {
     const lineas = [
       config.csv.encabezados ? columnas.map((c) => c.label).join(muestraDelimitador(config)) : null,
@@ -1423,6 +1481,81 @@ function VistaPrevia({ dataset, nombre }: { dataset: Dataset; nombre: string }) 
         </div>
       </div>
     </Marco>
+  )
+}
+
+/**
+ * La planilla del importador, con los colores reales del archivo: columnas
+ * alternadas azul/blanco y la categoría vertical en la primera columna.
+ */
+function PreviewImportador({ dataset }: { dataset: Dataset }) {
+  const sucursalId =
+    dataset.config.xlsx.sucursalImportador ?? dataset.sucursales[0]?.id ?? null
+  const sucursal = dataset.sucursales.find((s) => s.id === sucursalId)
+  const grupos = filasImportador(dataset, sucursalId)
+  const muestra: Array<{ categoria: string | null; fila: ReturnType<typeof filasImportador>[number]['filas'][number] }> = []
+  for (const grupo of grupos) {
+    grupo.filas.forEach((fila, i) => {
+      if (muestra.length < FILAS_PREVIEW) muestra.push({ categoria: i === 0 ? grupo.categoria : null, fila })
+    })
+    if (muestra.length >= FILAS_PREVIEW) break
+  }
+  const azul = '#5B9BD5'
+  const celdaFondo = (i: number) => (i % 2 === 0 ? azul : '#FFFFFF')
+
+  return (
+    <div className="space-y-2">
+      <div className="overflow-x-auto rounded-lg border border-line bg-white">
+        <table className="w-full border-collapse text-[0.55rem]">
+          <thead>
+            <tr>
+              {COLUMNAS_IMPORTADOR.map((c, i) => (
+                <th
+                  key={c.id}
+                  className="whitespace-nowrap border border-neutral-400 px-1 py-1 text-center font-normal text-neutral-900"
+                  style={{ background: celdaFondo(i) }}
+                >
+                  {c.label || ' '}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {muestra.map(({ categoria, fila }, r) => (
+              <tr key={r}>
+                <td
+                  className="whitespace-nowrap border border-neutral-400 px-1 py-1 text-center font-semibold text-neutral-900"
+                  style={{ background: azul }}
+                >
+                  {categoria ? categoria.slice(0, 6) : ''}
+                </td>
+                <td
+                  className="max-w-[9rem] truncate border border-neutral-400 px-1 py-1 text-neutral-900"
+                  style={{ background: '#FFFFFF' }}
+                >
+                  {fila.nombre}
+                </td>
+                {[fila.costoUsd, fila.costoArs, fila.listaUsd, fila.cashUsd, fila.listaArs, fila.cashArs, fila.stock, fila.minimo].map(
+                  (valor, i) => (
+                    <td
+                      key={i}
+                      className="whitespace-nowrap border border-neutral-400 px-1 py-1 text-center tabular-nums text-neutral-900"
+                      style={{ background: celdaFondo(i + 2) }}
+                    >
+                      {valor === null ? '' : num(valor)}
+                    </td>
+                  ),
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[0.65rem] leading-relaxed text-ink-400">
+        Planilla de <b className="text-ink-600">{sucursal?.nombre ?? '—'}</b> · columna STOCK
+        lista para completar. Las filas sin conteo van vacías: al reimportar no se tocan.
+      </p>
+    </div>
   )
 }
 

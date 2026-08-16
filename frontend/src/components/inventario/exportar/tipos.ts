@@ -74,6 +74,21 @@ export interface OpcionesXlsx {
   /** Cada grupo queda plegable con el +/- del margen izquierdo. */
   agrupable: boolean
   totalGeneral: boolean
+  /**
+   * Genera el archivo con el MISMO layout que espera «Importar stock»: la
+   * planilla del negocio (categoría en la columna A, PRODUCTOS, los precios y
+   * las columnas STOCK / STOCK MINIMO), para completarla y volver a subirla.
+   *
+   * Manda sobre el resto de las opciones de esta sección: el importador lee
+   * columnas y encabezados fijos, así que en este modo no se eligen columnas
+   * ni se agregan hojas.
+   */
+  formatoImportador: boolean
+  /**
+   * La sucursal cuyo stock va en la columna STOCK (el importador trabaja de a
+   * una sucursal). `null` = la primera de las elegidas arriba.
+   */
+  sucursalImportador: number | null
 }
 
 export interface OpcionesPdf {
@@ -272,6 +287,8 @@ export const CONFIG_POR_DEFECTO: ConfigExport = {
     formulas: true,
     agrupable: true,
     totalGeneral: true,
+    formatoImportador: false,
+    sucursalImportador: null,
   },
   pdf: {
     orientacion: 'auto',

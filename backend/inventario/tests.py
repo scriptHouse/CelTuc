@@ -1046,3 +1046,112 @@ class ImportarStockApiTests(TestCase):
             ],
         }, format='json')
         self.assertEqual(r.status_code, 400)
+
+
+class ExportarEnFormatoImportadorTests(TestCase):
+    """El archivo que baja «Exportar inventario» con «Mismo formato que
+    importador» tiene que volver a entrar por «Importar stock» sin tocar nada.
+
+    El generador vive en el front (`exportar/xlsx.ts`), asi que lo que se prueba
+    aca es el CONTRATO que ese archivo tiene que cumplir: los rotulos de la fila
+    1, la categoria en la columna A (combinada, o sea con valor solo en la
+    primera fila del grupo), el nombre rearmado como "nombre + calidad + nota" y
+    la regla de que una fila sin contar viaja VACIA. Si alguien cambia el parser
+    o los rotulos, este test se cae antes de que se rompa el ida y vuelta.
+    """
+
+    # Los rotulos EXACTOS que escribe el exportador en modo importador
+    # (`COLUMNAS_IMPORTADOR` en `frontend/src/components/inventario/exportar/datos.ts`).
+    ENCABEZADO = [
+        None, 'PRODUCTOS', 'COSTO USD', 'COSTO $', 'PRECIO DE LISTA USD',
+        'PRECIO CASH USD (20% OFF)',
+        'PRECIO DE LISTA CREDITO 1-3 CUOTAS  SIN INTERES',
+        '$/DEBITO/TRANSF (20% OFF)', 'STOCK', 'STOCK MINIMO',
+    ]
+
+    def setUp(self):
+        from .importacion import analizar
+
+        self.analizar = analizar
+        self.sucursal = Sucursal.objects.create(nombre='Export ida y vuelta', orden=91)
+        self.categoria = CategoriaProducto.objects.create(nombre='Zetaexport fuentes')
+        # Un producto con calidad y otro sin nada: los dos casos del rearmado.
+        self.con_calidad = Producto.objects.create(
+            categoria=self.categoria, nombre='Zetaexport Fuente 20W',
+            calidad='Calidad original', precio_lista_usd=Decimal('25'),
+        )
+        self.simple = Producto.objects.create(
+            categoria=self.categoria, nombre='Zetaexport Cable 2M',
+            precio_lista_usd=Decimal('8'),
+        )
+        aplicar_ajuste(self.con_calidad, self.sucursal, delta=7)
+
+    def _archivo_del_exportador(self, filas):
+        """Reproduce el layout que genera el exportador en modo importador."""
+        import io
+
+        import openpyxl
+
+        libro = openpyxl.Workbook()
+        hoja = libro.active
+        hoja.append(self.ENCABEZADO)
+        for categoria, nombre, lista, stock, minimo in filas:
+            hoja.append([categoria, nombre, None, None, lista, None, None, None, stock, minimo])
+        # La nota que el exportador deja en la columna K: NO tiene que leerse
+        # como un renglon de producto.
+        hoja.cell(1, 11).value = 'Stock de Export ida y vuelta. Completa la columna STOCK y volve a subirlo.'
+        buffer = io.BytesIO()
+        libro.save(buffer)
+        buffer.seek(0)
+        buffer.name = 'inventario-export.xlsx'
+        return buffer
+
+    def test_el_archivo_exportado_vuelve_a_entrar_sin_revisar(self):
+        # Asi lo escribe el exportador: la categoria solo en la primera fila del
+        # grupo (el resto son celdas de la combinacion) y el nombre completo.
+        archivo = self._archivo_del_exportador([
+            ('Zetaexport fuentes', 'Zetaexport Fuente 20W Calidad original', 25, 7, None),
+            (None, 'Zetaexport Cable 2M', 8, None, None),
+        ])
+        resultado = self.analizar(archivo, self.sucursal)
+        filas = {f['fila']: f for f in resultado['filas']}
+
+        # Dos renglones: la nota de la columna K no entra como producto.
+        self.assertEqual(len(resultado['filas']), 2)
+
+        # El que tenia stock informado matchea y se ve IGUAL a lo que ya hay.
+        self.assertEqual(filas[2]['estado'], 'igual')
+        self.assertEqual(filas[2]['seccion'], 'Zetaexport fuentes')
+
+        # El que viajo sin contar no toca el stock (vacio no es cero).
+        self.assertEqual(filas[3]['estado'], 'sin_valor')
+        self.assertIsNone(filas[3]['cantidad_nueva'])
+
+        # Nada quedo para revisar ni se propuso crear un producto nuevo.
+        self.assertEqual(resultado['resumen']['revisar'], 0)
+        self.assertEqual(resultado['resumen']['nueva'], 0)
+        self.assertEqual(resultado['resumen']['invalida'], 0)
+
+    def test_el_conteo_corregido_a_mano_se_aplica(self):
+        """El uso real: se baja el archivo, se corrige la columna STOCK y se sube."""
+        archivo = self._archivo_del_exportador([
+            ('Zetaexport fuentes', 'Zetaexport Fuente 20W Calidad original', 25, 12, None),
+        ])
+        resultado = self.analizar(archivo, self.sucursal)
+        fila = resultado['filas'][0]
+        self.assertEqual(fila['estado'], 'actualiza')
+        self.assertEqual(fila['cantidad_actual'], 7)
+        self.assertEqual(fila['cantidad_nueva'], 12)
+        self.assertTrue(fila['sugerido'])  # entra marcada: cambia y no hay dudas
+        self.assertEqual(resultado['resumen']['sube'], 1)
+
+    def test_los_rotulos_del_exportador_son_los_que_busca_el_parser(self):
+        """Si alguien renombra una columna del exportador, esto se cae."""
+        from .importacion import _indice_encabezado
+
+        indice, columnas = _indice_encabezado([self.ENCABEZADO])
+        self.assertEqual(indice, 0)
+        self.assertEqual(columnas['producto'], 1)   # columna B
+        self.assertEqual(columnas['stock'], 8)      # columna I
+        self.assertEqual(columnas['minimo'], 9)     # columna J
+        self.assertEqual(columnas['lista'], 4)      # columna E

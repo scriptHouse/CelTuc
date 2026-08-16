@@ -17,6 +17,7 @@
  * ejecutar y validar fuera del navegador.
  */
 import ExcelJS from 'exceljs'
+import { COLUMNAS_IMPORTADOR, filasImportador } from './datos'
 import type { ColumnaResuelta, Dataset, FilaExport, TotalesExport } from './datos'
 import type { TipoColumna } from './tipos'
 
@@ -97,6 +98,17 @@ export async function construirXlsx(
   wb.modified = meta.generado
   wb.title = meta.titulo
   wb.description = [meta.subtitulo, meta.sucursalesTexto, ...meta.filtros].filter(Boolean).join(' · ')
+
+  // Modo «mismo formato que el importador»: el archivo es la planilla del
+  // negocio y nada más. No lleva las hojas extra (el importador lee la primera
+  // hoja y el formato tiene que quedar igual al que se sube).
+  if (op.formatoImportador) {
+    hojaImportador(wb, dataset)
+    const buffer = await wb.xlsx.writeBuffer()
+    return new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+  }
 
   hojaInventario(wb, dataset)
   if (op.hojaResumen) hojaResumen(wb, dataset)
@@ -639,4 +651,141 @@ function hojaComoSeGenero(wb: ExcelJS.Workbook, dataset: Dataset) {
   nota.font = { name: FUENTE, size: 9, italic: true, color: { argb: INK_400 } }
   nota.alignment = { wrapText: true, vertical: 'top' }
   ws.getRow(fila).height = 30
+}
+
+/* ===================== Hoja «formato importador» ===================== */
+
+/* Los colores de la planilla del negocio, resueltos del tema del archivo
+   original: las columnas alternan azul (accent1) y blanco, con el título de
+   sección en azul fuerte (accent5). */
+const PLANILLA_AZUL = 'FF5B9BD5'
+const PLANILLA_BLANCO = 'FFFFFFFF'
+const PLANILLA_NEGRO = 'FF000000'
+
+/** Formatos de la planilla, columna por columna (los mismos del archivo real). */
+const FMT_PLANILLA_ARS = '_-"$"\\ * #,##0.00_-;\\-"$"\\ * #,##0.00_-;_-"$"\\ * "-"??_-;_-@'
+const FMT_PLANILLA_USD = '_-[$USD]\\ * #,##0.00_-;\\-[$USD]\\ * #,##0.00_-;_-[$USD]\\ * "-"??_-;_-@_-'
+const FMT_PLANILLA_PESOS = '[$$]#,##0'
+
+const BORDE_PLANILLA: Partial<ExcelJS.Borders> = {
+  top: { style: 'thin', color: { argb: PLANILLA_NEGRO } },
+  left: { style: 'thin', color: { argb: PLANILLA_NEGRO } },
+  bottom: { style: 'thin', color: { argb: PLANILLA_NEGRO } },
+  right: { style: 'thin', color: { argb: PLANILLA_NEGRO } },
+}
+
+/** El fondo de cada columna: impares azul, pares blanco (como el original). */
+const fondoPlanilla = (columna: number) => (columna % 2 === 1 ? PLANILLA_AZUL : PLANILLA_BLANCO)
+
+/**
+ * La planilla tal cual la lee «Importar stock»: encabezado en la fila 1,
+ * categoría combinada en la columna A y una fila por producto.
+ *
+ * Los rótulos y su posición son el CONTRATO con el importador
+ * (`backend/inventario/importacion.py` busca «PRODUCTOS» y «STOCK»): no se
+ * tocan sin tocar también el parser.
+ */
+function hojaImportador(wb: ExcelJS.Workbook, dataset: Dataset) {
+  const { config, meta } = dataset
+  // La sucursal de la columna STOCK: la elegida a mano o la primera del alcance.
+  const sucursalId =
+    config.xlsx.sucursalImportador ?? dataset.sucursales[0]?.id ?? null
+  const sucursal = dataset.sucursales.find((s) => s.id === sucursalId)
+  const grupos = filasImportador(dataset, sucursalId)
+  const nCols = COLUMNAS_IMPORTADOR.length
+
+  const ws = wb.addWorksheet((sucursal?.nombre ?? 'Stock').slice(0, 31), {
+    pageSetup: {
+      paperSize: 9,
+      orientation: 'landscape',
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+      margins: { left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 },
+    },
+  })
+  ws.columns = COLUMNAS_IMPORTADOR.map((c) => ({
+    width: c.ancho,
+    style: { font: { name: FUENTE, size: 10 } },
+  }))
+
+  /* ---- Fila 1: los rótulos que busca el importador ---- */
+  const cabecera = ws.getRow(1)
+  cabecera.height = 25.5
+  COLUMNAS_IMPORTADOR.forEach((columna, i) => {
+    const celda = cabecera.getCell(i + 1)
+    celda.value = columna.label || null
+    celda.font = { name: FUENTE, size: 10, bold: i === 0, color: { argb: PLANILLA_NEGRO } }
+    celda.fill = fill(fondoPlanilla(i + 1))
+    celda.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }
+    celda.border = BORDE_PLANILLA
+  })
+
+  /* ---- Datos, agrupados por categoría (la columna A va combinada) ---- */
+  let fila = 2
+  for (const grupo of grupos) {
+    const desde = fila
+    for (const item of grupo.filas) {
+      const r = ws.getRow(fila)
+      r.height = 15
+      const valores: Array<number | string | null> = [
+        null, // la categoría se escribe una sola vez, al cerrar el grupo
+        item.nombre,
+        item.costoUsd,
+        item.costoArs,
+        item.listaUsd,
+        item.cashUsd,
+        item.listaArs,
+        item.cashArs,
+        item.stock,
+        item.minimo,
+      ]
+      valores.forEach((valor, i) => {
+        const celda = r.getCell(i + 1)
+        celda.value = valor
+        celda.font = { name: FUENTE, size: 10, color: { argb: PLANILLA_NEGRO } }
+        celda.fill = fill(fondoPlanilla(i + 1))
+        celda.border = BORDE_PLANILLA
+        celda.alignment = {
+          vertical: 'middle',
+          horizontal: i === 1 ? 'left' : 'center',
+          indent: i === 1 ? 1 : 0,
+        }
+        // Cada columna con el formato que trae la planilla del negocio. El
+        // stock y el mínimo van como ENTERO: son unidades contadas, no plata
+        // (en la planilla original heredaron un formato de moneda).
+        if (i === 2 || i === 3) celda.numFmt = FMT_PLANILLA_ARS
+        else if (i === 4 || i === 5) celda.numFmt = FMT_PLANILLA_USD
+        else if (i === 6 || i === 7) celda.numFmt = FMT_PLANILLA_PESOS
+        else if (i === 8 || i === 9) celda.numFmt = FMT_ENTERO
+      })
+      fila += 1
+    }
+    const hasta = fila - 1
+    if (hasta < desde) continue
+    // El título de la sección: una celda combinada en vertical, como el original.
+    if (hasta > desde) ws.mergeCells(`A${desde}:A${hasta}`)
+    const titulo = ws.getCell(desde, 1)
+    titulo.value = grupo.categoria
+    titulo.font = { name: FUENTE, size: 10, bold: true, color: { argb: PLANILLA_NEGRO } }
+    titulo.fill = fill(PLANILLA_AZUL)
+    // Vertical y centrado, como en la planilla del negocio (la columna A mide 5).
+    titulo.alignment = { vertical: 'middle', horizontal: 'center', textRotation: 90 }
+    titulo.border = BORDE_PLANILLA
+  }
+
+  ws.views = [{ state: 'frozen', ySplit: 1, activeCell: 'B2' }]
+
+  /* ---- La nota va en la columna K, como en la planilla del negocio ----
+     Fuera de las columnas que lee el importador: si se escribiera en la de
+     PRODUCTOS, la leería como un renglón más. */
+  const nota = ws.getCell(1, nCols + 1)
+  nota.value =
+    `Stock de ${sucursal?.nombre ?? 'la sucursal'} al ${meta.generado.toLocaleDateString('es-AR')}` +
+    `${meta.usuario ? ` · exportado por ${meta.usuario}` : ''}. ` +
+    'Completá o corregí la columna STOCK y volvé a subir este mismo archivo en ' +
+    'Inventario → Importar stock. Una celda vacía NO es cero: esa fila se deja como está.'
+  nota.font = { name: FUENTE, size: 9, italic: true, color: { argb: INK_600 } }
+  nota.alignment = { vertical: 'middle', wrapText: true }
+  ws.getColumn(nCols + 1).width = 54.57
 }
