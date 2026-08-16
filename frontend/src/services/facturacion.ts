@@ -6,6 +6,8 @@ import type {
   Emisor,
   EstadoCobro,
   ItemComprobante,
+  MedioPagoComprobante,
+  TipoComprobante,
 } from '@/types'
 import { api } from '@/lib/api'
 import { useAuth } from '@/store/auth'
@@ -138,6 +140,8 @@ export interface NuevoComprobante {
   alicuota_iva?: number
   observaciones?: string
   estado_cobro?: EstadoCobro
+  /** Con qué se cobró (interno, no viaja a ARCA). Vacío = no informado. */
+  medio_pago?: MedioPagoComprobante
   items: Array<
     Pick<ItemComprobante, 'descripcion' | 'cantidad' | 'precio_unitario'> & {
       /**
@@ -174,6 +178,164 @@ export function emitirComprobante(input: NuevoComprobante): Promise<Comprobante>
 
 export function cambiarEstadoCobro(id: number, estado: EstadoCobro): Promise<Comprobante> {
   return api.patch<Comprobante>(`/facturacion/comprobantes/${id}/`, { estado_cobro: estado }, token())
+}
+
+/** Corrige el medio de cobro de una factura ya emitida (interno, no fiscal). */
+export function cambiarMedioPago(
+  id: number,
+  medio: MedioPagoComprobante,
+): Promise<Comprobante> {
+  return api.patch<Comprobante>(`/facturacion/comprobantes/${id}/`, { medio_pago: medio }, token())
+}
+
+// ===== Resumen mensual (lo que exporta el Studio de Facturación) =====
+
+/** Los "baldes" del resumen: los medios de cobro + lo que no se informó. */
+export type MedioResumen =
+  | 'efectivo'
+  | 'transferencia'
+  | 'transf_financiera'
+  | 'tarjeta'
+  | 'otro'
+  | 'sin_medio'
+
+/** Los importes de un corte (un día o el mes entero), ya sumados. */
+export interface CorteFacturacion {
+  cantidad: number
+  total: number
+  porMedio: Record<MedioResumen, number>
+  /** Facturas A/B (Responsable Inscripto). */
+  ri: number
+  /** Facturas C (Monotributo). */
+  mono: number
+  cobrado: number
+  pendiente: number
+}
+
+export interface DiaFacturacion extends CorteFacturacion {
+  /** `aaaa-mm-dd`. */
+  fecha: string
+}
+
+/** Un comprobante del mes, con el medio ya resuelto (ver `resumen.py`). */
+export interface ComprobanteResumen {
+  id: number
+  fecha: string
+  tipo: TipoComprobante
+  numero_formateado: string
+  emisor: number
+  emisor_nombre: string
+  cliente_nombre: string
+  total: number
+  estado_cobro: EstadoCobro
+  cae: string
+  /** True si está oculto de la lista (borrado lógico); el CAE existe igual. */
+  oculto: boolean
+  medio_pago: MedioPagoComprobante
+  /**
+   * De dónde salió el medio: `comprobante` (se informó), `venta` (se dedujo del
+   * cobro real de la venta de mostrador ligada) o vacío (no se sabe).
+   */
+  medio_origen: 'comprobante' | 'venta' | ''
+  porMedio: Partial<Record<MedioResumen, number>>
+}
+
+export interface ResumenFacturacion {
+  anio: number
+  mes: number
+  /** `aaaa-mm-dd` del primer y último día del mes. */
+  desde: string
+  hasta: string
+  diasDelMes: number
+  emisores: number[]
+  incluirOcultos: boolean
+  medios: MedioResumen[]
+  dias: DiaFacturacion[]
+  comprobantes: ComprobanteResumen[]
+  totales: CorteFacturacion
+  /** Cuánto quedó sin medio informado (para avisar que falta completarlo). */
+  sinMedio: { cantidad: number; total: number }
+}
+
+interface CorteApi {
+  cantidad: number
+  total: number
+  por_medio: Record<MedioResumen, number>
+  ri: number
+  mono: number
+  cobrado: number
+  pendiente: number
+}
+
+interface ResumenApi {
+  anio: number
+  mes: number
+  desde: string
+  hasta: string
+  dias_del_mes: number
+  emisores: number[]
+  incluir_ocultos: boolean
+  medios: MedioResumen[]
+  dias: Array<CorteApi & { fecha: string }>
+  comprobantes: Array<
+    Omit<ComprobanteResumen, 'porMedio'> & { por_medio: Partial<Record<MedioResumen, number>> }
+  >
+  totales: CorteApi
+  sin_medio: { cantidad: number; total: number }
+}
+
+const corteDesdeApi = (c: CorteApi): CorteFacturacion => ({
+  cantidad: c.cantidad,
+  total: c.total,
+  porMedio: c.por_medio,
+  ri: c.ri,
+  mono: c.mono,
+  cobrado: c.cobrado,
+  pendiente: c.pendiente,
+})
+
+export interface OpcionesResumen {
+  /** Cuentas que entran. Vacío o sin definir = todas. */
+  emisores?: number[]
+  /** Suma también los comprobantes ocultados de la lista (borrado lógico). */
+  incluirOcultos?: boolean
+}
+
+/**
+ * Lo facturado en un mes, por día y por medio de cobro. Es la fuente ÚNICA del
+ * exportador: el mismo dato alimenta la vista previa y el archivo.
+ *
+ * Son números del negocio: el backend lo reserva a administradores.
+ */
+export async function obtenerResumenFacturacion(
+  anio: number,
+  mes: number,
+  opciones: OpcionesResumen = {},
+): Promise<ResumenFacturacion> {
+  const params = new URLSearchParams({ anio: String(anio), mes: String(mes) })
+  if (opciones.emisores?.length) params.set('emisores', opciones.emisores.join(','))
+  if (opciones.incluirOcultos) params.set('incluir_ocultos', '1')
+  const r = await api.get<ResumenApi>(
+    `/facturacion/comprobantes/resumen-mensual/?${params.toString()}`,
+    token(),
+  )
+  return {
+    anio: r.anio,
+    mes: r.mes,
+    desde: r.desde,
+    hasta: r.hasta,
+    diasDelMes: r.dias_del_mes,
+    emisores: r.emisores,
+    incluirOcultos: r.incluir_ocultos,
+    medios: r.medios,
+    dias: r.dias.map((d) => ({ fecha: d.fecha, ...corteDesdeApi(d) })),
+    comprobantes: r.comprobantes.map(({ por_medio, ...resto }) => ({
+      ...resto,
+      porMedio: por_medio,
+    })),
+    totales: corteDesdeApi(r.totales),
+    sinMedio: r.sin_medio,
+  }
 }
 
 export function eliminarComprobante(id: number): Promise<void> {

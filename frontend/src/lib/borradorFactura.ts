@@ -1,4 +1,4 @@
-import type { CondicionEmisor, CondicionFiscal, DocTipo } from '@/types'
+import type { CondicionEmisor, CondicionFiscal, DocTipo, MedioPagoComprobante } from '@/types'
 
 /**
  * Puente entre Caja y Facturación: al registrar una venta de mostrador marcada
@@ -29,6 +29,11 @@ export interface BorradorFacturaVenta {
     conceptoGenerico?: boolean
   }>
   observaciones: string
+  /**
+   * Con qué se cobró la parte que se factura (el medio de mayor monto). Precarga
+   * el campo «Cobrado con» de la factura: dato interno, no viaja a ARCA.
+   */
+  medioPago?: MedioPagoComprobante
   /** Cliente elegido en el mostrador: precarga los datos del receptor. */
   cliente?: {
     nombre: string

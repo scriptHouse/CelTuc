@@ -279,6 +279,23 @@ class Comprobante(ModeloBase):
         PENDIENTE = 'pendiente', 'Pendiente'
         PAGADA = 'pagada', 'Pagada'
 
+    class MedioPago(models.TextChoices):
+        """Con que se cobro la factura. Dato INTERNO (no viaja a ARCA).
+
+        Es el MISMO vocabulario que la venta de mostrador (`inventario.Venta.
+        FormaPago`), asi el resumen mensual de facturacion (Efectivo /
+        Transferencias / Tarjetas por dia) sale sin mapeos. Vacio = no se
+        informo: en ese caso el resumen intenta deducirlo del cobro real de la
+        venta de mostrador ligada (`ventas` -> `PagoVenta`), y si no, queda
+        como "sin medio informado".
+        """
+
+        EFECTIVO = 'efectivo', 'Efectivo'
+        TRANSFERENCIA = 'transferencia', 'Transferencia'
+        TRANSF_FINANCIERA = 'transf_financiera', 'Transferencia financiera'
+        TARJETA = 'tarjeta', 'Tarjeta'
+        OTRO = 'otro', 'Otro'
+
     emisor = models.ForeignKey(
         Emisor,
         on_delete=models.PROTECT,
@@ -333,6 +350,12 @@ class Comprobante(ModeloBase):
 
     estado_cobro = models.CharField(
         'estado de cobro', max_length=12, choices=EstadoCobro.choices, default=EstadoCobro.PENDIENTE,
+    )
+    # Medio con el que se cobro. Interno y editable despues de emitir (como el
+    # estado de cobro): no toca nada fiscal. Blank = no informado.
+    medio_pago = models.CharField(
+        'medio de cobro', max_length=20, choices=MedioPago.choices, blank=True, default='',
+        help_text='Con que se cobro. Dato interno para el resumen mensual; no viaja a ARCA.',
     )
     observaciones = models.TextField('observaciones', blank=True)
 

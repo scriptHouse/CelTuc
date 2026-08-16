@@ -956,6 +956,8 @@ function VentaModal({
           : 'monotributista') as CondicionEmisor,
         monto: mayor.monto,
         emisorId: mayor.emisorId,
+        // Con qué se cobró ESTA parte: precarga el medio de la factura.
+        medio: mayor.medio,
         otros: facturables.length - 1,
       }
     }
@@ -964,9 +966,10 @@ function VentaModal({
     return {
       ...tramo,
       emisorId: cuentaPorCondicion[tramo.condicion] ?? null,
+      medio: formaPago,
       otros: 0,
     }
-  }, [dividido, pagos, tramosFacturables, cuentaPorCondicion])
+  }, [dividido, pagos, tramosFacturables, cuentaPorCondicion, formaPago])
 
   function asignarResto() {
     setPagos((ps) => {
@@ -1111,6 +1114,9 @@ function VentaModal({
                   itemServiceId: l.itemServiceId,
                 })),
             observaciones: `Venta de mostrador #${venta.id}`,
+            // El medio con el que entró la plata viaja a la factura: así el
+            // resumen mensual de facturación no queda con «sin informar».
+            medioPago: tramo.medio,
             // El cliente del mostrador viaja a la factura: no se retipea nada.
             cliente: clienteNombre.trim()
               ? {

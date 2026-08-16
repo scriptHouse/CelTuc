@@ -9,6 +9,7 @@ import {
   Clock,
   Download,
   Eye,
+  FileSpreadsheet,
   FileText,
   Gauge,
   Mail,
@@ -38,11 +39,14 @@ import type {
   DocTipo,
   Emisor,
   EstadoEfectivo,
+  MedioPagoComprobante,
 } from '@/types'
+import { MEDIOS_PAGO_CAJA } from '@/types'
 import {
   actualizarEmisor,
   buscarClientes,
   cambiarEstadoCobro,
+  cambiarMedioPago,
   crearEmisor,
   eliminarComprobante,
   emitirComprobante,
@@ -80,6 +84,7 @@ import {
 } from '@/lib/conceptoGenerico'
 import { AperturaModal, type AperturaValues } from '@/components/caja/AperturaModal'
 import { CuentaCard } from '@/components/facturacion/CuentaCard'
+import { ExportarFacturacionModal } from '@/components/facturacion/exportar/ExportarFacturacionModal'
 import { LimiteUsoBar } from '@/components/facturacion/LimiteUsoBar'
 import {
   calcularTotales,
@@ -128,6 +133,16 @@ const DOC_LABEL: Record<DocTipo, string> = {
   DNI: 'DNI',
   CF: 'Consumidor Final',
 }
+
+/**
+ * Medios de cobro que se pueden anotar en una factura. Es el MISMO vocabulario
+ * que la venta de mostrador, así el resumen mensual suma sin mapeos. El dato es
+ * interno (no viaja a ARCA) y se puede dejar sin especificar.
+ */
+const OPCIONES_MEDIO_PAGO = [
+  { value: '', label: 'Sin especificar' },
+  ...MEDIOS_PAGO_CAJA.map((m) => ({ value: m.value, label: m.label })),
+]
 
 const MESES = [
   'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
@@ -270,6 +285,9 @@ export function FacturacionPage() {
   const [limitesModal, setLimitesModal] = useState(false)
   const [conceptoModal, setConceptoModal] = useState(false)
   const [detalleId, setDetalleId] = useState<number | null>(null)
+  // Studio de exportación: arma la planilla del mes (formato de siempre) con lo
+  // facturado con CAE. Son números del negocio: solo administradores.
+  const [exportarModal, setExportarModal] = useState(false)
 
   // --- Facturar una venta de mostrador (viene de Caja) -----------------------
   // Si Caja dejó un borrador, se elige la cuenta que corresponde (RI o Mono),
@@ -313,6 +331,7 @@ export function FacturacionPage() {
       })),
       observaciones: borrador.observaciones,
       pagada: true, // la venta de mostrador ya se cobró
+      medioPago: borrador.medioPago,
       cliente: borrador.cliente,
     })
     setFacturaModal(true)
@@ -375,6 +394,10 @@ export function FacturacionPage() {
     queryClient.invalidateQueries({ queryKey: ['comprobantes'] })
     queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     queryClient.invalidateQueries({ queryKey: ['fact-limites'] })
+    // El resumen del mes que exporta el Studio: sin esto, emitir una factura y
+    // abrir «Exportar facturación» dentro del minuto siguiente bajaría el Excel
+    // sin esa factura (la query tiene staleTime).
+    queryClient.invalidateQueries({ queryKey: ['fact-resumen'] })
   }
 
   const emitirMut = useMutation({
@@ -532,6 +555,12 @@ export function FacturacionPage() {
         className="ct-rise"
         actions={
           <>
+            {soyAdmin && (
+              <Button variant="outline" size="sm" onClick={() => setExportarModal(true)}>
+                <FileSpreadsheet className="h-4 w-4" />
+                Exportar facturación
+              </Button>
+            )}
             {soySuper && (
               <Button variant="outline" size="sm" onClick={abrirNuevaCuenta}>
                 <Building2 className="h-4 w-4" />
@@ -791,6 +820,17 @@ export function FacturacionPage() {
       />
 
       <DetalleModal id={detalleId} onClose={() => setDetalleId(null)} />
+
+      {/* Studio de exportación: la planilla mensual de facturación. Arranca en
+          el mes en curso y con la cuenta que se está mirando. */}
+      {soyAdmin && (
+        <ExportarFacturacionModal
+          abierto={exportarModal}
+          onCerrar={() => setExportarModal(false)}
+          usuario={usuario?.username ?? ''}
+          emisorInicial={emisorId}
+        />
+      )}
 
       {/* Aviso post-emisión: la caja de esa plata no tiene turno abierto. */}
       <Modal open={avisoCajaCerrada != null} onClose={() => setAvisoCajaCerrada(null)} size="md">
@@ -1071,6 +1111,8 @@ interface PrefillFactura {
   }>
   observaciones: string
   pagada: boolean
+  /** Con qué se cobró en el mostrador (precarga el medio de la factura). */
+  medioPago?: MedioPagoComprobante
   /** Cliente cargado en el mostrador (si la venta lo tenía). */
   cliente?: BorradorFacturaVenta['cliente']
 }
@@ -1101,6 +1143,18 @@ function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void 
     staleTime: 5 * 60 * 1000,
   })
   const plantilla = plantillaEfectiva(prefMensaje?.valor)
+
+  // Corregir con qué se cobró: interno, no toca nada fiscal (igual que el
+  // estado de cobro). Al guardarlo, el resumen mensual se recalcula.
+  const medioMut = useMutation({
+    mutationFn: (medio: MedioPagoComprobante) => cambiarMedioPago(id as number, medio),
+    onSuccess: (actualizado) => {
+      queryClient.setQueryData(['comprobante', id], actualizado)
+      queryClient.invalidateQueries({ queryKey: ['comprobantes'] })
+      queryClient.invalidateQueries({ queryKey: ['fact-resumen'] })
+    },
+    onError: (e) => toast.error('No se pudo guardar el medio de cobro', (e as Error).message),
+  })
 
   const guardarMensaje = useMutation({
     // Guardar el texto default equivale a "sin personalizar": se manda vacío,
@@ -1263,6 +1317,24 @@ function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void 
                   <QrCode className="h-8 w-8" />
                 </span>
               )}
+            </div>
+
+            {/* Con qué se cobró: dato INTERNO, editable. Es lo que separa el mes
+                por Efectivo / Transferencias / Tarjetas al exportar. */}
+            <div className="flex flex-col gap-2.5 rounded-xl border border-line bg-surface-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-ink-800">Cobrado con</p>
+                <p className="text-xs leading-relaxed text-ink-400">
+                  Dato interno para el resumen mensual. No viaja a ARCA ni cambia el comprobante.
+                </p>
+              </div>
+              <Select
+                options={OPCIONES_MEDIO_PAGO}
+                value={c.medio_pago ?? ''}
+                onChange={(v) => medioMut.mutate(v as MedioPagoComprobante)}
+                disabled={medioMut.isPending}
+                className="sm:w-56"
+              />
             </div>
 
             <div className="overflow-hidden rounded-xl border border-line">
@@ -1431,6 +1503,9 @@ function NuevaFacturaModal({
   const [fechaEmision, setFechaEmision] = useState(hoyInput())
   const [vencimiento, setVencimiento] = useState(addDaysInput(15))
   const [pagada, setPagada] = useState(false)
+  // Con qué se cobra. Dato INTERNO (no viaja a ARCA): es lo que separa el mes
+  // por Efectivo / Transferencias / Tarjetas en la planilla que se exporta.
+  const [medioPago, setMedioPago] = useState<MedioPagoComprobante>('')
   const [observaciones, setObservaciones] = useState('')
   const [items, setItems] = useState<BorradorItem[]>([])
   const [sucursalStock, setSucursalStock] = useState('')
@@ -1492,6 +1567,8 @@ function NuevaFacturaModal({
     // se cobró en el mostrador (pagada) y NO llevan `producto` — el stock ya
     // lo descontó la venta, así que acá no se vuelve a tocar.
     setPagada(prefill?.pagada ?? false)
+    // Desde una venta de mostrador ya se sabe con qué se cobró: viene elegido.
+    setMedioPago(prefill?.medioPago ?? '')
     setObservaciones(prefill?.observaciones ?? '')
     setItems(
       prefill?.items.length
@@ -1678,6 +1755,9 @@ function NuevaFacturaModal({
       vencimiento: vencimiento || null,
       observaciones: observaciones.trim() || undefined,
       estado_cobro: pagada ? 'pagada' : 'pendiente',
+      // Vacío = no informado: el resumen mensual lo deduce de la venta ligada
+      // (si la hay) y, si no, lo muestra como «sin informar».
+      medio_pago: medioPago || undefined,
       items: validos,
       // Con ítems de una venta el stock YA se movió en el mostrador: la sucursal
       // nunca viaja (el selector ni se muestra), así nada se descuenta dos veces.
@@ -1903,13 +1983,22 @@ function NuevaFacturaModal({
           </div>
         </section>
 
-        {/* Fechas */}
-        <section className="grid gap-3 sm:grid-cols-2">
+        {/* Fechas y cobro */}
+        <section className="grid gap-3 sm:grid-cols-3">
           <Campo label="Fecha de emisión">
             <Input type="date" value={fechaEmision} onChange={(e) => setFechaEmision(e.target.value)} />
           </Campo>
           <Campo label="Vencimiento de pago">
             <Input type="date" value={vencimiento} onChange={(e) => setVencimiento(e.target.value)} />
+          </Campo>
+          {/* Interno: no viaja a ARCA. Es lo que arma las columnas Efectivo /
+              Transferencias / Tarjetas del Excel de facturación del mes. */}
+          <Campo label="Cobrado con">
+            <Select
+              options={OPCIONES_MEDIO_PAGO}
+              value={medioPago}
+              onChange={(v) => setMedioPago(v as MedioPagoComprobante)}
+            />
           </Campo>
         </section>
 

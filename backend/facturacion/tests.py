@@ -953,3 +953,328 @@ class EmitirConConceptoTests(TestCase):
                           self._payload(concepto_generico=self.inactivo.id), format='json')
         self.assertEqual(r.status_code, 400)
         mock_emitir.assert_not_called()
+
+class ResumenMensualTests(TestCase):
+    """Resumen mensual por dia y medio de cobro (`resumen.py`) + su endpoint.
+
+    Prueba lo que decide el numero de cada columna del Excel: el medio informado
+    en el comprobante manda; sin medio se toma el cobro real de la venta ligada
+    (repartido si fue mixto); sin nada, queda como "sin_medio" y NUNCA se pierde
+    del total. Y que solo un administrador puede pedirlo.
+    """
+
+    def setUp(self):
+        from .resumen import resumen_mensual
+        self.resumen_mensual = resumen_mensual
+
+        self.ri = Emisor.objects.create(
+            nombre='RI test', condicion='responsable_inscripto', cuit='30111111112',
+            punto_venta=1, produccion=True,
+        )
+        self.mono = Emisor.objects.create(
+            nombre='Mono test', condicion='monotributista', cuit='20111111112',
+            punto_venta=1, produccion=True,
+        )
+
+    def _comprobante(self, emisor, tipo, numero, fecha, total, **extra):
+        return Comprobante.objects.create(
+            emisor=emisor, tipo=tipo, punto_venta=1, numero=numero,
+            cliente_nombre='Cliente', cliente_condicion='consumidor_final',
+            fecha=fecha, neto=total, iva=0, total=Decimal(str(total)), cae='123',
+            **extra,
+        )
+
+    def _venta_ligada(self, nombre, precio, comprobante, **kwargs):
+        """Una venta de mostrador apuntada al comprobante (como hace Caja)."""
+        from inventario.models import Sucursal, registrar_venta
+        from productos.models import CategoriaProducto, Producto
+
+        sucursal = Sucursal.objects.create(nombre=f'Sucursal {nombre}', orden=90)
+        categoria, _ = CategoriaProducto.objects.get_or_create(nombre='Cat resumen')
+        producto = Producto.objects.create(categoria=categoria, nombre=f'Prod {nombre}')
+        venta = registrar_venta(
+            sucursal, [(producto, 1, Decimal(str(precio)))], permitir_faltante=True, **kwargs,
+        )
+        venta.comprobante = comprobante
+        venta.save(update_fields=['comprobante'])
+        return venta
+
+    def test_agrupa_por_dia_y_por_medio_informado(self):
+        d1 = datetime.date(2026, 8, 3)
+        d2 = datetime.date(2026, 8, 20)
+        self._comprobante(self.ri, 'B', 1, d1, 1000, medio_pago='efectivo')
+        self._comprobante(self.ri, 'B', 2, d1, 2500, medio_pago='transferencia',
+                          estado_cobro='pagada')
+        self._comprobante(self.mono, 'C', 1, d2, 400, medio_pago='tarjeta')
+        # Otro mes: no entra.
+        self._comprobante(self.mono, 'C', 2, datetime.date(2026, 7, 31), 999, medio_pago='efectivo')
+
+        r = self.resumen_mensual(2026, 8)
+        self.assertEqual(r['desde'], '2026-08-01')
+        self.assertEqual(r['hasta'], '2026-08-31')
+        self.assertEqual(r['dias_del_mes'], 31)
+        self.assertEqual([d['fecha'] for d in r['dias']], ['2026-08-03', '2026-08-20'])
+        dia1 = r['dias'][0]
+        self.assertEqual(dia1['cantidad'], 2)
+        self.assertEqual(dia1['total'], 3500.0)
+        self.assertEqual(dia1['por_medio']['efectivo'], 1000.0)
+        self.assertEqual(dia1['por_medio']['transferencia'], 2500.0)
+        self.assertEqual(dia1['por_medio']['sin_medio'], 0.0)
+        self.assertEqual(dia1['ri'], 3500.0)
+        self.assertEqual(dia1['mono'], 0.0)
+        self.assertEqual(dia1['cobrado'], 2500.0)
+        self.assertEqual(dia1['pendiente'], 1000.0)
+        self.assertEqual(r['totales']['total'], 3900.0)
+        self.assertEqual(r['totales']['cantidad'], 3)
+        self.assertEqual(r['totales']['por_medio']['tarjeta'], 400.0)
+        self.assertEqual(r['totales']['mono'], 400.0)
+        self.assertEqual(len(r['comprobantes']), 3)
+        self.assertEqual(r['comprobantes'][0]['medio_origen'], 'comprobante')
+        self.assertEqual(r['sin_medio'], {'cantidad': 0, 'total': 0.0})
+
+    def test_sin_medio_queda_aparte_y_no_se_pierde(self):
+        self._comprobante(self.ri, 'B', 1, datetime.date(2026, 8, 5), 1500)
+        r = self.resumen_mensual(2026, 8)
+        self.assertEqual(r['dias'][0]['por_medio']['sin_medio'], 1500.0)
+        self.assertEqual(r['dias'][0]['total'], 1500.0)
+        self.assertEqual(r['sin_medio'], {'cantidad': 1, 'total': 1500.0})
+        self.assertEqual(r['comprobantes'][0]['medio_origen'], '')
+
+    def test_sin_medio_toma_el_cobro_real_de_la_venta_ligada(self):
+        """Venta cobrada 60 % efectivo + 40 % tarjeta, facturada entera con el
+        mono: la factura aporta 60/40 a esos medios (no va a "sin medio")."""
+        comp = self._comprobante(self.mono, 'C', 1, datetime.date(2026, 8, 7), 1000)
+        self._venta_ligada(
+            'mixta', 1000, comp,
+            pagos=[
+                {'medio': 'efectivo', 'facturacion': 'factura_c', 'emisor': self.mono,
+                 'monto': Decimal('600')},
+                {'medio': 'tarjeta', 'facturacion': 'factura_c', 'emisor': self.mono,
+                 'monto': Decimal('400')},
+            ],
+        )
+        r = self.resumen_mensual(2026, 8)
+        dia = r['dias'][0]
+        self.assertEqual(dia['por_medio']['efectivo'], 600.0)
+        self.assertEqual(dia['por_medio']['tarjeta'], 400.0)
+        self.assertEqual(dia['por_medio']['sin_medio'], 0.0)
+        self.assertEqual(r['sin_medio']['cantidad'], 0)
+        fila = r['comprobantes'][0]
+        self.assertEqual(fila['medio_origen'], 'venta')
+        self.assertEqual(fila['por_medio'], {'efectivo': 600.0, 'tarjeta': 400.0})
+
+    def test_reparto_por_venta_cierra_al_centavo(self):
+        """Aunque el redondeo no sea exacto, la suma de las partes es EXACTAMENTE
+        el total del comprobante (la diferencia va al medio de mayor peso)."""
+        comp = self._comprobante(self.ri, 'B', 1, datetime.date(2026, 8, 9), Decimal('9.99'))
+        self._venta_ligada(
+            'tercios', 10, comp,
+            pagos=[
+                {'medio': 'efectivo', 'facturacion': 'factura_ri', 'emisor': self.ri,
+                 'monto': Decimal('3.33')},
+                {'medio': 'transferencia', 'facturacion': 'factura_ri', 'emisor': self.ri,
+                 'monto': Decimal('3.33')},
+                {'medio': 'tarjeta', 'facturacion': 'factura_ri', 'emisor': self.ri,
+                 'monto': Decimal('3.34')},
+            ],
+        )
+        r = self.resumen_mensual(2026, 8)
+        partes = r['comprobantes'][0]['por_medio']
+        self.assertEqual(len(partes), 3)
+        self.assertEqual(round(sum(partes.values()), 2), 9.99)
+        self.assertEqual(round(sum(r['dias'][0]['por_medio'].values()), 2), 9.99)
+
+    def test_una_parte_de_monto_exacto_gana_al_reparto(self):
+        """Venta cobrada 300 sin factura + 500 facturado: la factura de 500 toma
+        SOLO esa parte, no un pedazo de cada medio."""
+        comp = self._comprobante(self.mono, 'C', 1, datetime.date(2026, 8, 10), 500)
+        self._venta_ligada(
+            'exacta', 800, comp,
+            pagos=[
+                {'medio': 'efectivo', 'facturacion': 'sin_factura', 'monto': Decimal('300')},
+                {'medio': 'tarjeta', 'facturacion': 'factura_c', 'emisor': self.mono,
+                 'monto': Decimal('500')},
+            ],
+        )
+        r = self.resumen_mensual(2026, 8)
+        self.assertEqual(r['comprobantes'][0]['por_medio'], {'tarjeta': 500.0})
+
+    def test_venta_repartida_en_dos_facturas_no_inventa_el_medio(self):
+        """Una venta partida en DOS facturas de la misma cuenta solo puede
+        apuntar a una (`Venta.comprobante` es una FK): repartirle el total entre
+        todas las partes le atribuiria medios que no cobro. Queda sin informar.
+        """
+        comp = self._comprobante(self.mono, 'C', 1, datetime.date(2026, 8, 11), 500)
+        self._venta_ligada(
+            'dos-facturas', 1000, comp,
+            pagos=[
+                {'medio': 'efectivo', 'facturacion': 'factura_c', 'emisor': self.mono,
+                 'monto': Decimal('500')},
+                {'medio': 'tarjeta', 'facturacion': 'factura_c', 'emisor': self.mono,
+                 'monto': Decimal('500')},
+            ],
+        )
+        r = self.resumen_mensual(2026, 8)
+        fila = r['comprobantes'][0]
+        self.assertEqual(fila['medio_origen'], '')
+        self.assertEqual(fila['por_medio'], {'sin_medio': 500.0})
+        # La plata sigue estando en el total del dia: no se pierde, se ve que
+        # falta informar con que se cobro esa factura.
+        self.assertEqual(r['dias'][0]['total'], 500.0)
+        self.assertEqual(r['sin_medio'], {'cantidad': 1, 'total': 500.0})
+
+    def test_solo_las_partes_facturadas_con_esa_cuenta_reparten(self):
+        """Venta mitad sin factura (efectivo) y mitad Factura C por transferencia
+        financiera: la factura del mono va TODA a la financiera."""
+        comp = self._comprobante(self.mono, 'C', 1, datetime.date(2026, 8, 9), 500)
+        self._venta_ligada(
+            'mitad', 1000, comp,
+            pagos=[
+                {'medio': 'efectivo', 'facturacion': 'sin_factura', 'monto': Decimal('500')},
+                {'medio': 'transf_financiera', 'facturacion': 'factura_c',
+                 'emisor': self.mono, 'monto': Decimal('500')},
+            ],
+        )
+        r = self.resumen_mensual(2026, 8)
+        self.assertEqual(r['comprobantes'][0]['por_medio'], {'transf_financiera': 500.0})
+
+    def test_medio_informado_manda_sobre_la_venta(self):
+        comp = self._comprobante(self.mono, 'C', 1, datetime.date(2026, 8, 9), 500,
+                                 medio_pago='efectivo')
+        self._venta_ligada('manda', 500, comp, forma_pago='tarjeta', facturacion='factura_c')
+        r = self.resumen_mensual(2026, 8)
+        self.assertEqual(r['dias'][0]['por_medio']['efectivo'], 500.0)
+        self.assertEqual(r['dias'][0]['por_medio']['tarjeta'], 0.0)
+        self.assertEqual(r['comprobantes'][0]['medio_origen'], 'comprobante')
+
+    def test_filtra_por_cuentas_y_ocultos(self):
+        d = datetime.date(2026, 8, 12)
+        self._comprobante(self.ri, 'B', 1, d, 100, medio_pago='efectivo')
+        oculto = self._comprobante(self.mono, 'C', 1, d, 50, medio_pago='efectivo')
+        oculto.delete()  # borrado logico: sale de la lista, el CAE existe igual
+
+        solo_ri = self.resumen_mensual(2026, 8, emisores=[self.ri.pk])
+        self.assertEqual(solo_ri['totales']['total'], 100.0)
+        self.assertEqual(solo_ri['emisores'], [self.ri.pk])
+
+        sin_ocultos = self.resumen_mensual(2026, 8)
+        self.assertEqual(sin_ocultos['totales']['total'], 100.0)
+
+        con_ocultos = self.resumen_mensual(2026, 8, incluir_ocultos=True)
+        self.assertEqual(con_ocultos['totales']['total'], 150.0)
+        ocultos = [c for c in con_ocultos['comprobantes'] if c['oculto']]
+        self.assertEqual(len(ocultos), 1)
+
+    def test_endpoint_solo_administradores(self):
+        rol = Rol.objects.create(nombre='Facturador resumen')
+        rol.permisos.set(Permiso.objects.filter(codigo='ver_facturacion'))
+        empleado = Usuario.objects.create_user(
+            email='emp-resumen@celtuc.ar', username='empresumen', password='x', rol=rol,
+        )
+        admin = Usuario.objects.create_superuser(
+            email='adm-resumen@celtuc.ar', username='admresumen', password='x',
+        )
+        self._comprobante(self.ri, 'B', 1, datetime.date(2026, 8, 12), 100, medio_pago='efectivo')
+        url = reverse('facturacion:comprobante-resumen-mensual')
+
+        cliente = APIClient()
+        r = cliente.get(url, {'anio': 2026, 'mes': 8})
+        self.assertIn(r.status_code, (401, 403))
+
+        cliente.force_authenticate(empleado)
+        r = cliente.get(url, {'anio': 2026, 'mes': 8})
+        self.assertEqual(r.status_code, 403)
+
+        cliente.force_authenticate(admin)
+        r = cliente.get(url, {'anio': 2026, 'mes': 8, 'emisores': f'{self.ri.pk},{self.mono.pk}'})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['totales']['total'], 100.0)
+        self.assertEqual(r.data['emisores'], [self.ri.pk, self.mono.pk])
+
+        r = cliente.get(url, {'anio': 2026, 'mes': 13})
+        self.assertEqual(r.status_code, 400)
+        r = cliente.get(url, {'anio': 'x', 'mes': 8})
+        self.assertEqual(r.status_code, 400)
+        r = cliente.get(url, {'anio': 2026, 'mes': 8, 'emisores': 'a,b'})
+        self.assertEqual(r.status_code, 400)
+
+
+class MedioPagoComprobanteTests(TestCase):
+    """El medio de cobro viaja al emitir, se guarda y se puede corregir despues
+    (como el estado de cobro): interno, sin tocar nada fiscal."""
+
+    def setUp(self):
+        rol = Rol.objects.create(nombre='Facturador medio')
+        rol.permisos.set(Permiso.objects.filter(codigo='ver_facturacion'))
+        self.fact = Usuario.objects.create_user(
+            email='fm@celtuc.ar', username='factmedio', password='x', rol=rol,
+        )
+        self.emisor = Emisor.objects.create(
+            nombre='Emisor medio', condicion='monotributista', cuit='20111111112', punto_venta=1,
+        )
+        self.cliente = APIClient()
+        self.cliente.force_authenticate(self.fact)
+
+    def _emitir_mock(self, emisor, datos, usuario=None):
+        # Mismo criterio que `servicio.emitir`: el medio informado se guarda.
+        return Comprobante.objects.create(
+            emisor=emisor, tipo='C', punto_venta=1,
+            numero=(Comprobante.objects.count() + 1),
+            cliente_nombre=datos['cliente_nombre'],
+            cliente_condicion=datos['cliente_condicion'],
+            neto=100, iva=0, total=100, cae='999',
+            medio_pago=datos.get('medio_pago') or '',
+        )
+
+    def _payload(self, **extra):
+        payload = {
+            'emisor': self.emisor.id,
+            'cliente_nombre': 'Cliente',
+            'cliente_condicion': 'consumidor_final',
+            'items': [{'descripcion': 'Item', 'cantidad': 1, 'precio_unitario': 100}],
+        }
+        payload.update(extra)
+        return payload
+
+    @patch('facturacion.views.servicio.emitir')
+    def test_emitir_con_medio_lo_guarda_y_lo_devuelve(self, mock_emitir):
+        mock_emitir.side_effect = self._emitir_mock
+        r = self.cliente.post(reverse('facturacion:comprobante-list'),
+                              self._payload(medio_pago='tarjeta'), format='json')
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.data['medio_pago'], 'tarjeta')
+        self.assertEqual(mock_emitir.call_args.args[1]['medio_pago'], 'tarjeta')
+        self.assertEqual(Comprobante.objects.get().medio_pago, 'tarjeta')
+
+    @patch('facturacion.views.servicio.emitir')
+    def test_emitir_sin_medio_queda_vacio(self, mock_emitir):
+        mock_emitir.side_effect = self._emitir_mock
+        r = self.cliente.post(reverse('facturacion:comprobante-list'), self._payload(), format='json')
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.data['medio_pago'], '')
+
+    def test_medio_invalido_es_400(self):
+        r = self.cliente.post(reverse('facturacion:comprobante-list'),
+                              self._payload(medio_pago='cheque'), format='json')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('medio_pago', r.data)
+
+    def test_patch_cambia_el_medio_sin_tocar_lo_fiscal(self):
+        comp = Comprobante.objects.create(
+            emisor=self.emisor, tipo='C', punto_venta=1, numero=7,
+            cliente_nombre='Cliente', cliente_condicion='consumidor_final',
+            neto=100, iva=0, total=100, cae='999',
+        )
+        r = self.cliente.patch(
+            reverse('facturacion:comprobante-detail', args=[comp.pk]),
+            {'medio_pago': 'transf_financiera'}, format='json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['medio_pago'], 'transf_financiera')
+        comp.refresh_from_db()
+        self.assertEqual(comp.medio_pago, 'transf_financiera')
+        self.assertEqual(comp.cae, '999')
+        self.assertEqual(comp.total, Decimal('100'))
+        # La lista tambien lo trae.
+        r = self.cliente.get(reverse('facturacion:comprobante-list'))
+        self.assertEqual(r.data[0]['medio_pago'], 'transf_financiera')

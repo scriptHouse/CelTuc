@@ -29,6 +29,7 @@
 14. [Gotchas y lecciones aprendidas](#14-gotchas-y-lecciones-aprendidas)
 15. [Pendientes / próximos pasos](#15-pendientes--próximos-pasos)
 16. [Mapa de archivos](#16-mapa-de-archivos)
+17. [Exportar la facturación del mes (planilla Excel)](#17-exportar-la-facturación-del-mes-planilla-excel)
 
 ---
 
@@ -135,6 +136,11 @@ La app sigue los patrones del proyecto:
 - Resultado ARCA: `cae`, `cae_vencimiento` (DateField), `qr_url` (Text), `respuesta_afip`
   (JSONField, guardamos un dict chico: resultado/cae/vto/obs).
 - `estado_cobro` (`pendiente`|`pagada` — interno, NO fiscal), `observaciones`.
+- `medio_pago` (`efectivo`|`transferencia`|`transf_financiera`|`tarjeta`|`otro`, o vacío
+  = no informado) — **interno, NO fiscal, no viaja a ARCA**. Es el MISMO vocabulario que
+  la venta de mostrador (`inventario.Venta.FormaPago`), para que el resumen mensual sume
+  sin mapeos. Se carga al emitir y se puede corregir después (igual que `estado_cobro`).
+  Ver §17.
 - `unique_together (emisor, tipo, punto_venta, numero)`.
 - Propiedad **`numero_formateado`** → `0001-00000007` (PV 4 dígitos + número 8 dígitos).
 - Hereda `ModeloBase` (el borrado es lógico: oculta de la lista, **no anula en ARCA**;
@@ -404,8 +410,9 @@ para leer/emitir; gestión de emisores solo admin.
 | GET | `comprobantes/?emisor=<id>` | ver_facturacion | Lista comprobantes |
 | POST | `comprobantes/` | ver_facturacion | **Emite** (llama a ARCA, devuelve CAE) |
 | GET | `comprobantes/<id>/` | ver_facturacion | Detalle (incluye `qr` como data-URI) |
-| PATCH | `comprobantes/<id>/` | ver_facturacion | Cambia `estado_cobro` / `observaciones` |
+| PATCH | `comprobantes/<id>/` | ver_facturacion | Cambia `estado_cobro` / `medio_pago` / `observaciones` |
 | DELETE | `comprobantes/<id>/` | ver_facturacion | Borrado lógico (no anula en ARCA) |
+| GET | `comprobantes/resumen-mensual/` | **admin** | Lo facturado en un mes por día y por medio de cobro (§17) |
 
 **Payload de emisión (POST comprobantes/):**
 ```json
@@ -414,7 +421,7 @@ para leer/emitir; gestión de emisores solo admin.
   "cliente_nombre": "Juan Perez", "cliente_doc_tipo": "CUIT",
   "cliente_doc_numero": "20111111112", "cliente_condicion": "responsable_inscripto",
   "fecha": "2026-06-27", "vencimiento": "2026-07-12", "alicuota_iva": 21,
-  "estado_cobro": "pendiente", "observaciones": "",
+  "estado_cobro": "pendiente", "medio_pago": "efectivo", "observaciones": "",
   "items": [{ "descripcion": "iPhone 15", "cantidad": 1, "precio_unitario": 1350000 }]
 }
 ```
@@ -678,3 +685,67 @@ backend/facturacion/
 > la autorización de ARCA). No edites comprobantes; para corregir, se emite una Nota de
 > Crédito. Y el comprobante debe representar **al emisor**, no a CelTuc (salvo que el emisor
 > sea CelTuc, es decir, RI → A/B).
+
+---
+
+## 17. Exportar la facturación del mes (planilla Excel)
+
+Botón **«Exportar facturación»** en el header de **Facturación** y del **Panel** (solo
+administradores): abre un Studio que arma la planilla mensual del negocio con lo facturado
+**con factura electrónica (CAE)**, día por día y por medio de cobro.
+
+### El formato
+Calca el Excel que ya usa el negocio: `Fecha · Efectivo · Transferencias · Tarjetas ·
+TOTAL · ESTADO · ÍNDICE`, con los títulos de medios en azul (`FF0070C0`), el resto gris
+(`FFD8D8D8`), el ÍNDICE en rojo, la columna TOTAL en verde (`FF92D050`), formato
+**Contabilidad** con `$` (el cero se ve `$ -`), bordes finos y un renglón por día del mes
+(incluidos los días sin facturación, en blanco, para completar a mano).
+
+- **TOTAL**: fórmula viva `=B6+C6+D6` **solo si las columnas de medios elegidas cubren toda
+  la plata del mes sin pisarse**; si no, va el valor real y el Studio avisa (una fórmula que
+  no cierra es peor que ningún dato). Lo decide `dataset.totalCubierto`.
+- **ÍNDICE**: `=IF(E6>meta,"GANANCIA",IF(E6>0,"PERDIDA",0))` + **formato condicional**
+  nativo (verde/rojo). La meta diaria es configurable (default `205000`, la del archivo
+  original). Las etiquetas van **sin tilde**, como en la planilla del negocio: el formato
+  condicional las busca por texto y así los archivos se mezclan sin romperse.
+- **ESTADO**: columna vacía a propósito (se anota a mano).
+- Hojas opcionales: **Comprobantes** (una fila por factura con medio, total, estado y CAE)
+  y **Cómo se generó** (trazabilidad).
+
+### De dónde sale el medio de cobro
+`backend/facturacion/resumen.py`, en este orden:
+1. `Comprobante.medio_pago`, si se informó.
+2. Si no, el **cobro real de la venta de mostrador ligada** (`Venta.comprobante` →
+   `PagoVenta`): el total del comprobante se reparte entre los medios de las partes que ese
+   comprobante representa, en proporción a sus montos (prefiere las de la MISMA cuenta). El
+   conjunto se acepta solo si **su suma es el total de la factura** (± $1 por el redondeo del
+   IVA) o si hay **una sola parte de monto exacto**; si no cierra —por ejemplo una venta
+   repartida en dos facturas, donde la venta apunta a una sola— no se inventa el reparto y
+   cae al punto 3.
+3. Si tampoco, `sin_medio`: aparece como columna aparte, así la plata nunca se pierde del
+   total y se ve que falta completarla.
+
+El medio se carga al emitir (campo «Cobrado con» del modal, precargado desde la venta de
+mostrador vía `lib/borradorFactura.ts`) y se corrige desde el detalle de la factura.
+
+### Archivos
+```
+backend/facturacion/resumen.py        # el cálculo (solo lectura; no toca ARCA)
+backend/facturacion/views.py          # ResumenMensualView (EsAdministrador)
+backend/facturacion/migrations/0009_comprobante_medio_pago.py
+
+frontend/src/components/facturacion/exportar/
+  tipos.ts                            # contrato: columnas, opciones, plantillas
+  datos.ts                            # dataset (fuente única de vista previa y archivo)
+  xlsx.ts                             # generador ExcelJS (no importa nada de la app)
+  ExportarFacturacionModal.tsx        # el Studio (config + vista previa en vivo)
+frontend/src/services/facturacion.ts  # obtenerResumenFacturacion / cambiarMedioPago
+```
+
+### Gotchas del generador (probados)
+- **ExcelJS agrega el `=` solo**: la fórmula viaja SIN él (`{ formula: 'B6+C6+D6' }`).
+  Con `=B6+C6+D6` el archivo sale con `==B6+C6+D6` y Excel lo rechaza.
+- **Las fechas se serializan por UTC**: hay que escribir `Date.UTC(a, m, d)` (medianoche
+  UTC) o la celda queda con una fracción de día colgada.
+- El formato condicional se declara con `fgColor` **y** `bgColor` iguales: según cómo
+  interprete el `dxf`, Excel usa uno u otro.

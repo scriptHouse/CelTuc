@@ -155,6 +155,10 @@ class CrearComprobanteSerializer(serializers.Serializer):
     estado_cobro = serializers.ChoiceField(
         choices=Comprobante.EstadoCobro.choices, default=Comprobante.EstadoCobro.PENDIENTE,
     )
+    # Con que se cobro (interno, no viaja a ARCA). Opcional: vacio = no informado.
+    medio_pago = serializers.ChoiceField(
+        choices=Comprobante.MedioPago.choices, required=False, allow_blank=True, default='',
+    )
     items = ItemComprobanteSerializer(many=True)
     # Si viene, los items que traen `producto` descuentan stock de esta sucursal
     # despues de emitir (la emision NUNCA falla por stock: se avisa aparte).
@@ -209,7 +213,7 @@ class ComprobanteListSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'emisor', 'emisor_nombre', 'tipo', 'punto_venta', 'numero',
             'numero_formateado', 'cliente_nombre', 'cliente_condicion', 'fecha',
-            'vencimiento', 'total', 'estado_cobro', 'cae',
+            'vencimiento', 'total', 'estado_cobro', 'medio_pago', 'cae',
         )
 
 
@@ -234,7 +238,7 @@ class ComprobanteDetailSerializer(serializers.ModelSerializer):
             'cliente_doc_numero', 'cliente_condicion', 'cliente_telefono', 'cliente_email',
             'fecha', 'vencimiento',
             'alicuota_iva', 'neto', 'iva', 'total', 'cae', 'cae_vencimiento',
-            'qr_url', 'qr', 'estado_cobro', 'observaciones', 'items', 'creado',
+            'qr_url', 'qr', 'estado_cobro', 'medio_pago', 'observaciones', 'items', 'creado',
         )
 
     def get_qr(self, obj):
@@ -243,11 +247,12 @@ class ComprobanteDetailSerializer(serializers.ModelSerializer):
 
 
 class ActualizarComprobanteSerializer(serializers.ModelSerializer):
-    """Edicion permitida de un comprobante ya emitido (no toca lo fiscal)."""
+    """Edicion permitida de un comprobante ya emitido (no toca lo fiscal):
+    estado de cobro, medio de cobro y observaciones."""
 
     class Meta:
         model = Comprobante
-        fields = ('estado_cobro', 'observaciones')
+        fields = ('estado_cobro', 'medio_pago', 'observaciones')
 
 
 class EnviarEmailSerializer(serializers.Serializer):

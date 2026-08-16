@@ -18,6 +18,7 @@ from rest_framework.views import APIView
 
 from comun.mixins import AuditoriaMixin
 from usuarios.permissions import (
+    EsAdministrador,
     LecturaConPermisoEscrituraAdmin,
     LecturaConPermisoEscrituraSuperadmin,
 )
@@ -30,6 +31,7 @@ from .email import EmailNoConfigurado, enviar_comprobante
 from .limites import estado_limites_del_anio, guardar_limites, verificar_limite_mensual
 from .models import Cliente, Comprobante, ConceptoFactura, Emisor
 from .permissions import PuedeFacturar
+from .resumen import resumen_mensual
 from .serializers import (
     ActualizarComprobanteSerializer,
     ClienteDetalleSerializer,
@@ -287,6 +289,36 @@ class ComprobanteListCreateView(generics.ListCreateAPIView):
         if avisos_stock:
             cuerpo['avisos_stock'] = avisos_stock
         return Response(cuerpo, status=status.HTTP_201_CREATED)
+
+
+class ResumenMensualView(APIView):
+    """Lo facturado en un mes, por dia y por medio de cobro (ver `resumen.py`).
+
+    Alimenta el boton "Exportar facturacion" (Facturacion y Panel). Son numeros
+    del negocio: SOLO administradores, igual que los KPIs del Panel.
+
+    ``GET ?anio=2026&mes=8[&emisores=1,2][&incluir_ocultos=1]``. Sin anio/mes
+    se toma el mes en curso.
+    """
+
+    permission_classes = [EsAdministrador]
+
+    def get(self, request):
+        hoy = timezone.localdate()
+        try:
+            anio = int(request.query_params.get('anio') or hoy.year)
+            mes = int(request.query_params.get('mes') or hoy.month)
+        except (TypeError, ValueError):
+            return Response({'detail': 'Año o mes inválidos.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not (2000 <= anio <= 2100) or not (1 <= mes <= 12):
+            return Response({'detail': 'Año o mes inválidos.'}, status=status.HTTP_400_BAD_REQUEST)
+        crudo = request.query_params.get('emisores') or ''
+        try:
+            emisores = [int(parte) for parte in crudo.split(',') if parte.strip()]
+        except ValueError:
+            return Response({'detail': 'Cuentas inválidas.'}, status=status.HTTP_400_BAD_REQUEST)
+        incluir_ocultos = (request.query_params.get('incluir_ocultos') or '').lower() in ('1', 'true', 'si')
+        return Response(resumen_mensual(anio, mes, emisores=emisores, incluir_ocultos=incluir_ocultos))
 
 
 class ComprobanteDetailView(AuditoriaMixin, generics.RetrieveUpdateDestroyAPIView):

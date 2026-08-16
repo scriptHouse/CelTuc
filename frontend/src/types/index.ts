@@ -180,6 +180,19 @@ export interface Emisor {
 }
 
 export type EstadoCobro = 'pendiente' | 'pagada'
+
+/**
+ * Medio con el que se cobró una factura. Es EL MISMO vocabulario que la venta
+ * de mostrador (`MedioPagoCaja`), así el resumen mensual suma sin mapeos.
+ * Cadena vacía = no se informó.
+ */
+export type MedioPagoComprobante =
+  | 'efectivo'
+  | 'transferencia'
+  | 'transf_financiera'
+  | 'tarjeta'
+  | 'otro'
+  | ''
 export type DocTipo = 'CUIT' | 'CUIL' | 'DNI' | 'CF'
 
 export interface ItemComprobante {
@@ -225,6 +238,11 @@ export interface Comprobante {
   /** Imagen del QR como data URI (solo en el detalle). */
   qr?: string | null
   estado_cobro: EstadoCobro
+  /**
+   * Con qué se cobró la factura. Dato INTERNO (no viaja a ARCA): alimenta el
+   * resumen mensual del exportador de Facturación. Vacío = no se informó.
+   */
+  medio_pago?: MedioPagoComprobante
   observaciones?: string
   items?: ItemComprobante[]
   creado?: string

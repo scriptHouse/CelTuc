@@ -1,9 +1,11 @@
+import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
   ArrowRightLeft,
   Boxes,
   Building2,
+  FileSpreadsheet,
   Landmark,
   LayoutDashboard,
   PackageSearch,
@@ -28,6 +30,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { Button } from '@/components/ui/Button'
 import { FacturaEstadoBadge } from '@/components/ui/StatusBadge'
 import { operacionesLabel } from '@/components/caja/medios'
+import { ExportarFacturacionModal } from '@/components/facturacion/exportar/ExportarFacturacionModal'
 import { Cartelera } from '@/components/Cartelera'
 import { GestorDolar } from '@/components/GestorDolar'
 import { useToast } from '@/components/ToastProvider'
@@ -39,6 +42,9 @@ export function PanelPage() {
   const confirm = useConfirm()
   const usuario = useAuth((s) => s.usuario)
   const admin = esAdmin(usuario)
+  // Studio de exportación de facturación: la planilla del mes, en el formato de
+  // siempre. Se abre desde acá y desde Facturación (es el mismo).
+  const [exportarModal, setExportarModal] = useState(false)
   // Los números del negocio son SOLO para administradores: a los empleados ni
   // siquiera se les consulta el resumen (ven cartelera + dólar vigente).
   const { data, isLoading } = useQuery({
@@ -74,13 +80,27 @@ export function PanelPage() {
         className="ct-rise"
         actions={
           admin ? (
-            <Button variant="outline" size="sm" onClick={handleReset}>
-              <RefreshCw className="h-4 w-4" />
-              Restaurar demo
-            </Button>
+            <>
+              <Button variant="outline" size="sm" onClick={() => setExportarModal(true)}>
+                <FileSpreadsheet className="h-4 w-4" />
+                Exportar facturación
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleReset}>
+                <RefreshCw className="h-4 w-4" />
+                Restaurar demo
+              </Button>
+            </>
           ) : undefined
         }
       />
+
+      {admin && (
+        <ExportarFacturacionModal
+          abierto={exportarModal}
+          onCerrar={() => setExportarModal(false)}
+          usuario={usuario?.username ?? ''}
+        />
+      )}
 
       {/* Gestor de dólar: el admin ve el del negocio + el blue de DolarAPI; los
           empleados ven SOLO el dólar vigente del negocio, en modo lectura. */}

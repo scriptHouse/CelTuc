@@ -22,8 +22,9 @@ def emitir(emisor, datos: dict, usuario=None):
     ``datos`` (ya validado por el serializer) trae: cliente_nombre,
     cliente_doc_tipo, cliente_doc_numero, cliente_condicion, cliente_telefono,
     cliente_email, concepto, fecha, vencimiento, alicuota_iva, observaciones,
-    estado_cobro e items. Los datos de contacto del cliente son internos: no
-    viajan a ARCA, alimentan la base de clientes.
+    estado_cobro, medio_pago e items. Los datos de contacto del cliente y el
+    medio de cobro son internos: no viajan a ARCA (alimentan la base de
+    clientes y el resumen mensual).
     """
     from ..models import Comprobante, Emisor, ItemComprobante
 
@@ -112,6 +113,8 @@ def emitir(emisor, datos: dict, usuario=None):
                 'observaciones': resultado['observaciones'],
             },
             estado_cobro=datos.get('estado_cobro') or 'pendiente',
+            # Interno (no viaja a ARCA): con que se cobro, para el resumen mensual.
+            medio_pago=datos.get('medio_pago') or '',
             observaciones=(datos.get('observaciones') or '').strip(),
             creado_por=usuario,
             actualizado_por=usuario,
