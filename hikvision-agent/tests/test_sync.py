@@ -343,3 +343,23 @@ def test_un_corte_a_mitad_del_backfill_no_pierde_el_progreso(db, monkeypatch):
     assert Repository(db).get_watermark() == ahora
     # 2 consultas antes del corte + 1 fallida + los tramos restantes (no 13 de nuevo).
     assert reloj.consultas < 20
+
+
+def test_un_404_del_proxy_es_transitorio(db, monkeypatch):
+    """Durante un redespliegue el proxy contesta 404: hay que reintentar corto.
+
+    Antes caía en el `except Exception` genérico del loop, que escribe una
+    traza completa en el log — alarmante para algo que se resuelve solo en
+    segundos.
+    """
+    from hikvision_agent.backend.client import BackendClient, BackendTransientError
+
+    class RespuestaFalsa:
+        status_code = 404
+        text = "404 page not found"
+
+        def json(self):
+            return {}
+
+    with pytest.raises(BackendTransientError):
+        BackendClient._interpretar(RespuestaFalsa())

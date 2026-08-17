@@ -82,6 +82,14 @@ class BackendClient:
             )
         if respuesta.status_code == 429 or respuesta.status_code >= 500:
             raise BackendTransientError(f"Backend devolvió HTTP {respuesta.status_code}")
+        if respuesta.status_code == 404:
+            # Durante un redespliegue el proxy contesta 404 hasta que el
+            # contenedor vuelve a levantar. Es transitorio: reintento corto y
+            # un aviso de una línea, no un error con traza.
+            raise BackendTransientError(
+                "El backend no responde todavía (404): suele ser un "
+                "redespliegue en curso"
+            )
         if respuesta.status_code == 400:
             raise BackendPayloadError(f"Payload rechazado (400): {respuesta.text[:300]}")
         if respuesta.status_code not in (200, 201):
