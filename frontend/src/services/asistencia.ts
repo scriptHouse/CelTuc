@@ -2,6 +2,7 @@ import type {
   AgenteAsistencia,
   AgenteAsistenciaInput,
   AsignacionTurno,
+  FeriadoAsistencia,
   FichadaDetalle,
   LicenciaAsistencia,
   MapeoAsistencia,
@@ -11,6 +12,8 @@ import type {
   RelojAsistencia,
   RelojAsistenciaInput,
   RespuestaResumenAsistencia,
+  TipoCicloTurno,
+  TipoFeriado,
   TipoLicencia,
   TramoTurno,
   TurnoAsistencia,
@@ -170,6 +173,9 @@ export function eliminarMapeo(id: number): Promise<void> {
 export interface TurnoInput {
   nombre: string
   activo?: boolean
+  tipo_ciclo?: TipoCicloTurno
+  dias_ciclo?: number
+  fecha_inicio_ciclo?: string | null
   tolerancia_entrada?: number
   tolerancia_salida?: number
   minutos_antirebote?: number
@@ -202,6 +208,7 @@ export interface AsignacionInput {
   turno: number
   desde: string
   hasta?: string | null
+  desfase_ciclo?: number
 }
 
 export function listarAsignaciones(soloVigentes = false): Promise<AsignacionTurno[]> {
@@ -233,6 +240,10 @@ export interface LicenciaInput {
   tipo: TipoLicencia
   desde: string
   hasta: string
+  /** false = licencia por horas: solo se descuenta esa franja del turno. */
+  jornada_completa?: boolean
+  hora_desde?: string | null
+  hora_hasta?: string | null
   observacion?: string
 }
 
@@ -260,6 +271,45 @@ export function actualizarLicencia(
 
 export function eliminarLicencia(id: number): Promise<void> {
   return api.del<void>(`/asistencia/licencias/${id}/`, token())
+}
+
+// --- Feriados ----------------------------------------------------------------
+
+export interface FeriadoInput {
+  fecha: string
+  nombre: string
+  tipo: TipoFeriado
+  /** null = todas las sucursales. */
+  sucursal?: number | null
+}
+
+export function listarFeriados(filtros: { anio?: number; sucursal?: number | '' } = {}) {
+  return api.get<FeriadoAsistencia[]>(`/asistencia/feriados/${query(filtros)}`, token())
+}
+
+export function crearFeriado(input: FeriadoInput): Promise<FeriadoAsistencia> {
+  return api.post<FeriadoAsistencia>('/asistencia/feriados/', input, token())
+}
+
+export function actualizarFeriado(
+  id: number,
+  input: Partial<FeriadoInput>,
+): Promise<FeriadoAsistencia> {
+  return api.patch<FeriadoAsistencia>(`/asistencia/feriados/${id}/`, input, token())
+}
+
+export function eliminarFeriado(id: number): Promise<void> {
+  return api.del<void>(`/asistencia/feriados/${id}/`, token())
+}
+
+/** Carga de una los feriados nacionales de fecha fija de un año. */
+export function sembrarFeriados(anio: number): Promise<{
+  creados: number
+  omitidos: number
+  resultados: FeriadoAsistencia[]
+  aviso: string
+}> {
+  return api.post('/asistencia/feriados/sembrar/', { anio }, token())
 }
 
 // --- Config del agente (descarga desde la UI) --------------------------------

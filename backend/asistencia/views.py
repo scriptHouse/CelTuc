@@ -8,7 +8,7 @@ Dos APIs bien separadas:
 - **Gestión** (todo lo demás): SOLO superadministrador, como Auditoría.
 """
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Max, Q
@@ -30,11 +30,13 @@ from .models import (
     AsignacionTurno,
     Dispositivo,
     EstadoMapeo,
+    Feriado,
     Fichada,
     Licencia,
     MapeoEmpleado,
     MetodoVerificacion,
     TipoFichada,
+    TipoFeriado,
     Turno,
     aplicar_mapeo,
     hash_evento,
@@ -45,6 +47,7 @@ from .serializers import (
     AsignacionTurnoSerializer,
     DispositivoSerializer,
     EventoAgenteSerializer,
+    FeriadoSerializer,
     HeartbeatSerializer,
     LicenciaSerializer,
     MapeoEmpleadoSerializer,
@@ -599,7 +602,8 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
         if empleado_id:
             fichadas = fichadas.filter(empleado_id=empleado_id)
 
-        turno_en, licencia_en, empleados_seguidos = self._contexto(desde, hasta, empleado_id)
+        ctx = self._contexto(desde, hasta, empleado_id)
+        turno_en, licencia_en, feriado_en, empleados_seguidos = ctx
 
         # 1) Agrupar las fichadas por (dia, persona).
         grupos = {}
@@ -613,6 +617,7 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
                     'numero_reloj': f.numero_reloj,
                     'sin_mapear': False,
                 }
+                sucursal_id = f.empleado.sucursal_id or f.dispositivo.sucursal_id
             else:
                 clave = (dia, 'n', '%s:%s' % (f.dispositivo_id, f.numero_reloj))
                 meta = {
@@ -621,17 +626,24 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
                     'numero_reloj': f.numero_reloj,
                     'sin_mapear': True,
                 }
-            grupos.setdefault(clave, {'meta': meta, 'fichadas': []})['fichadas'].append(f)
+                sucursal_id = f.dispositivo.sucursal_id
+            grupo = grupos.setdefault(
+                clave, {'meta': meta, 'sucursal_id': sucursal_id, 'fichadas': []}
+            )
+            grupo['fichadas'].append(f)
 
         resultados = []
         for clave, grupo in grupos.items():
             meta = grupo['meta']
+            turno, desfase = turno_en(meta['empleado_id'], clave[0])
             resultados.append(
                 jornada_mod.calcular(
                     clave[0],
                     grupo['fichadas'],
-                    turno=turno_en(meta['empleado_id'], clave[0]),
+                    turno=turno,
+                    desfase=desfase,
                     licencia=licencia_en(meta['empleado_id'], clave[0]),
+                    feriado=feriado_en(clave[0], grupo.get('sucursal_id')),
                     **meta
                 ).to_dict()
             )
@@ -640,21 +652,23 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
         vistos = set((clave[0], clave[2]) for clave in grupos if clave[1] == 'e')
         dia = desde
         while dia <= hasta:
-            for emp_id, nombre in empleados_seguidos.items():
+            for emp_id, datos_emp in empleados_seguidos.items():
                 if (dia, emp_id) in vistos:
                     continue
-                turno = turno_en(emp_id, dia)
+                turno, desfase = turno_en(emp_id, dia)
                 licencia = licencia_en(emp_id, dia)
+                # Feriado sin fichadas: el dia no da noticia, se omite.
+                if feriado_en(dia, datos_emp['sucursal_id']) is not None:
+                    continue
                 if turno is None and licencia is None:
                     continue
-                # Franco sin licencia: no es noticia, no ensuciamos el listado.
-                if licencia is None and turno is not None:
-                    if not any(t.dia_semana == dia.weekday() for t in turno.tramos.all()):
-                        continue
+                # Franco sin licencia: tampoco es noticia.
+                if licencia is None and turno is not None and not turno.tramos_de(dia, desfase):
+                    continue
                 resultados.append(
                     jornada_mod.calcular(
-                        dia, [], empleado_id=emp_id, nombre=nombre,
-                        turno=turno, licencia=licencia,
+                        dia, [], empleado_id=emp_id, nombre=datos_emp['nombre'],
+                        turno=turno, desfase=desfase, licencia=licencia,
                     ).to_dict()
                 )
             dia += timedelta(days=1)
@@ -677,7 +691,7 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
 
     @staticmethod
     def _contexto(desde, hasta, empleado_id=None):
-        """Precarga turnos y licencias del rango: evita una consulta por dia."""
+        """Precarga turnos, licencias y feriados: evita una consulta por dia."""
         asignaciones = (
             AsignacionTurno.objects
             .filter(desde__lte=hasta)
@@ -698,18 +712,27 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
         seguidos = {}
         for a in asignaciones:
             por_empleado.setdefault(a.empleado_id, []).append(a)
-            seguidos.setdefault(a.empleado_id, a.empleado.nombre_completo)
+            seguidos.setdefault(a.empleado_id, {
+                'nombre': a.empleado.nombre_completo,
+                'sucursal_id': a.empleado.sucursal_id,
+            })
 
         licencias_por_empleado = {}
         for lic in licencias:
             licencias_por_empleado.setdefault(lic.empleado_id, []).append(lic)
-            seguidos.setdefault(lic.empleado_id, lic.empleado.nombre_completo)
+            seguidos.setdefault(lic.empleado_id, {
+                'nombre': lic.empleado.nombre_completo,
+                'sucursal_id': lic.empleado.sucursal_id,
+            })
+
+        feriados = list(Feriado.objects.filter(fecha__gte=desde, fecha__lte=hasta))
 
         def turno_en(emp_id, fecha):
+            """(turno, desfase) vigente para un empleado en una fecha."""
             for a in por_empleado.get(emp_id, ()):
                 if a.cubre(fecha):
-                    return a.turno
-            return None
+                    return a.turno, a.desfase_ciclo
+            return None, 0
 
         def licencia_en(emp_id, fecha):
             for lic in licencias_por_empleado.get(emp_id, ()):
@@ -717,7 +740,19 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
                     return lic
             return None
 
-        return turno_en, licencia_en, seguidos
+        def feriado_en(fecha, sucursal_id=None):
+            """El feriado del dia; uno de la sucursal le gana al general."""
+            general = None
+            for f in feriados:
+                if f.fecha != fecha:
+                    continue
+                if f.sucursal_id == sucursal_id and sucursal_id is not None:
+                    return f
+                if f.sucursal_id is None:
+                    general = general or f
+            return general
+
+        return turno_en, licencia_en, feriado_en, seguidos
 
 
 # --- Horarios y licencias (solo superadministrador) --------------------------
@@ -772,3 +807,74 @@ class LicenciaListCreateView(_BaseGestion, AuditoriaMixin, generics.ListCreateAP
 class LicenciaDetailView(_BaseGestion, AuditoriaMixin, generics.RetrieveUpdateDestroyAPIView):
     queryset = Licencia.objects.select_related('empleado')
     serializer_class = LicenciaSerializer
+
+
+class FeriadoListCreateView(_BaseGestion, AuditoriaMixin, generics.ListCreateAPIView):
+    serializer_class = FeriadoSerializer
+
+    def get_queryset(self):
+        qs = Feriado.objects.select_related('sucursal')
+        params = self.request.query_params
+        try:
+            anio = int(params.get('anio', ''))
+        except (TypeError, ValueError):
+            anio = None
+        if anio:
+            qs = qs.filter(fecha__year=anio)
+        if _id(params, 'sucursal'):
+            qs = qs.filter(
+                Q(sucursal_id=_id(params, 'sucursal')) | Q(sucursal__isnull=True)
+            )
+        return qs
+
+
+class FeriadoDetailView(_BaseGestion, AuditoriaMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = Feriado.objects.select_related('sucursal')
+    serializer_class = FeriadoSerializer
+
+
+# Feriados nacionales INAMOVIBLES (fecha fija por ley 27.399). Los trasladables
+# —Carnaval, Viernes Santo, 17/8, 12/10, 20/11— cambian cada año y los define
+# el Poder Ejecutivo, asi que esos se cargan a mano.
+FERIADOS_FIJOS = (
+    (1, 1, 'Año Nuevo'),
+    (3, 24, 'Día Nacional de la Memoria por la Verdad y la Justicia'),
+    (4, 2, 'Día del Veterano y de los Caídos en la Guerra de Malvinas'),
+    (5, 1, 'Día del Trabajador'),
+    (5, 25, 'Día de la Revolución de Mayo'),
+    (6, 20, 'Paso a la Inmortalidad del Gral. Manuel Belgrano'),
+    (7, 9, 'Día de la Independencia'),
+    (12, 8, 'Inmaculada Concepción de María'),
+    (12, 25, 'Navidad'),
+)
+
+
+class FeriadosSembrarView(_BaseGestion, APIView):
+    """Carga de una los feriados nacionales de fecha fija de un año."""
+
+    def post(self, request):
+        try:
+            anio = int(request.data.get('anio'))
+        except (TypeError, ValueError):
+            return Response({'detail': 'Indicá el año.'}, status=400)
+        if not 2000 <= anio <= 2100:
+            return Response({'detail': 'Año fuera de rango.'}, status=400)
+
+        creados = []
+        for mes, dia, nombre in FERIADOS_FIJOS:
+            fecha = date(anio, mes, dia)
+            if Feriado.objects.filter(fecha=fecha, sucursal__isnull=True).exists():
+                continue
+            feriado = Feriado.objects.create(
+                fecha=fecha, nombre=nombre, tipo=TipoFeriado.NACIONAL,
+                creado_por=request.user, actualizado_por=request.user,
+            )
+            creados.append(FeriadoSerializer(feriado).data)
+
+        return Response({
+            'creados': len(creados),
+            'omitidos': len(FERIADOS_FIJOS) - len(creados),
+            'resultados': creados,
+            'aviso': 'Los feriados trasladables (Carnaval, Viernes Santo, 17/8, '
+                     '12/10 y 20/11) cambian cada año: cargalos a mano.',
+        })

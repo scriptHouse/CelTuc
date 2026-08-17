@@ -40,7 +40,7 @@ const TABS: { id: Tab; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'resumen', label: 'Resumen', icon: CalendarRange },
   { id: 'fichadas', label: 'Fichadas', icon: ListChecks },
   { id: 'turnos', label: 'Turnos', icon: CalendarClock },
-  { id: 'licencias', label: 'Licencias', icon: Palmtree },
+  { id: 'licencias', label: 'Calendario', icon: Palmtree },
   { id: 'empleados', label: 'Empleados', icon: UserRoundSearch },
   { id: 'config', label: 'Configuración', icon: Settings2 },
 ]

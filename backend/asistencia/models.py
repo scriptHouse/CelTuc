@@ -359,8 +359,32 @@ class Turno(ModeloBase):
     franco. Dos tramos en el mismo día = jornada partida (mañana y tarde).
     """
 
+    SEMANAL = 'semanal'
+    ROTATIVO = 'rotativo'
+    TIPOS_CICLO = (
+        (SEMANAL, 'Semanal (mismo horario cada semana)'),
+        (ROTATIVO, 'Rotativo (ciclo de N días)'),
+    )
+
     nombre = models.CharField('nombre', max_length=120)
     activo = models.BooleanField('activo', default=True)
+
+    # Semanal: el horario se repite por día de la semana (lunes, martes...).
+    # Rotativo: se repite cada `dias_ciclo` días contados desde
+    # `fecha_inicio_ciclo`, así el franco corre respecto del calendario
+    # (2x2, 4x2, semana A / semana B...).
+    tipo_ciclo = models.CharField(
+        'tipo de ciclo', max_length=10, choices=TIPOS_CICLO, default=SEMANAL
+    )
+    dias_ciclo = models.PositiveSmallIntegerField(
+        'días del ciclo', default=7,
+        help_text='Solo para turnos rotativos: cada cuántos días se repite el patrón.',
+    )
+    fecha_inicio_ciclo = models.DateField(
+        'inicio del ciclo', null=True, blank=True,
+        help_text='Solo para turnos rotativos: el día 1 del patrón.',
+    )
+
     tolerancia_entrada = models.PositiveIntegerField(
         'tolerancia de llegada (min)', default=10,
         help_text='Minutos de gracia antes de marcar la llegada como tarde.',
@@ -390,12 +414,49 @@ class Turno(ModeloBase):
         return self.nombre
 
     @property
+    def es_rotativo(self) -> bool:
+        return self.tipo_ciclo == self.ROTATIVO
+
+    @property
+    def largo_patron(self) -> int:
+        """Cuántos días distintos tiene el patrón: 7 si es semanal."""
+        return self.dias_ciclo if self.es_rotativo else 7
+
+    @property
     def minutos_semanales(self) -> int:
+        """Minutos por vuelta completa del patrón (una semana si es semanal)."""
         return sum(t.minutos for t in self.tramos.all())
+
+    def indice_de(self, fecha, desfase: int = 0) -> int:
+        """Qué día del patrón le toca a una fecha.
+
+        Semanal: el día de la semana (0 = lunes). Rotativo: la posición
+        dentro del ciclo, corrida por el `desfase` del empleado (así dos
+        personas comparten un 2x2 en fases opuestas).
+        """
+        if not self.es_rotativo:
+            return fecha.weekday()
+        ancla = self.fecha_inicio_ciclo or fecha
+        largo = max(1, self.dias_ciclo)
+        return ((fecha - ancla).days + desfase) % largo
+
+    def tramos_de(self, fecha, desfase: int = 0):
+        """Los bloques horarios que le corresponden a una fecha."""
+        indice = self.indice_de(fecha, desfase)
+        return sorted(
+            (t for t in self.tramos.all() if t.indice_dia == indice),
+            key=lambda t: t.hora_entrada,
+        )
 
 
 class TramoTurno(ModeloBase):
-    """Un bloque horario de un día de la semana dentro de un turno."""
+    """Un bloque horario dentro del patrón de un turno.
+
+    `indice_dia` es la posición en el patrón: en un turno semanal es el día
+    de la semana (0 = lunes … 6 = domingo); en uno rotativo es el día del
+    ciclo (0 … dias_ciclo-1). Varios tramos con el mismo índice = jornada
+    partida (por ejemplo mañana y tarde, cerrando al mediodía).
+    """
 
     DIAS = (
         (0, 'Lunes'), (1, 'Martes'), (2, 'Miércoles'), (3, 'Jueves'),
@@ -405,7 +466,10 @@ class TramoTurno(ModeloBase):
     turno = models.ForeignKey(
         Turno, on_delete=models.CASCADE, related_name='tramos', verbose_name='turno'
     )
-    dia_semana = models.PositiveSmallIntegerField('día', choices=DIAS)
+    indice_dia = models.PositiveSmallIntegerField(
+        'día del patrón',
+        help_text='Semanal: 0 = lunes … 6 = domingo. Rotativo: día del ciclo.',
+    )
     hora_entrada = models.TimeField('entrada')
     hora_salida = models.TimeField('salida')
 
@@ -413,10 +477,10 @@ class TramoTurno(ModeloBase):
         db_table = 'asistencia_tramos_turno'
         verbose_name = 'horario del turno'
         verbose_name_plural = 'horarios del turno'
-        ordering = ('dia_semana', 'hora_entrada')
+        ordering = ('indice_dia', 'hora_entrada')
 
     def __str__(self):
-        return f'{self.get_dia_semana_display()} {self.hora_entrada:%H:%M}-{self.hora_salida:%H:%M}'
+        return f'Día {self.indice_dia} {self.hora_entrada:%H:%M}-{self.hora_salida:%H:%M}'
 
     @property
     def minutos(self) -> int:
@@ -443,6 +507,11 @@ class AsignacionTurno(ModeloBase):
     )
     desde = models.DateField('desde')
     hasta = models.DateField('hasta', null=True, blank=True, help_text='Vacío: vigente.')
+    desfase_ciclo = models.PositiveSmallIntegerField(
+        'desfase en el ciclo', default=0,
+        help_text='Solo en turnos rotativos: corre el patrón N días para esta '
+                  'persona. Así dos empleados comparten un 2x2 en fases opuestas.',
+    )
 
     class Meta:
         db_table = 'asistencia_asignaciones_turno'
@@ -476,6 +545,14 @@ class Licencia(ModeloBase):
     tipo = models.CharField('tipo', max_length=16, choices=TipoLicencia.choices)
     desde = models.DateField('desde')
     hasta = models.DateField('hasta')
+
+    # Licencia parcial: cubre solo una franja del día (media jornada, turno
+    # médico...). El resto del horario se sigue esperando, así que la persona
+    # no figura ausente por la franja licenciada pero sí por lo demás.
+    jornada_completa = models.BooleanField('día completo', default=True)
+    hora_desde = models.TimeField('desde (hora)', null=True, blank=True)
+    hora_hasta = models.TimeField('hasta (hora)', null=True, blank=True)
+
     observacion = models.TextField('observación', blank=True)
 
     class Meta:
@@ -493,6 +570,10 @@ class Licencia(ModeloBase):
     @property
     def dias(self) -> int:
         return (self.hasta - self.desde).days + 1
+
+    @property
+    def es_parcial(self) -> bool:
+        return not self.jornada_completa and bool(self.hora_desde and self.hora_hasta)
 
     def cubre(self, fecha) -> bool:
         return self.desde <= fecha <= self.hasta
@@ -523,3 +604,65 @@ def licencia_de(empleado_id: int, fecha):
         .order_by('desde')
         .first()
     )
+
+
+class TipoFeriado(models.TextChoices):
+    NACIONAL = 'nacional', 'Nacional'
+    PROVINCIAL = 'provincial', 'Provincial'
+    PUENTE = 'puente', 'Puente turístico'
+    PROPIO = 'propio', 'Cierre propio'
+
+
+class Feriado(ModeloBase):
+    """Un día en el que no se espera que nadie trabaje.
+
+    Sin esto, cada feriado aparece como una ausencia para todo el equipo.
+    `sucursal` vacía = vale para todas; cargarla permite feriados
+    provinciales distintos (Salta y Tucumán no coinciden).
+
+    Si igual se trabaja ese día, las fichadas se registran normalmente y la
+    jornada queda marcada como trabajada en feriado (dato útil para liquidar).
+    """
+
+    fecha = models.DateField('fecha')
+    nombre = models.CharField('nombre', max_length=120)
+    tipo = models.CharField(
+        'tipo', max_length=12, choices=TipoFeriado.choices, default=TipoFeriado.NACIONAL
+    )
+    sucursal = models.ForeignKey(
+        'inventario.Sucursal', on_delete=models.PROTECT, null=True, blank=True,
+        related_name='feriados', verbose_name='sucursal',
+        help_text='Vacío: aplica a todas las sucursales.',
+    )
+
+    class Meta:
+        db_table = 'asistencia_feriados'
+        verbose_name = 'feriado'
+        verbose_name_plural = 'feriados'
+        ordering = ('-fecha',)
+        constraints = [
+            models.UniqueConstraint(
+                fields=('fecha', 'sucursal'),
+                condition=models.Q(borrado=False),
+                name='uq_feriado_fecha_sucursal',
+            ),
+        ]
+        indexes = [models.Index(fields=('fecha',), name='idx_feriado_fecha')]
+
+    def __str__(self):
+        return f'{self.fecha:%d/%m/%Y} · {self.nombre}'
+
+
+def feriado_de(fecha, sucursal_id=None):
+    """El feriado que aplica a una fecha y sucursal (lo específico gana)."""
+    feriados = Feriado.objects.filter(fecha=fecha).filter(
+        models.Q(sucursal_id=sucursal_id) | models.Q(sucursal__isnull=True)
+    )
+    especifico = None
+    general = None
+    for f in feriados:
+        if f.sucursal_id is not None:
+            especifico = f
+        else:
+            general = general or f
+    return especifico or general

@@ -31,4 +31,7 @@ urlpatterns = [
     path('asignaciones/<int:pk>/', views.AsignacionDetailView.as_view(), name='asignacion'),
     path('licencias/', views.LicenciaListCreateView.as_view(), name='licencias'),
     path('licencias/<int:pk>/', views.LicenciaDetailView.as_view(), name='licencia'),
+    path('feriados/', views.FeriadoListCreateView.as_view(), name='feriados'),
+    path('feriados/sembrar/', views.FeriadosSembrarView.as_view(), name='feriados-sembrar'),
+    path('feriados/<int:pk>/', views.FeriadoDetailView.as_view(), name='feriado'),
 ]

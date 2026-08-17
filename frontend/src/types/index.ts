@@ -1004,20 +1004,29 @@ export interface NumeroSinMapear {
 
 // ===== Horarios, licencias y jornada calculada =====
 
-/** Un bloque horario de un día. Varios el mismo día = jornada partida. */
+/**
+ * Un bloque horario del patrón. Varios con el mismo índice = jornada partida.
+ */
 export interface TramoTurno {
   id?: number
-  /** 0 = lunes … 6 = domingo. */
-  dia_semana: number
+  /** Semanal: 0 = lunes … 6 = domingo. Rotativo: día del ciclo (0…N-1). */
+  indice_dia: number
   /** `HH:MM` o `HH:MM:SS`. */
   hora_entrada: string
   hora_salida: string
 }
 
+export type TipoCicloTurno = 'semanal' | 'rotativo'
+
 export interface TurnoAsistencia {
   id: number
   nombre: string
   activo: boolean
+  /** `semanal` repite por día de semana; `rotativo` cada `dias_ciclo` días. */
+  tipo_ciclo: TipoCicloTurno
+  dias_ciclo: number
+  /** Ancla del ciclo rotativo (`aaaa-mm-dd`), null si es semanal. */
+  fecha_inicio_ciclo: string | null
   /** Minutos de gracia antes de marcar la llegada como tarde. */
   tolerancia_entrada: number
   tolerancia_salida: number
@@ -1038,6 +1047,8 @@ export interface AsignacionTurno {
   desde: string
   /** null = vigente. */
   hasta: string | null
+  /** Solo rotativos: corre el patrón N días para esta persona (fases opuestas). */
+  desfase_ciclo: number
   vigente: boolean
   creado: string
 }
@@ -1059,7 +1070,27 @@ export interface LicenciaAsistencia {
   desde: string
   hasta: string
   dias: number
+  /** false = licencia por horas (media jornada, turno médico…). */
+  jornada_completa: boolean
+  /** `HH:MM`, solo si no es de día completo. */
+  hora_desde: string | null
+  hora_hasta: string | null
   observacion: string
+  creado: string
+}
+
+export type TipoFeriado = 'nacional' | 'provincial' | 'puente' | 'propio'
+
+/** Un día en el que no se espera que nadie trabaje. */
+export interface FeriadoAsistencia {
+  id: number
+  fecha: string
+  nombre: string
+  tipo: TipoFeriado
+  tipo_display: string
+  /** null = aplica a todas las sucursales. */
+  sucursal: number | null
+  sucursal_nombre: string | null
   creado: string
 }
 
@@ -1070,6 +1101,7 @@ export type EstadoJornada =
   | 'incompleta'
   | 'ausente'
   | 'licencia'
+  | 'feriado'
   | 'no_laborable'
   | 'sin_turno'
 
@@ -1116,8 +1148,14 @@ export interface JornadaAsistencia {
     tipo_display: string
     desde: string
     hasta: string
+    jornada_completa: boolean
+    hora_desde: string | null
+    hora_hasta: string | null
     observacion: string
   } | null
+  feriado: { nombre: string; tipo: TipoFeriado; tipo_display: string } | null
+  /** Feriado en el que igual se trabajó (dato para liquidar). */
+  trabajo_en_feriado: boolean
 }
 
 export interface RespuestaResumenAsistencia {

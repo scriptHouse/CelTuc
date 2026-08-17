@@ -24,11 +24,23 @@ Un rostro se puede leer dos veces en segundos. Sin protección, esa doble
 lectura invertiría la paridad y arruinaría el día entero (una entrada
 pasaría a leerse como salida). Por eso las fichadas consecutivas dentro de
 la ventana anti-rebote del turno se cuentan una sola vez.
+
+## Qué se espera de cada día
+
+El horario esperado sale del turno, que puede ser **semanal** (por día de la
+semana) o **rotativo** (ciclo de N días, con desfase por empleado). Sobre ese
+horario se aplican, en orden:
+
+1. **Feriado**: no se espera a nadie. Si igual trabajaron, se registra como
+   trabajo en feriado (dato útil para liquidar).
+2. **Licencia de día completo**: tampoco se espera a nadie.
+3. **Licencia por horas**: se descuenta solo esa franja del horario
+   esperado; el resto del día se sigue esperando.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 from django.db import models
 from django.utils import timezone
@@ -47,6 +59,7 @@ class EstadoJornada(models.TextChoices):
     INCOMPLETA = 'incompleta', 'Falta fichar la salida'
     AUSENTE = 'ausente', 'Ausente'
     LICENCIA = 'licencia', 'Licencia'
+    FERIADO = 'feriado', 'Feriado'
     NO_LABORABLE = 'no_laborable', 'No laborable'
     SIN_TURNO = 'sin_turno', 'Sin turno asignado'
 
@@ -113,6 +126,7 @@ class Jornada:
     salida_temprana_minutos: int = 0
     fichadas: int = 0
     licencia: dict | None = None
+    feriado: dict | None = None
     horario_esperado: str = ''
 
     @property
@@ -128,6 +142,10 @@ class Jornada:
     @property
     def minutos_fuera(self) -> int:
         return sum(s.minutos for s in self.salidas_parciales)
+
+    @property
+    def trabajo_en_feriado(self) -> bool:
+        return self.feriado is not None and self.minutos_trabajados > 0
 
     def to_dict(self) -> dict:
         return {
@@ -153,10 +171,12 @@ class Jornada:
             'salida_temprana_minutos': self.salida_temprana_minutos,
             'fichadas': self.fichadas,
             'licencia': self.licencia,
+            'feriado': self.feriado,
+            'trabajo_en_feriado': self.trabajo_en_feriado,
         }
 
 
-# --- Derivación -------------------------------------------------------------
+# --- Derivación de presencia -------------------------------------------------
 
 def colapsar_rebotes(fichadas, minutos_antirebote: int) -> list:
     """Descarta relecturas: dos fichadas seguidas muy juntas son una sola."""
@@ -187,18 +207,15 @@ def armar_tramos(fichadas) -> list[Tramo]:
         elif usar_tipos and f.tipo in TIPOS_SALIDA:
             es_entrada = False
         else:
-            # Sin dato del reloj: alterna según cuántos tramos ya se cerraron.
             es_entrada = (indice % 2 == 0) if not usar_tipos else abierto is None
 
         if es_entrada:
             if abierto is None:
                 abierto = f.ocurrida_en
-            # Dos entradas seguidas: nos quedamos con la primera.
         else:
             if abierto is not None:
                 tramos.append(Tramo(entrada=abierto, salida=f.ocurrida_en))
                 abierto = None
-            # Salida sin entrada previa: se descarta.
 
     if abierto is not None:
         tramos.append(Tramo(entrada=abierto, salida=None))
@@ -214,11 +231,36 @@ def salidas_parciales_de(tramos: list[Tramo]) -> list[SalidaParcial]:
     return huecos
 
 
-def _combinar(fecha: date, hora) -> datetime:
+# --- Horario esperado --------------------------------------------------------
+
+def _combinar(fecha: date, hora: time) -> datetime:
     return timezone.make_aware(datetime.combine(fecha, hora))
 
 
-# --- Cálculo principal ------------------------------------------------------
+def restar_franja(intervalos, quitar_desde, quitar_hasta):
+    """Saca una franja horaria de una lista de intervalos.
+
+    Es lo que convierte una licencia por horas en "el resto del día se sigue
+    esperando": si el turno es 09:00-18:00 y hay licencia 09:00-13:00, queda
+    esperado 13:00-18:00.
+    """
+    resultado = []
+    for inicio, fin in intervalos:
+        if quitar_hasta <= inicio or quitar_desde >= fin:
+            resultado.append((inicio, fin))
+            continue
+        if quitar_desde > inicio:
+            resultado.append((inicio, quitar_desde))
+        if quitar_hasta < fin:
+            resultado.append((quitar_hasta, fin))
+    return resultado
+
+
+def _minutos(intervalos) -> int:
+    return sum(int((fin - inicio).total_seconds() // 60) for inicio, fin in intervalos)
+
+
+# --- Cálculo principal -------------------------------------------------------
 
 def calcular(
     fecha: date,
@@ -230,6 +272,8 @@ def calcular(
     sin_mapear: bool = False,
     turno=None,
     licencia=None,
+    feriado=None,
+    desfase: int = 0,
 ) -> Jornada:
     """Analiza el día de una persona. `fichadas` debe venir ordenada por hora."""
     jornada = Jornada(
@@ -249,15 +293,24 @@ def calcular(
     jornada.salidas_parciales = salidas_parciales_de(jornada.tramos)
     jornada.minutos_trabajados = sum(t.minutos for t in jornada.tramos)
 
-    # Horario esperado para este día de la semana.
-    tramos_turno = []
+    # Horario esperado del día, según el patrón del turno.
+    esperados: list[tuple[datetime, datetime]] = []
     if turno is not None:
-        tramos_turno = [t for t in turno.tramos.all() if t.dia_semana == fecha.weekday()]
-        tramos_turno.sort(key=lambda t: t.hora_entrada)
-        jornada.minutos_esperados = sum(t.minutos for t in tramos_turno)
+        tramos_turno = turno.tramos_de(fecha, desfase)
+        esperados = [
+            (_combinar(fecha, t.hora_entrada), _combinar(fecha, t.hora_salida))
+            for t in tramos_turno
+        ]
         jornada.horario_esperado = ' / '.join(
             f'{t.hora_entrada:%H:%M}-{t.hora_salida:%H:%M}' for t in tramos_turno
         )
+
+    if feriado is not None:
+        jornada.feriado = {
+            'nombre': feriado.nombre,
+            'tipo': feriado.tipo,
+            'tipo_display': feriado.get_tipo_display(),
+        }
 
     if licencia is not None:
         jornada.licencia = {
@@ -265,10 +318,38 @@ def calcular(
             'tipo_display': licencia.get_tipo_display(),
             'desde': licencia.desde.isoformat(),
             'hasta': licencia.hasta.isoformat(),
+            'jornada_completa': licencia.jornada_completa,
+            'hora_desde': licencia.hora_desde.strftime('%H:%M') if licencia.hora_desde else None,
+            'hora_hasta': licencia.hora_hasta.strftime('%H:%M') if licencia.hora_hasta else None,
             'observacion': licencia.observacion,
         }
+
+    # 1) Feriado: no se espera a nadie. Si trabajaron, queda registrado.
+    if feriado is not None:
+        jornada.minutos_esperados = 0
+        jornada.estado = EstadoJornada.FERIADO
+        return jornada
+
+    # 2) Licencia de día completo.
+    if licencia is not None and not licencia.es_parcial:
+        jornada.minutos_esperados = 0
         jornada.estado = EstadoJornada.LICENCIA
         return jornada
+
+    # 3) Licencia por horas: se descuenta esa franja del horario esperado.
+    if licencia is not None and licencia.es_parcial and esperados:
+        esperados = restar_franja(
+            esperados,
+            _combinar(fecha, licencia.hora_desde),
+            _combinar(fecha, licencia.hora_hasta),
+        )
+        if not esperados:
+            # La franja se comió todo el horario del día.
+            jornada.minutos_esperados = 0
+            jornada.estado = EstadoJornada.LICENCIA
+            return jornada
+
+    jornada.minutos_esperados = _minutos(esperados)
 
     if turno is None:
         # Sin turno asignado no hay contra qué comparar: mostramos los tramos
@@ -276,7 +357,7 @@ def calcular(
         jornada.estado = EstadoJornada.SIN_TURNO
         return jornada
 
-    if not tramos_turno:
+    if not esperados:
         jornada.estado = EstadoJornada.NO_LABORABLE
         return jornada
 
@@ -284,9 +365,8 @@ def calcular(
         jornada.estado = EstadoJornada.AUSENTE
         return jornada
 
-    # Comparación con el horario esperado.
-    entrada_esperada = _combinar(fecha, tramos_turno[0].hora_entrada)
-    salida_esperada = _combinar(fecha, tramos_turno[-1].hora_salida)
+    entrada_esperada = esperados[0][0]
+    salida_esperada = esperados[-1][1]
 
     if jornada.primera and jornada.primera > entrada_esperada:
         atraso = int((jornada.primera - entrada_esperada).total_seconds() // 60)

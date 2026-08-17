@@ -10,6 +10,7 @@ from .models import (
     Agente,
     AsignacionTurno,
     Dispositivo,
+    Feriado,
     Licencia,
     MapeoEmpleado,
     MetodoVerificacion,
@@ -174,11 +175,11 @@ class HeartbeatSerializer(serializers.Serializer):
 # --- Horarios y licencias ----------------------------------------------------
 
 class TramoTurnoSerializer(serializers.ModelSerializer):
-    """Un bloque horario de un día. Varios en el mismo día = jornada partida."""
+    """Un bloque horario del patrón. Varios con el mismo índice = jornada partida."""
 
     class Meta:
         model = TramoTurno
-        fields = ('id', 'dia_semana', 'hora_entrada', 'hora_salida')
+        fields = ('id', 'indice_dia', 'hora_entrada', 'hora_salida')
 
     def validate(self, datos):
         if datos['hora_entrada'] == datos['hora_salida']:
@@ -197,6 +198,7 @@ class TurnoSerializer(serializers.ModelSerializer):
         model = Turno
         fields = (
             'id', 'nombre', 'activo',
+            'tipo_ciclo', 'dias_ciclo', 'fecha_inicio_ciclo',
             'tolerancia_entrada', 'tolerancia_salida', 'minutos_antirebote',
             'tramos', 'minutos_semanales', 'empleados_asignados', 'creado',
         )
@@ -213,6 +215,35 @@ class TurnoSerializer(serializers.ModelSerializer):
         if repetido.exists():
             raise serializers.ValidationError(f'Ya existe un turno llamado «{nombre}».')
         return nombre
+
+    def validate(self, datos):
+        tipo = datos.get('tipo_ciclo') or getattr(self.instance, 'tipo_ciclo', Turno.SEMANAL)
+        if tipo == Turno.ROTATIVO:
+            dias = datos.get('dias_ciclo') or getattr(self.instance, 'dias_ciclo', 0)
+            if not dias or dias < 2:
+                raise serializers.ValidationError(
+                    {'dias_ciclo': 'Un ciclo rotativo necesita al menos 2 días.'}
+                )
+            if dias > 60:
+                raise serializers.ValidationError({'dias_ciclo': 'Máximo 60 días de ciclo.'})
+            inicio = datos.get('fecha_inicio_ciclo') or getattr(
+                self.instance, 'fecha_inicio_ciclo', None
+            )
+            if inicio is None:
+                raise serializers.ValidationError(
+                    {'fecha_inicio_ciclo': 'Indicá desde qué día arranca el ciclo.'}
+                )
+            limite = dias
+        else:
+            limite = 7
+
+        for tramo in datos.get('tramos', []) or []:
+            if tramo['indice_dia'] >= limite:
+                raise serializers.ValidationError(
+                    {'tramos': 'Hay un horario fuera del patrón (día %s de %s).'
+                               % (tramo['indice_dia'] + 1, limite)}
+                )
+        return datos
 
     def _reemplazar_tramos(self, turno, tramos):
         # Los tramos son configuración del turno: se reemplazan físicamente,
@@ -245,7 +276,7 @@ class AsignacionTurnoSerializer(serializers.ModelSerializer):
         model = AsignacionTurno
         fields = (
             'id', 'empleado', 'empleado_nombre', 'turno', 'turno_nombre',
-            'desde', 'hasta', 'vigente', 'creado',
+            'desde', 'hasta', 'desfase_ciclo', 'vigente', 'creado',
         )
         read_only_fields = ('creado',)
 
@@ -286,7 +317,9 @@ class LicenciaSerializer(serializers.ModelSerializer):
         model = Licencia
         fields = (
             'id', 'empleado', 'empleado_nombre', 'tipo', 'tipo_display',
-            'desde', 'hasta', 'dias', 'observacion', 'creado',
+            'desde', 'hasta', 'dias',
+            'jornada_completa', 'hora_desde', 'hora_hasta',
+            'observacion', 'creado',
         )
         read_only_fields = ('creado',)
 
@@ -300,6 +333,21 @@ class LicenciaSerializer(serializers.ModelSerializer):
         if desde and hasta and hasta < desde:
             raise serializers.ValidationError({'hasta': 'No puede ser anterior a «desde».'})
 
+        completa = datos.get('jornada_completa')
+        if completa is None:
+            completa = getattr(self.instance, 'jornada_completa', True)
+        if not completa:
+            h_desde = datos.get('hora_desde') or getattr(self.instance, 'hora_desde', None)
+            h_hasta = datos.get('hora_hasta') or getattr(self.instance, 'hora_hasta', None)
+            if not h_desde or not h_hasta:
+                raise serializers.ValidationError(
+                    {'hora_desde': 'Una licencia por horas necesita hora de inicio y de fin.'}
+                )
+            if h_hasta <= h_desde:
+                raise serializers.ValidationError(
+                    {'hora_hasta': 'Tiene que ser posterior a la hora de inicio.'}
+                )
+
         superpuesta = Licencia.objects.filter(
             empleado=empleado, desde__lte=hasta, hasta__gte=desde
         )
@@ -310,5 +358,31 @@ class LicenciaSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 'Ese empleado ya tiene cargada «%s» del %s al %s.'
                 % (otra.get_tipo_display(), otra.desde, otra.hasta)
+            )
+        return datos
+
+
+class FeriadoSerializer(serializers.ModelSerializer):
+    tipo_display = serializers.CharField(source='get_tipo_display', read_only=True)
+    sucursal_nombre = serializers.CharField(source='sucursal.nombre', read_only=True)
+
+    class Meta:
+        model = Feriado
+        fields = (
+            'id', 'fecha', 'nombre', 'tipo', 'tipo_display',
+            'sucursal', 'sucursal_nombre', 'creado',
+        )
+        read_only_fields = ('creado',)
+
+    def validate(self, datos):
+        fecha = datos.get('fecha') or getattr(self.instance, 'fecha', None)
+        sucursal = datos.get('sucursal', getattr(self.instance, 'sucursal', None))
+        repetido = Feriado.objects.filter(fecha=fecha, sucursal=sucursal)
+        if self.instance is not None:
+            repetido = repetido.exclude(pk=self.instance.pk)
+        if repetido.exists():
+            alcance = sucursal.nombre if sucursal else 'todas las sucursales'
+            raise serializers.ValidationError(
+                {'fecha': f'Ya hay un feriado ese día para {alcance}.'}
             )
         return datos

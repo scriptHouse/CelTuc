@@ -35,6 +35,7 @@ const ESTADOS_FILTRO = [
   { value: 'incompleta', label: 'Falta fichar salida' },
   { value: 'ausente', label: 'Ausentes' },
   { value: 'licencia', label: 'Con licencia' },
+  { value: 'feriado', label: 'Feriados' },
   { value: 'con_parcial', label: 'Con salida parcial' },
 ]
 
@@ -78,6 +79,7 @@ export function ResumenTab() {
 
   const resumen = data?.resumen
   const porEstado = resumen?.por_estado ?? {}
+  const trabajadosEnFeriado = (data?.resultados ?? []).filter((j) => j.trabajo_en_feriado).length
 
   return (
     <div>
@@ -113,7 +115,11 @@ export function ResumenTab() {
         <StatCard
           label="A revisar"
           value={num((porEstado.tarde ?? 0) + (porEstado.incompleta ?? 0) + (porEstado.salida_temprana ?? 0))}
-          hint="tarde, temprano o sin cerrar"
+          hint={
+            trabajadosEnFeriado > 0
+              ? `${trabajadosEnFeriado} trabajaron en feriado`
+              : 'tarde, temprano o sin cerrar'
+          }
           icon={TriangleAlert}
           className="ct-stagger-item"
           style={ctStagger(3)}
@@ -271,9 +277,18 @@ function FilaJornada({ jornada, indice }: { jornada: JornadaAsistencia; indice: 
             se fue {duracion(jornada.salida_temprana_minutos)} antes
           </span>
         )}
+        {jornada.feriado && (
+          <span className="font-medium text-violet-700 dark:text-violet-300">
+            {jornada.feriado.nombre}
+            {jornada.trabajo_en_feriado && ' · se trabajó igual'}
+          </span>
+        )}
         {jornada.licencia && (
           <span className="text-sky-700 dark:text-sky-300">
-            {jornada.licencia.tipo_display} ({jornada.licencia.desde} a {jornada.licencia.hasta})
+            {jornada.licencia.tipo_display}
+            {jornada.licencia.jornada_completa
+              ? ` (${jornada.licencia.desde} a ${jornada.licencia.hasta})`
+              : ` de ${jornada.licencia.hora_desde} a ${jornada.licencia.hora_hasta}`}
             {jornada.licencia.observacion ? ` · ${jornada.licencia.observacion}` : ''}
           </span>
         )}

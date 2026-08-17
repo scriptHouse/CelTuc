@@ -20,7 +20,8 @@ import { Modal } from '@/components/ui/Modal'
 import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Textarea } from '@/components/ui/Textarea'
-import { TIPOS_LICENCIA, fechaLocalISO } from '@/components/asistencia/constantes'
+import { FeriadosSeccion } from '@/components/asistencia/FeriadosSeccion'
+import { TIPOS_LICENCIA, duracion, fechaLocalISO, hhmm } from '@/components/asistencia/constantes'
 import { fecha as fechaCorta } from '@/lib/format'
 import { cn, ctStagger } from '@/lib/utils'
 
@@ -31,6 +32,13 @@ const TONO_TIPO: Record<TipoLicencia, string> = {
   franco: 'border-line bg-ink-50 text-ink-700',
   suspension: 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300',
   otro: 'border-line bg-ink-50 text-ink-700',
+}
+
+/** Minutos entre dos horas `HH:MM`. */
+function minutosFranja(desde: string, hasta: string): number {
+  const [hd, md] = desde.split(':').map(Number)
+  const [hh, mh] = hasta.split(':').map(Number)
+  return hh * 60 + mh - (hd * 60 + md)
 }
 
 /** ¿La licencia está corriendo hoy? */
@@ -73,6 +81,14 @@ export function LicenciasTab() {
 
   return (
     <div className="space-y-6">
+      <FeriadosSeccion />
+
+      <div className="border-t border-line pt-6">
+        <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-ink-400">
+          Licencias
+        </h3>
+      </div>
+
       <Card className="p-4">
         <div className="flex flex-wrap items-center gap-3">
           <div className="min-w-52 flex-1">
@@ -181,8 +197,15 @@ export function LicenciasTab() {
                           </td>
                           <td className="tnum px-4 py-3 text-ink-600">
                             {fechaCorta(l.desde)} → {fechaCorta(l.hasta)}
+                            {!l.jornada_completa && l.hora_desde && (
+                              <span className="ml-2 text-xs text-ink-400">
+                                {hhmm(l.hora_desde)}–{hhmm(l.hora_hasta ?? '')}
+                              </span>
+                            )}
                           </td>
-                          <td className="tnum px-4 py-3 text-right text-ink-900">{l.dias}</td>
+                          <td className="tnum px-4 py-3 text-right text-ink-900">
+                            {l.jornada_completa ? l.dias : 'parcial'}
+                          </td>
                           <td className="px-2 py-3">
                             <div className="flex justify-end gap-1">
                               <Button
@@ -262,12 +285,17 @@ function TarjetaLicencia({
           </span>
         </div>
         <Badge tone="soft" className="tnum shrink-0">
-          {licencia.dias} d
+          {licencia.jornada_completa ? `${licencia.dias} d` : 'parcial'}
         </Badge>
       </div>
       <p className="tnum mt-2 text-xs text-ink-500">
         {fechaCorta(licencia.desde)} → {fechaCorta(licencia.hasta)}
       </p>
+      {!licencia.jornada_completa && licencia.hora_desde && (
+        <p className="tnum mt-0.5 text-xs text-ink-400">
+          Solo de {hhmm(licencia.hora_desde)} a {hhmm(licencia.hora_hasta ?? '')}
+        </p>
+      )}
       {licencia.observacion && (
         <p className="mt-1 line-clamp-2 text-xs text-ink-400">{licencia.observacion}</p>
       )}
@@ -299,6 +327,9 @@ function LicenciaModal({
   const [tipo, setTipo] = useState<TipoLicencia>('vacaciones')
   const [desde, setDesde] = useState('')
   const [hasta, setHasta] = useState('')
+  const [completa, setCompleta] = useState(true)
+  const [horaDesde, setHoraDesde] = useState('09:00')
+  const [horaHasta, setHoraHasta] = useState('13:00')
   const [observacion, setObservacion] = useState('')
 
   const { data: empleados = [] } = useQuery({
@@ -314,6 +345,9 @@ function LicenciaModal({
     setTipo(licencia?.tipo ?? 'vacaciones')
     setDesde(licencia?.desde ?? hoy)
     setHasta(licencia?.hasta ?? hoy)
+    setCompleta(licencia?.jornada_completa ?? true)
+    setHoraDesde(hhmm(licencia?.hora_desde ?? '') || '09:00')
+    setHoraHasta(hhmm(licencia?.hora_hasta ?? '') || '13:00')
     setObservacion(licencia?.observacion ?? '')
   }, [abierto, licencia])
 
@@ -324,6 +358,9 @@ function LicenciaModal({
         tipo,
         desde,
         hasta,
+        jornada_completa: completa,
+        hora_desde: completa ? null : horaDesde,
+        hora_hasta: completa ? null : horaHasta,
         observacion: observacion.trim(),
       }
       return licencia ? actualizarLicencia(licencia.id, cuerpo) : crearLicencia(cuerpo)
@@ -339,7 +376,9 @@ function LicenciaModal({
     onError: (e: Error) => toast.error('No se pudo guardar', e.message),
   })
 
-  const valido = empleado !== '' && desde !== '' && hasta !== '' && hasta >= desde
+  const franjaValida = completa || horaHasta > horaDesde
+  const valido =
+    empleado !== '' && desde !== '' && hasta !== '' && hasta >= desde && franjaValida
 
   return (
     <Modal open={abierto} onClose={onClose} size="md">
@@ -390,6 +429,66 @@ function LicenciaModal({
             <p className="text-xs text-red-600 dark:text-red-400">
               La fecha «hasta» no puede ser anterior a «desde».
             </p>
+          )}
+
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-ink-700">Alcance del día</label>
+            <div className="flex gap-1.5">
+              {[
+                { valor: true, label: 'Día completo' },
+                { valor: false, label: 'Por horas' },
+              ].map((opcion) => (
+                <button
+                  key={String(opcion.valor)}
+                  type="button"
+                  onClick={() => setCompleta(opcion.valor)}
+                  className={cn(
+                    'rounded-full border px-3.5 py-1.5 text-xs font-medium transition-colors',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900',
+                    completa === opcion.valor
+                      ? 'border-ink-950 bg-ink-950 text-on-ink'
+                      : 'border-line text-ink-500 hover:border-line-strong hover:text-ink-900',
+                  )}
+                >
+                  {opcion.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {!completa && (
+            <div className="rounded-xl border border-line bg-ink-50 p-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-ink-700">Desde</label>
+                  <Input
+                    type="time"
+                    value={horaDesde}
+                    onChange={(e) => setHoraDesde(e.target.value)}
+                    className="tnum"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-ink-700">Hasta</label>
+                  <Input
+                    type="time"
+                    value={horaHasta}
+                    onChange={(e) => setHoraHasta(e.target.value)}
+                    className="tnum"
+                  />
+                </div>
+              </div>
+              {franjaValida ? (
+                <p className="mt-2 text-[11px] text-ink-400">
+                  Se descuentan {duracion(minutosFranja(horaDesde, horaHasta))} del horario
+                  esperado. El resto del día se sigue esperando: si no viene, figura ausente.
+                </p>
+              ) : (
+                <p className="mt-2 text-[11px] text-red-600 dark:text-red-400">
+                  La hora «hasta» tiene que ser posterior a «desde».
+                </p>
+              )}
+            </div>
           )}
           <div>
             <label className="mb-1.5 block text-sm font-medium text-ink-700">

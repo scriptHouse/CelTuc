@@ -70,6 +70,7 @@ AUDITADOS = {
     'asistencia.Turno': {},
     'asistencia.AsignacionTurno': {},
     'asistencia.Licencia': {},
+    'asistencia.Feriado': {},
 }
 
 

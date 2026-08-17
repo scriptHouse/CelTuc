@@ -10,6 +10,7 @@ import {
   LogIn,
   LogOut,
   MonitorSmartphone,
+  PartyPopper,
   Palmtree,
   ScanFace,
   ShieldQuestion,
@@ -19,7 +20,13 @@ import {
   UserX,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import type { EstadoJornada, MetodoFichada, TipoFichada, TipoLicencia } from '@/types'
+import type {
+  EstadoJornada,
+  MetodoFichada,
+  TipoFeriado,
+  TipoFichada,
+  TipoLicencia,
+} from '@/types'
 
 /** Etiquetas e iconos de los estados de asistencia del reloj (serie MinMoe). */
 export const TIPO_FICHADA: Record<TipoFichada, { label: string; icon: LucideIcon }> = {
@@ -94,6 +101,12 @@ export const ESTADO_JORNADA: Record<
     tono: 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-300',
     punto: 'bg-sky-500',
   },
+  feriado: {
+    label: 'Feriado',
+    icon: PartyPopper,
+    tono: 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900 dark:bg-violet-950 dark:text-violet-300',
+    punto: 'bg-violet-500',
+  },
   no_laborable: {
     label: 'No laborable',
     icon: CalendarOff,
@@ -121,6 +134,13 @@ export const TIPOS_LICENCIA: { value: TipoLicencia; label: string }[] = [
   { value: 'franco', label: 'Franco / día libre' },
   { value: 'suspension', label: 'Suspensión' },
   { value: 'otro', label: 'Otro' },
+]
+
+export const TIPOS_FERIADO: { value: TipoFeriado; label: string }[] = [
+  { value: 'nacional', label: 'Nacional' },
+  { value: 'provincial', label: 'Provincial' },
+  { value: 'puente', label: 'Puente turístico' },
+  { value: 'propio', label: 'Cierre propio' },
 ]
 
 export const DIAS_SEMANA = [

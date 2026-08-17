@@ -42,7 +42,7 @@ def turno_de_prueba(entrada=time(9, 0), salida=time(18, 0), dias=(0,), **kwargs)
     turno = Turno.objects.create(nombre=kwargs.pop('nombre', 'Comercio'), **kwargs)
     for dia in dias:
         TramoTurno.objects.create(
-            turno=turno, dia_semana=dia, hora_entrada=entrada, hora_salida=salida
+            turno=turno, indice_dia=dia, hora_entrada=entrada, hora_salida=salida
         )
     return turno
 
@@ -139,9 +139,9 @@ class TurnoYPuntualidadTests(TestCase):
 
     def test_jornada_partida_suma_los_dos_tramos(self):
         turno = Turno.objects.create(nombre='Partido')
-        TramoTurno.objects.create(turno=turno, dia_semana=0,
+        TramoTurno.objects.create(turno=turno, indice_dia=0,
                                   hora_entrada=time(9, 0), hora_salida=time(13, 0))
-        TramoTurno.objects.create(turno=turno, dia_semana=0,
+        TramoTurno.objects.create(turno=turno, indice_dia=0,
                                   hora_entrada=time(17, 0), hora_salida=time(21, 0))
         j = J.calcular(FECHA, [f(9), f(13), f(17), f(21)], turno=turno)
         self.assertEqual(j.minutos_esperados, 8 * 60)
@@ -290,7 +290,7 @@ class TurnosYLicenciasAPITests(TestCase):
         respuesta = self.cliente.post(reverse('asistencia:turnos'), {
             'nombre': 'Comercio 9 a 18',
             'tramos': [
-                {'dia_semana': d, 'hora_entrada': '09:00', 'hora_salida': '18:00'}
+                {'indice_dia': d, 'hora_entrada': '09:00', 'hora_salida': '18:00'}
                 for d in range(5)
             ],
         }, format='json')
@@ -302,12 +302,12 @@ class TurnosYLicenciasAPITests(TestCase):
         turno = turno_de_prueba(dias=(0, 1, 2, 3, 4))
         respuesta = self.cliente.patch(
             reverse('asistencia:turno', args=[turno.id]),
-            {'tramos': [{'dia_semana': 5, 'hora_entrada': '10:00', 'hora_salida': '14:00'}]},
+            {'tramos': [{'indice_dia': 5, 'hora_entrada': '10:00', 'hora_salida': '14:00'}]},
             format='json',
         )
         self.assertEqual(respuesta.status_code, 200)
         self.assertEqual(turno.tramos.count(), 1)
-        self.assertEqual(turno.tramos.first().dia_semana, 5)
+        self.assertEqual(turno.tramos.first().indice_dia, 5)
 
     def test_no_se_puede_solapar_dos_turnos(self):
         turno_a = turno_de_prueba(nombre='A')
