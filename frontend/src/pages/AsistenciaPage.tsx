@@ -3,11 +3,13 @@ import { useQuery } from '@tanstack/react-query'
 import {
   Activity,
   AlertTriangle,
+  CalendarClock,
   CalendarRange,
   Fingerprint,
   LayoutDashboard,
   ListChecks,
   MonitorSmartphone,
+  Palmtree,
   Settings2,
   UserRoundSearch,
   Watch,
@@ -24,17 +26,21 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { Badge } from '@/components/ui/Badge'
 import { FichadasTab } from '@/components/asistencia/FichadasTab'
 import { ResumenTab } from '@/components/asistencia/ResumenTab'
+import { TurnosTab } from '@/components/asistencia/TurnosTab'
+import { LicenciasTab } from '@/components/asistencia/LicenciasTab'
 import { MapeoTab } from '@/components/asistencia/MapeoTab'
 import { ConfigTab } from '@/components/asistencia/ConfigTab'
 import { num, tiempoRelativo } from '@/lib/format'
 import { cn, ctStagger } from '@/lib/utils'
 
-type Tab = 'panel' | 'fichadas' | 'resumen' | 'empleados' | 'config'
+type Tab = 'panel' | 'resumen' | 'fichadas' | 'turnos' | 'licencias' | 'empleados' | 'config'
 
 const TABS: { id: Tab; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'panel', label: 'Panel', icon: LayoutDashboard },
-  { id: 'fichadas', label: 'Fichadas', icon: ListChecks },
   { id: 'resumen', label: 'Resumen', icon: CalendarRange },
+  { id: 'fichadas', label: 'Fichadas', icon: ListChecks },
+  { id: 'turnos', label: 'Turnos', icon: CalendarClock },
+  { id: 'licencias', label: 'Licencias', icon: Palmtree },
   { id: 'empleados', label: 'Empleados', icon: UserRoundSearch },
   { id: 'config', label: 'Configuración', icon: Settings2 },
 ]
@@ -83,8 +89,10 @@ export function AsistenciaPage() {
       </div>
 
       {tab === 'panel' && <PanelTab />}
-      {tab === 'fichadas' && <FichadasTab />}
       {tab === 'resumen' && <ResumenTab />}
+      {tab === 'fichadas' && <FichadasTab />}
+      {tab === 'turnos' && <TurnosTab />}
+      {tab === 'licencias' && <LicenciasTab />}
       {tab === 'empleados' && <MapeoTab />}
       {tab === 'config' && <ConfigTab />}
     </div>

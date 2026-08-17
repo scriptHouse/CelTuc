@@ -18,6 +18,12 @@ from .models import ClockEvent
 log = logging.getLogger(__name__)
 
 # Estados de asistencia documentados por Hikvision para la serie MinMoe.
+#
+# OJO (validado 2026-08-17 contra un DS-K1A340WX real, firmware V1.2.7 build
+# 240228): si el modulo de Hora y Asistencia del reloj no esta configurado, el
+# equipo manda SIEMPRE "undefined" y nunca entrada/salida. Por eso el backend
+# deriva entrada/salida alternando las fichadas del dia (ver
+# `asistencia.jornada`): este mapa solo aporta el dato cuando el reloj lo sabe.
 ATTENDANCE_STATUS_MAP = {
     "checkin": "check_in",
     "checkout": "check_out",
@@ -25,6 +31,7 @@ ATTENDANCE_STATUS_MAP = {
     "breakin": "break_in",
     "overtimein": "overtime_in",
     "overtimeout": "overtime_out",
+    "undefined": "unknown",   # el reloj no clasifica: lo resuelve el backend
 }
 
 # currentVerifyMode / attendanceStatus llegan en camelCase variable según firmware.
@@ -39,6 +46,13 @@ VERIFY_MODE_MAP = {
     "password": "password",
     "pw": "password",
     "remote": "remote",
+    # El reloj real reporta los metodos HABILITADOS en el lector, no el que la
+    # persona uso. No es un dato util, pero se registra tal cual en vez de
+    # ensuciar el listado con "Otro".
+    "faceorfporcardorpw": "multiple",
+    "faceorfporcard": "multiple",
+    "faceorcardorpw": "multiple",
+    "faceorfp": "multiple",
 }
 
 

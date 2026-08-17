@@ -7,6 +7,7 @@ Dos APIs bien separadas:
   remota que administra el superadmin desde la interfaz.
 - **Gestión** (todo lo demás): SOLO superadministrador, como Auditoría.
 """
+from collections import Counter
 from datetime import datetime, timedelta
 
 from django.db import IntegrityError, transaction
@@ -22,25 +23,32 @@ from comun.mixins import AuditoriaMixin
 from inventario.models import Sucursal
 from usuarios.permissions import EsSuperadministrador
 
+from . import jornada as jornada_mod
 from .authentication import AgenteTokenAuthentication, EsAgenteAutenticado
 from .models import (
     Agente,
+    AsignacionTurno,
     Dispositivo,
     EstadoMapeo,
     Fichada,
+    Licencia,
     MapeoEmpleado,
     MetodoVerificacion,
     TipoFichada,
+    Turno,
     aplicar_mapeo,
     hash_evento,
     resolver_mapeos,
 )
 from .serializers import (
     AgenteSerializer,
+    AsignacionTurnoSerializer,
     DispositivoSerializer,
     EventoAgenteSerializer,
     HeartbeatSerializer,
+    LicenciaSerializer,
     MapeoEmpleadoSerializer,
+    TurnoSerializer,
 )
 
 MAX_EVENTOS_POR_LOTE = 500
@@ -558,77 +566,209 @@ class PanelAsistenciaView(_BaseGestion, APIView):
 
 
 class ResumenAsistenciaView(_BaseGestion, APIView):
-    """Resumen diario por empleado: primera entrada, última salida, presencia."""
+    """Resumen diario con tramos, salidas parciales, turno y licencias.
+
+    Genera una fila por (empleado, dia). Incluye los dias SIN fichadas de
+    quienes tenian turno: esas son las ausencias, que son justamente las que
+    hay que ver.
+    """
 
     MAX_DIAS = 92
 
     def get(self, request):
         params = request.query_params
-        hasta = _fecha_local(params.get('hasta')) or _inicio_de_hoy()
-        desde = _fecha_local(params.get('desde')) or (hasta - timedelta(days=6))
+        hasta = timezone.localtime(_fecha_local(params.get('hasta')) or _inicio_de_hoy()).date()
+        desde_param = _fecha_local(params.get('desde'))
+        desde = timezone.localtime(desde_param).date() if desde_param else hasta - timedelta(days=6)
         if (hasta - desde).days > self.MAX_DIAS:
             desde = hasta - timedelta(days=self.MAX_DIAS)
 
+        inicio = timezone.make_aware(datetime.combine(desde, datetime.min.time()))
+        fin = timezone.make_aware(datetime.combine(hasta, datetime.min.time())) + timedelta(days=1)
+
         fichadas = (
-            Fichada.objects.filter(
-                ocurrida_en__gte=desde, ocurrida_en__lt=hasta + timedelta(days=1)
-            )
+            Fichada.objects.filter(ocurrida_en__gte=inicio, ocurrida_en__lt=fin)
             .select_related('empleado', 'dispositivo')
             .order_by('ocurrida_en')
         )
+        empleado_id = _id(params, 'empleado')
         if _id(params, 'dispositivo'):
             fichadas = fichadas.filter(dispositivo_id=_id(params, 'dispositivo'))
         if _id(params, 'sucursal'):
             fichadas = fichadas.filter(dispositivo__sucursal_id=_id(params, 'sucursal'))
-        if _id(params, 'empleado'):
-            fichadas = fichadas.filter(empleado_id=_id(params, 'empleado'))
+        if empleado_id:
+            fichadas = fichadas.filter(empleado_id=empleado_id)
 
+        turno_en, licencia_en, empleados_seguidos = self._contexto(desde, hasta, empleado_id)
+
+        # 1) Agrupar las fichadas por (dia, persona).
         grupos = {}
         for f in fichadas.iterator():
             dia = timezone.localtime(f.ocurrida_en).date()
             if f.empleado_id:
                 clave = (dia, 'e', f.empleado_id)
-                nombre = f.empleado.nombre_completo
-            else:
-                clave = (dia, 'n', f'{f.dispositivo_id}:{f.numero_reloj}')
-                nombre = f.nombre_reloj or f'Nº {f.numero_reloj}'
-            grupo = grupos.get(clave)
-            if grupo is None:
-                grupo = grupos[clave] = {
-                    'fecha': dia.isoformat(),
-                    'empleado': (
-                        {'id': f.empleado_id, 'nombre': nombre} if f.empleado_id else None
-                    ),
+                meta = {
+                    'empleado_id': f.empleado_id,
+                    'nombre': f.empleado.nombre_completo,
                     'numero_reloj': f.numero_reloj,
-                    'nombre': nombre,
-                    'sin_mapear': f.empleado_id is None,
-                    'eventos': [],
+                    'sin_mapear': False,
                 }
-            grupo['eventos'].append(f)
+            else:
+                clave = (dia, 'n', '%s:%s' % (f.dispositivo_id, f.numero_reloj))
+                meta = {
+                    'empleado_id': None,
+                    'nombre': f.nombre_reloj or f.numero_reloj or 'Sin identificar',
+                    'numero_reloj': f.numero_reloj,
+                    'sin_mapear': True,
+                }
+            grupos.setdefault(clave, {'meta': meta, 'fichadas': []})['fichadas'].append(f)
 
         resultados = []
-        for grupo in grupos.values():
-            eventos = grupo.pop('eventos')
-            entradas = [e for e in eventos if e.tipo == TipoFichada.ENTRADA]
-            salidas = [e for e in eventos if e.tipo == TipoFichada.SALIDA]
-            primera = (entradas[0] if entradas else eventos[0]).ocurrida_en
-            ultima = (salidas[-1] if salidas else eventos[-1]).ocurrida_en
-            presencia = int((ultima - primera).total_seconds() // 60) if ultima > primera else 0
-            grupo.update(
-                {
-                    'primera': primera.isoformat(),
-                    'ultima': ultima.isoformat() if ultima > primera else None,
-                    'fichadas': len(eventos),
-                    'presencia_minutos': presencia,
-                }
+        for clave, grupo in grupos.items():
+            meta = grupo['meta']
+            resultados.append(
+                jornada_mod.calcular(
+                    clave[0],
+                    grupo['fichadas'],
+                    turno=turno_en(meta['empleado_id'], clave[0]),
+                    licencia=licencia_en(meta['empleado_id'], clave[0]),
+                    **meta
+                ).to_dict()
             )
-            resultados.append(grupo)
 
-        resultados.sort(key=lambda g: (g['fecha'], g['nombre']), reverse=True)
-        return Response(
-            {
-                'desde': timezone.localtime(desde).date().isoformat(),
-                'hasta': timezone.localtime(hasta).date().isoformat(),
-                'resultados': resultados,
-            }
+        # 2) Dias sin fichadas de quienes tenian turno: ausencias y licencias.
+        vistos = set((clave[0], clave[2]) for clave in grupos if clave[1] == 'e')
+        dia = desde
+        while dia <= hasta:
+            for emp_id, nombre in empleados_seguidos.items():
+                if (dia, emp_id) in vistos:
+                    continue
+                turno = turno_en(emp_id, dia)
+                licencia = licencia_en(emp_id, dia)
+                if turno is None and licencia is None:
+                    continue
+                # Franco sin licencia: no es noticia, no ensuciamos el listado.
+                if licencia is None and turno is not None:
+                    if not any(t.dia_semana == dia.weekday() for t in turno.tramos.all()):
+                        continue
+                resultados.append(
+                    jornada_mod.calcular(
+                        dia, [], empleado_id=emp_id, nombre=nombre,
+                        turno=turno, licencia=licencia,
+                    ).to_dict()
+                )
+            dia += timedelta(days=1)
+
+        resultados.sort(key=lambda j: (j['fecha'], j['nombre']), reverse=True)
+
+        conteo = Counter(j['estado'] for j in resultados)
+        return Response({
+            'desde': desde.isoformat(),
+            'hasta': hasta.isoformat(),
+            'resultados': resultados,
+            'resumen': {
+                'jornadas': len(resultados),
+                'minutos_trabajados': sum(j['minutos_trabajados'] for j in resultados),
+                'minutos_esperados': sum(j['minutos_esperados'] for j in resultados),
+                'con_salida_parcial': sum(1 for j in resultados if j['salidas_parciales']),
+                'por_estado': dict(conteo),
+            },
+        })
+
+    @staticmethod
+    def _contexto(desde, hasta, empleado_id=None):
+        """Precarga turnos y licencias del rango: evita una consulta por dia."""
+        asignaciones = (
+            AsignacionTurno.objects
+            .filter(desde__lte=hasta)
+            .filter(Q(hasta__isnull=True) | Q(hasta__gte=desde))
+            .select_related('turno', 'empleado')
+            .prefetch_related('turno__tramos')
+            .order_by('-desde')
         )
+        licencias = (
+            Licencia.objects.filter(desde__lte=hasta, hasta__gte=desde)
+            .select_related('empleado')
+        )
+        if empleado_id:
+            asignaciones = asignaciones.filter(empleado_id=empleado_id)
+            licencias = licencias.filter(empleado_id=empleado_id)
+
+        por_empleado = {}
+        seguidos = {}
+        for a in asignaciones:
+            por_empleado.setdefault(a.empleado_id, []).append(a)
+            seguidos.setdefault(a.empleado_id, a.empleado.nombre_completo)
+
+        licencias_por_empleado = {}
+        for lic in licencias:
+            licencias_por_empleado.setdefault(lic.empleado_id, []).append(lic)
+            seguidos.setdefault(lic.empleado_id, lic.empleado.nombre_completo)
+
+        def turno_en(emp_id, fecha):
+            for a in por_empleado.get(emp_id, ()):
+                if a.cubre(fecha):
+                    return a.turno
+            return None
+
+        def licencia_en(emp_id, fecha):
+            for lic in licencias_por_empleado.get(emp_id, ()):
+                if lic.cubre(fecha):
+                    return lic
+            return None
+
+        return turno_en, licencia_en, seguidos
+
+
+# --- Horarios y licencias (solo superadministrador) --------------------------
+
+class TurnoListCreateView(_BaseGestion, AuditoriaMixin, generics.ListCreateAPIView):
+    queryset = Turno.objects.prefetch_related('tramos')
+    serializer_class = TurnoSerializer
+
+
+class TurnoDetailView(_BaseGestion, AuditoriaMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = Turno.objects.prefetch_related('tramos')
+    serializer_class = TurnoSerializer
+
+
+class AsignacionListCreateView(_BaseGestion, AuditoriaMixin, generics.ListCreateAPIView):
+    serializer_class = AsignacionTurnoSerializer
+
+    def get_queryset(self):
+        qs = AsignacionTurno.objects.select_related('empleado', 'turno')
+        params = self.request.query_params
+        if _id(params, 'empleado'):
+            qs = qs.filter(empleado_id=_id(params, 'empleado'))
+        if params.get('vigentes') == '1':
+            qs = qs.filter(hasta__isnull=True)
+        return qs
+
+
+class AsignacionDetailView(_BaseGestion, AuditoriaMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = AsignacionTurno.objects.select_related('empleado', 'turno')
+    serializer_class = AsignacionTurnoSerializer
+
+
+class LicenciaListCreateView(_BaseGestion, AuditoriaMixin, generics.ListCreateAPIView):
+    serializer_class = LicenciaSerializer
+
+    def get_queryset(self):
+        qs = Licencia.objects.select_related('empleado')
+        params = self.request.query_params
+        if _id(params, 'empleado'):
+            qs = qs.filter(empleado_id=_id(params, 'empleado'))
+        if params.get('tipo'):
+            qs = qs.filter(tipo=params['tipo'])
+        desde = _fecha_local(params.get('desde'))
+        if desde:
+            qs = qs.filter(hasta__gte=timezone.localtime(desde).date())
+        hasta = _fecha_local(params.get('hasta'))
+        if hasta:
+            qs = qs.filter(desde__lte=timezone.localtime(hasta).date())
+        return qs
+
+
+class LicenciaDetailView(_BaseGestion, AuditoriaMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = Licencia.objects.select_related('empleado')
+    serializer_class = LicenciaSerializer

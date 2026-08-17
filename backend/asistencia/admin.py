@@ -3,7 +3,16 @@ from unfold.admin import ModelAdmin
 
 from comun.admin import ModeloBaseAdminMixin
 
-from .models import Agente, Dispositivo, Fichada, MapeoEmpleado
+from .models import (
+    Agente,
+    AsignacionTurno,
+    Dispositivo,
+    Fichada,
+    Licencia,
+    MapeoEmpleado,
+    TramoTurno,
+    Turno,
+)
 
 
 @admin.register(Dispositivo)
@@ -51,3 +60,34 @@ class FichadaAdmin(ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+class TramoTurnoInline(admin.TabularInline):
+    model = TramoTurno
+    extra = 0
+    fields = ('dia_semana', 'hora_entrada', 'hora_salida')
+
+
+@admin.register(Turno)
+class TurnoAdmin(ModeloBaseAdminMixin, ModelAdmin):
+    list_display = ('nombre', 'activo', 'tolerancia_entrada', 'tolerancia_salida', 'borrado')
+    list_filter = ('activo',)
+    search_fields = ('nombre',)
+    inlines = (TramoTurnoInline,)
+    actions = ('restaurar',)
+
+
+@admin.register(AsignacionTurno)
+class AsignacionTurnoAdmin(ModeloBaseAdminMixin, ModelAdmin):
+    list_display = ('empleado', 'turno', 'desde', 'hasta', 'borrado')
+    list_filter = ('turno',)
+    search_fields = ('empleado__nombre', 'empleado__apellido')
+    actions = ('restaurar',)
+
+
+@admin.register(Licencia)
+class LicenciaAdmin(ModeloBaseAdminMixin, ModelAdmin):
+    list_display = ('empleado', 'tipo', 'desde', 'hasta', 'borrado')
+    list_filter = ('tipo',)
+    search_fields = ('empleado__nombre', 'empleado__apellido', 'observacion')
+    actions = ('restaurar',)

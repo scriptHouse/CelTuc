@@ -67,6 +67,9 @@ AUDITADOS = {
     'asistencia.Dispositivo': {},
     'asistencia.Agente': {},
     'asistencia.MapeoEmpleado': {},
+    'asistencia.Turno': {},
+    'asistencia.AsignacionTurno': {},
+    'asistencia.Licencia': {},
 }
 
 

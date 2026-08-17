@@ -78,8 +78,9 @@ def test_reloj_a_sqlite_recupera_historico_e_idempotente(db, monkeypatch):
     monkeypatch.setattr(
         "hikvision_agent.sync.device_sync.HikvisionClient", lambda *_args, **_kw: reloj
     )
-    # Congelar "ahora" en una fecha que contiene al fixture.
-    ahora = datetime(2026, 8, 11, 12, 0, tzinfo=TZ)
+    # Congelar "ahora" justo despues del dia del fixture real (2026-07-18),
+    # para que la ventana de backfill (7 dias) lo cubra entero.
+    ahora = datetime(2026, 7, 19, 12, 0, tzinfo=TZ)
 
     class _FakeDatetime(datetime):
         @classmethod
@@ -89,13 +90,13 @@ def test_reloj_a_sqlite_recupera_historico_e_idempotente(db, monkeypatch):
     monkeypatch.setattr("hikvision_agent.sync.device_sync.datetime", _FakeDatetime)
 
     sincronizador = DeviceSync(_holder(), _secrets(), StatusBoard(), Repository(db))
-    assert sincronizador.run_once() == 3  # 3 fichadas; el evento de puerta se ignora
+    assert sincronizador.run_once() == 48  # los 2 `minor 76` (rostro no reconocido) se descartan
 
     # Segunda pasada: solapamiento + mismos eventos → cero nuevos, cero duplicados en el buffer.
     assert sincronizador.run_once() == 0
 
     repo = Repository(db)
-    assert repo.counts()["PENDING"] == 3
+    assert repo.counts()["PENDING"] == 48
     assert repo.get_watermark() is not None
     repo.close()
 

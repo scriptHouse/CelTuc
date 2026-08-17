@@ -896,7 +896,15 @@ export type TipoFichada =
   | 'overtime_out'
   | 'unknown'
 
-export type MetodoFichada = 'face' | 'card' | 'fingerprint' | 'password' | 'remote' | 'unknown'
+export type MetodoFichada =
+  | 'face'
+  | 'card'
+  | 'fingerprint'
+  | 'password'
+  | 'remote'
+  /** El reloj informa los métodos habilitados en el lector, no el que se usó. */
+  | 'multiple'
+  | 'unknown'
 
 export interface FichadaAsistencia {
   id: number
@@ -994,14 +1002,133 @@ export interface NumeroSinMapear {
   ultima: string
 }
 
-export interface ResumenDiaAsistencia {
+// ===== Horarios, licencias y jornada calculada =====
+
+/** Un bloque horario de un día. Varios el mismo día = jornada partida. */
+export interface TramoTurno {
+  id?: number
+  /** 0 = lunes … 6 = domingo. */
+  dia_semana: number
+  /** `HH:MM` o `HH:MM:SS`. */
+  hora_entrada: string
+  hora_salida: string
+}
+
+export interface TurnoAsistencia {
+  id: number
+  nombre: string
+  activo: boolean
+  /** Minutos de gracia antes de marcar la llegada como tarde. */
+  tolerancia_entrada: number
+  tolerancia_salida: number
+  /** Refichadas dentro de estos minutos cuentan una sola vez (doble lectura). */
+  minutos_antirebote: number
+  tramos: TramoTurno[]
+  minutos_semanales: number
+  empleados_asignados: number
+  creado: string
+}
+
+export interface AsignacionTurno {
+  id: number
+  empleado: number
+  empleado_nombre: string
+  turno: number
+  turno_nombre: string
+  desde: string
+  /** null = vigente. */
+  hasta: string | null
+  vigente: boolean
+  creado: string
+}
+
+export type TipoLicencia =
+  | 'vacaciones'
+  | 'enfermedad'
+  | 'especial'
+  | 'franco'
+  | 'suspension'
+  | 'otro'
+
+export interface LicenciaAsistencia {
+  id: number
+  empleado: number
+  empleado_nombre: string
+  tipo: TipoLicencia
+  tipo_display: string
+  desde: string
+  hasta: string
+  dias: number
+  observacion: string
+  creado: string
+}
+
+export type EstadoJornada =
+  | 'ok'
+  | 'tarde'
+  | 'salida_temprana'
+  | 'incompleta'
+  | 'ausente'
+  | 'licencia'
+  | 'no_laborable'
+  | 'sin_turno'
+
+/** Un bloque continuo de presencia: entró y salió. */
+export interface TramoJornada {
+  entrada: string
+  salida: string | null
+  minutos: number
+  /** Sin salida: se olvidó de fichar. */
+  abierto: boolean
+}
+
+/** El hueco entre dos tramos: se fue y volvió el mismo día. */
+export interface SalidaParcial {
+  desde: string
+  hasta: string
+  minutos: number
+}
+
+/** El día de una persona, ya analizado por el backend. */
+export interface JornadaAsistencia {
   fecha: string
   empleado: { id: number; nombre: string } | null
-  numero_reloj: string
   nombre: string
+  numero_reloj: string
   sin_mapear: boolean
-  primera: string
+  turno: string
+  /** Ej: `09:00-13:00 / 17:00-21:00`. */
+  horario_esperado: string
+  estado: EstadoJornada
+  estado_display: string
+  tramos: TramoJornada[]
+  salidas_parciales: SalidaParcial[]
+  primera: string | null
   ultima: string | null
+  minutos_trabajados: number
+  minutos_esperados: number
+  minutos_fuera: number
+  llegada_tarde_minutos: number
+  salida_temprana_minutos: number
   fichadas: number
-  presencia_minutos: number
+  licencia: {
+    tipo: TipoLicencia
+    tipo_display: string
+    desde: string
+    hasta: string
+    observacion: string
+  } | null
+}
+
+export interface RespuestaResumenAsistencia {
+  desde: string
+  hasta: string
+  resultados: JornadaAsistencia[]
+  resumen: {
+    jornadas: number
+    minutos_trabajados: number
+    minutos_esperados: number
+    con_salida_parcial: number
+    por_estado: Partial<Record<EstadoJornada, number>>
+  }
 }

@@ -23,4 +23,12 @@ urlpatterns = [
     path('agentes/<int:pk>/regenerar-token/', views.AgenteRegenerarTokenView.as_view(), name='agente-regenerar-token'),
     path('mapeos/', views.MapeoListCreateView.as_view(), name='mapeos'),
     path('mapeos/<int:pk>/', views.MapeoDetailView.as_view(), name='mapeo'),
+
+    # Horarios y licencias
+    path('turnos/', views.TurnoListCreateView.as_view(), name='turnos'),
+    path('turnos/<int:pk>/', views.TurnoDetailView.as_view(), name='turno'),
+    path('asignaciones/', views.AsignacionListCreateView.as_view(), name='asignaciones'),
+    path('asignaciones/<int:pk>/', views.AsignacionDetailView.as_view(), name='asignacion'),
+    path('licencias/', views.LicenciaListCreateView.as_view(), name='licencias'),
+    path('licencias/<int:pk>/', views.LicenciaDetailView.as_view(), name='licencia'),
 ]

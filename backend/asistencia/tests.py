@@ -341,4 +341,7 @@ class PanelYListadosTests(BaseAsistenciaTest):
         self.assertEqual(respuesta.status_code, 200)
         fila = respuesta.data['resultados'][0]
         self.assertEqual(fila['fichadas'], 2)
-        self.assertEqual(fila['presencia_minutos'], 9 * 60)
+        # El reloj mando check_in/check_out reales: se emparejan en un tramo.
+        self.assertEqual(fila['minutos_trabajados'], 9 * 60)
+        self.assertEqual(len(fila['tramos']), 1)
+        self.assertEqual(fila['salidas_parciales'], [])

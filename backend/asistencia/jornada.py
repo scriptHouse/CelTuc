@@ -1,0 +1,318 @@
+"""Cálculo de la jornada diaria de un empleado.
+
+Este módulo es puro: recibe fichadas ya cargadas y devuelve el análisis del
+día. No toca la base de datos, así que es fácil de testear y de reprocesar.
+
+## Por qué hay que derivar entrada/salida
+
+El DS-K1A340WX real (firmware V1.2.7) manda SIEMPRE ``attendanceStatus:
+"undefined"``: no clasifica entrada ni salida, solo registra "esta persona
+pasó por acá a esta hora". Validado contra el equipo el 2026-08-17.
+
+Entonces las fichadas del día se **alternan**: la 1ª es entrada, la 2ª salida,
+la 3ª entrada otra vez, y así. Eso resuelve solo las salidas parciales:
+
+    09:00 entrada → 13:00 salida → 14:30 entrada → 18:00 salida
+      └── tramo 1 (4 h) ──┘  └ausente 1 h 30┘  └── tramo 2 (3 h 30) ──┘
+
+Si algún día se configura el módulo de Hora y Asistencia del reloj, los
+eventos van a traer el tipo real y este módulo lo prefiere automáticamente.
+
+## Anti-rebote
+
+Un rostro se puede leer dos veces en segundos. Sin protección, esa doble
+lectura invertiría la paridad y arruinaría el día entero (una entrada
+pasaría a leerse como salida). Por eso las fichadas consecutivas dentro de
+la ventana anti-rebote del turno se cuentan una sola vez.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
+
+from django.db import models
+from django.utils import timezone
+
+MINUTOS_ANTIREBOTE_DEFECTO = 2
+
+# Tipos que el reloj usa cuando SÍ tiene configurada la asistencia.
+TIPOS_ENTRADA = {'check_in', 'overtime_in', 'break_in'}
+TIPOS_SALIDA = {'check_out', 'overtime_out', 'break_out'}
+
+
+class EstadoJornada(models.TextChoices):
+    OK = 'ok', 'Presente'
+    TARDE = 'tarde', 'Llegó tarde'
+    SALIDA_TEMPRANA = 'salida_temprana', 'Se retiró antes'
+    INCOMPLETA = 'incompleta', 'Falta fichar la salida'
+    AUSENTE = 'ausente', 'Ausente'
+    LICENCIA = 'licencia', 'Licencia'
+    NO_LABORABLE = 'no_laborable', 'No laborable'
+    SIN_TURNO = 'sin_turno', 'Sin turno asignado'
+
+
+@dataclass
+class Tramo:
+    """Un bloque continuo de presencia: entró y salió."""
+
+    entrada: datetime
+    salida: datetime | None = None
+
+    @property
+    def abierto(self) -> bool:
+        return self.salida is None
+
+    @property
+    def minutos(self) -> int:
+        if self.salida is None:
+            return 0
+        return max(0, int((self.salida - self.entrada).total_seconds() // 60))
+
+    def to_dict(self) -> dict:
+        return {
+            'entrada': self.entrada.isoformat(),
+            'salida': self.salida.isoformat() if self.salida else None,
+            'minutos': self.minutos,
+            'abierto': self.abierto,
+        }
+
+
+@dataclass
+class SalidaParcial:
+    """El hueco entre dos tramos: se fue y volvió dentro del mismo día."""
+
+    desde: datetime
+    hasta: datetime
+
+    @property
+    def minutos(self) -> int:
+        return max(0, int((self.hasta - self.desde).total_seconds() // 60))
+
+    def to_dict(self) -> dict:
+        return {
+            'desde': self.desde.isoformat(),
+            'hasta': self.hasta.isoformat(),
+            'minutos': self.minutos,
+        }
+
+
+@dataclass
+class Jornada:
+    fecha: date
+    empleado_id: int | None = None
+    nombre: str = ''
+    numero_reloj: str = ''
+    sin_mapear: bool = False
+    turno_nombre: str = ''
+    estado: str = EstadoJornada.SIN_TURNO
+    tramos: list[Tramo] = field(default_factory=list)
+    salidas_parciales: list[SalidaParcial] = field(default_factory=list)
+    minutos_trabajados: int = 0
+    minutos_esperados: int = 0
+    llegada_tarde_minutos: int = 0
+    salida_temprana_minutos: int = 0
+    fichadas: int = 0
+    licencia: dict | None = None
+    horario_esperado: str = ''
+
+    @property
+    def primera(self) -> datetime | None:
+        return self.tramos[0].entrada if self.tramos else None
+
+    @property
+    def ultima(self) -> datetime | None:
+        if not self.tramos:
+            return None
+        return self.tramos[-1].salida or self.tramos[-1].entrada
+
+    @property
+    def minutos_fuera(self) -> int:
+        return sum(s.minutos for s in self.salidas_parciales)
+
+    def to_dict(self) -> dict:
+        return {
+            'fecha': self.fecha.isoformat(),
+            'empleado': (
+                {'id': self.empleado_id, 'nombre': self.nombre} if self.empleado_id else None
+            ),
+            'nombre': self.nombre,
+            'numero_reloj': self.numero_reloj,
+            'sin_mapear': self.sin_mapear,
+            'turno': self.turno_nombre,
+            'horario_esperado': self.horario_esperado,
+            'estado': self.estado,
+            'estado_display': EstadoJornada(self.estado).label,
+            'tramos': [t.to_dict() for t in self.tramos],
+            'salidas_parciales': [s.to_dict() for s in self.salidas_parciales],
+            'primera': self.primera.isoformat() if self.primera else None,
+            'ultima': self.ultima.isoformat() if self.ultima else None,
+            'minutos_trabajados': self.minutos_trabajados,
+            'minutos_esperados': self.minutos_esperados,
+            'minutos_fuera': self.minutos_fuera,
+            'llegada_tarde_minutos': self.llegada_tarde_minutos,
+            'salida_temprana_minutos': self.salida_temprana_minutos,
+            'fichadas': self.fichadas,
+            'licencia': self.licencia,
+        }
+
+
+# --- Derivación -------------------------------------------------------------
+
+def colapsar_rebotes(fichadas, minutos_antirebote: int) -> list:
+    """Descarta relecturas: dos fichadas seguidas muy juntas son una sola."""
+    if minutos_antirebote <= 0:
+        return list(fichadas)
+    ventana = timedelta(minutes=minutos_antirebote)
+    limpias = []
+    for f in fichadas:
+        if limpias and (f.ocurrida_en - limpias[-1].ocurrida_en) < ventana:
+            continue
+        limpias.append(f)
+    return limpias
+
+
+def armar_tramos(fichadas) -> list[Tramo]:
+    """Empareja las fichadas del día en tramos de presencia.
+
+    Usa el tipo que informa el reloj si al menos una fichada lo trae; si no
+    (el caso real del DS-K1A340WX), alterna entrada/salida por posición.
+    """
+    usar_tipos = any(f.tipo in TIPOS_ENTRADA or f.tipo in TIPOS_SALIDA for f in fichadas)
+
+    tramos: list[Tramo] = []
+    abierto: datetime | None = None
+    for indice, f in enumerate(fichadas):
+        if usar_tipos and f.tipo in TIPOS_ENTRADA:
+            es_entrada = True
+        elif usar_tipos and f.tipo in TIPOS_SALIDA:
+            es_entrada = False
+        else:
+            # Sin dato del reloj: alterna según cuántos tramos ya se cerraron.
+            es_entrada = (indice % 2 == 0) if not usar_tipos else abierto is None
+
+        if es_entrada:
+            if abierto is None:
+                abierto = f.ocurrida_en
+            # Dos entradas seguidas: nos quedamos con la primera.
+        else:
+            if abierto is not None:
+                tramos.append(Tramo(entrada=abierto, salida=f.ocurrida_en))
+                abierto = None
+            # Salida sin entrada previa: se descarta.
+
+    if abierto is not None:
+        tramos.append(Tramo(entrada=abierto, salida=None))
+    return tramos
+
+
+def salidas_parciales_de(tramos: list[Tramo]) -> list[SalidaParcial]:
+    """Los huecos entre tramos cerrados: se fue y volvió el mismo día."""
+    huecos = []
+    for anterior, siguiente in zip(tramos, tramos[1:]):
+        if anterior.salida is not None:
+            huecos.append(SalidaParcial(desde=anterior.salida, hasta=siguiente.entrada))
+    return huecos
+
+
+def _combinar(fecha: date, hora) -> datetime:
+    return timezone.make_aware(datetime.combine(fecha, hora))
+
+
+# --- Cálculo principal ------------------------------------------------------
+
+def calcular(
+    fecha: date,
+    fichadas: list,
+    *,
+    empleado_id: int | None = None,
+    nombre: str = '',
+    numero_reloj: str = '',
+    sin_mapear: bool = False,
+    turno=None,
+    licencia=None,
+) -> Jornada:
+    """Analiza el día de una persona. `fichadas` debe venir ordenada por hora."""
+    jornada = Jornada(
+        fecha=fecha,
+        empleado_id=empleado_id,
+        nombre=nombre,
+        numero_reloj=numero_reloj,
+        sin_mapear=sin_mapear,
+        turno_nombre=turno.nombre if turno else '',
+    )
+
+    antirebote = turno.minutos_antirebote if turno else MINUTOS_ANTIREBOTE_DEFECTO
+    limpias = colapsar_rebotes(fichadas, antirebote)
+    jornada.fichadas = len(limpias)
+
+    jornada.tramos = armar_tramos(limpias)
+    jornada.salidas_parciales = salidas_parciales_de(jornada.tramos)
+    jornada.minutos_trabajados = sum(t.minutos for t in jornada.tramos)
+
+    # Horario esperado para este día de la semana.
+    tramos_turno = []
+    if turno is not None:
+        tramos_turno = [t for t in turno.tramos.all() if t.dia_semana == fecha.weekday()]
+        tramos_turno.sort(key=lambda t: t.hora_entrada)
+        jornada.minutos_esperados = sum(t.minutos for t in tramos_turno)
+        jornada.horario_esperado = ' / '.join(
+            f'{t.hora_entrada:%H:%M}-{t.hora_salida:%H:%M}' for t in tramos_turno
+        )
+
+    if licencia is not None:
+        jornada.licencia = {
+            'tipo': licencia.tipo,
+            'tipo_display': licencia.get_tipo_display(),
+            'desde': licencia.desde.isoformat(),
+            'hasta': licencia.hasta.isoformat(),
+            'observacion': licencia.observacion,
+        }
+        jornada.estado = EstadoJornada.LICENCIA
+        return jornada
+
+    if turno is None:
+        # Sin turno asignado no hay contra qué comparar: mostramos los tramos
+        # y las horas, pero no juzgamos puntualidad ni ausencia.
+        jornada.estado = EstadoJornada.SIN_TURNO
+        return jornada
+
+    if not tramos_turno:
+        jornada.estado = EstadoJornada.NO_LABORABLE
+        return jornada
+
+    if not limpias:
+        jornada.estado = EstadoJornada.AUSENTE
+        return jornada
+
+    # Comparación con el horario esperado.
+    entrada_esperada = _combinar(fecha, tramos_turno[0].hora_entrada)
+    salida_esperada = _combinar(fecha, tramos_turno[-1].hora_salida)
+
+    if jornada.primera and jornada.primera > entrada_esperada:
+        atraso = int((jornada.primera - entrada_esperada).total_seconds() // 60)
+        if atraso > turno.tolerancia_entrada:
+            jornada.llegada_tarde_minutos = atraso
+
+    ultima = jornada.ultima
+    if ultima and not any(t.abierto for t in jornada.tramos) and ultima < salida_esperada:
+        adelanto = int((salida_esperada - ultima).total_seconds() // 60)
+        if adelanto > turno.tolerancia_salida:
+            jornada.salida_temprana_minutos = adelanto
+
+    if any(t.abierto for t in jornada.tramos):
+        jornada.estado = EstadoJornada.INCOMPLETA
+    elif jornada.llegada_tarde_minutos:
+        jornada.estado = EstadoJornada.TARDE
+    elif jornada.salida_temprana_minutos:
+        jornada.estado = EstadoJornada.SALIDA_TEMPRANA
+    else:
+        jornada.estado = EstadoJornada.OK
+    return jornada
+
+
+def formatear_minutos(minutos: int) -> str:
+    """`465` → `7 h 45 m` (para reportes de texto)."""
+    if minutos <= 0:
+        return '—'
+    horas, resto = divmod(minutos, 60)
+    return f'{horas} h {resto:02d} m' if horas else f'{resto} m'

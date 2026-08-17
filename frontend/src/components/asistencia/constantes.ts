@@ -1,4 +1,7 @@
 import {
+  AlarmClock,
+  CalendarOff,
+  CircleCheck,
   Coffee,
   CreditCard,
   Fingerprint,
@@ -7,12 +10,16 @@ import {
   LogIn,
   LogOut,
   MonitorSmartphone,
+  Palmtree,
   ScanFace,
+  ShieldQuestion,
   Timer,
+  TriangleAlert,
   Undo2,
+  UserX,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import type { MetodoFichada, TipoFichada } from '@/types'
+import type { EstadoJornada, MetodoFichada, TipoFichada, TipoLicencia } from '@/types'
 
 /** Etiquetas e iconos de los estados de asistencia del reloj (serie MinMoe). */
 export const TIPO_FICHADA: Record<TipoFichada, { label: string; icon: LucideIcon }> = {
@@ -22,7 +29,7 @@ export const TIPO_FICHADA: Record<TipoFichada, { label: string; icon: LucideIcon
   break_in: { label: 'Vuelta de descanso', icon: Undo2 },
   overtime_in: { label: 'Entrada extra', icon: Timer },
   overtime_out: { label: 'Salida extra', icon: Timer },
-  unknown: { label: 'Fichada', icon: HelpCircle },
+  unknown: { label: 'Fichada', icon: Fingerprint },
 }
 
 export const METODO_FICHADA: Record<MetodoFichada, { label: string; icon: LucideIcon }> = {
@@ -31,6 +38,8 @@ export const METODO_FICHADA: Record<MetodoFichada, { label: string; icon: Lucide
   fingerprint: { label: 'Huella', icon: Fingerprint },
   password: { label: 'Clave', icon: KeyRound },
   remote: { label: 'Remoto', icon: MonitorSmartphone },
+  // El DS-K1A340WX informa los métodos habilitados en el lector, no el usado.
+  multiple: { label: 'Rostro/tarjeta/huella', icon: ScanFace },
   unknown: { label: 'Otro', icon: HelpCircle },
 }
 
@@ -44,6 +53,105 @@ export function metodoDe(valor: string) {
   ]
 }
 
+/** Cómo se ve cada estado de una jornada. `tono` son clases Tailwind del chip. */
+export const ESTADO_JORNADA: Record<
+  EstadoJornada,
+  { label: string; icon: LucideIcon; tono: string; punto: string }
+> = {
+  ok: {
+    label: 'Presente',
+    icon: CircleCheck,
+    tono: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300',
+    punto: 'bg-emerald-500',
+  },
+  tarde: {
+    label: 'Llegó tarde',
+    icon: AlarmClock,
+    tono: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300',
+    punto: 'bg-amber-500',
+  },
+  salida_temprana: {
+    label: 'Se retiró antes',
+    icon: LogOut,
+    tono: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300',
+    punto: 'bg-amber-500',
+  },
+  incompleta: {
+    label: 'Falta fichar salida',
+    icon: TriangleAlert,
+    tono: 'border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-900 dark:bg-orange-950 dark:text-orange-300',
+    punto: 'bg-orange-500',
+  },
+  ausente: {
+    label: 'Ausente',
+    icon: UserX,
+    tono: 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300',
+    punto: 'bg-red-500',
+  },
+  licencia: {
+    label: 'Licencia',
+    icon: Palmtree,
+    tono: 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-300',
+    punto: 'bg-sky-500',
+  },
+  no_laborable: {
+    label: 'No laborable',
+    icon: CalendarOff,
+    tono: 'border-line bg-ink-50 text-ink-500',
+    punto: 'bg-ink-300',
+  },
+  sin_turno: {
+    label: 'Sin turno',
+    icon: ShieldQuestion,
+    tono: 'border-line bg-surface text-ink-500',
+    punto: 'bg-ink-300',
+  },
+}
+
+export function estadoDe(valor: string) {
+  return ESTADO_JORNADA[
+    (valor as EstadoJornada) in ESTADO_JORNADA ? (valor as EstadoJornada) : 'sin_turno'
+  ]
+}
+
+export const TIPOS_LICENCIA: { value: TipoLicencia; label: string }[] = [
+  { value: 'vacaciones', label: 'Vacaciones' },
+  { value: 'enfermedad', label: 'Enfermedad' },
+  { value: 'especial', label: 'Licencia especial' },
+  { value: 'franco', label: 'Franco / día libre' },
+  { value: 'suspension', label: 'Suspensión' },
+  { value: 'otro', label: 'Otro' },
+]
+
+export const DIAS_SEMANA = [
+  { valor: 0, corto: 'Lun', largo: 'Lunes' },
+  { valor: 1, corto: 'Mar', largo: 'Martes' },
+  { valor: 2, corto: 'Mié', largo: 'Miércoles' },
+  { valor: 3, corto: 'Jue', largo: 'Jueves' },
+  { valor: 4, corto: 'Vie', largo: 'Viernes' },
+  { valor: 5, corto: 'Sáb', largo: 'Sábado' },
+  { valor: 6, corto: 'Dom', largo: 'Domingo' },
+]
+
+/** `465` → `7 h 45 m`. Devuelve `—` si no hay nada que mostrar. */
+export function duracion(minutos: number): string {
+  if (!minutos || minutos <= 0) return '—'
+  const horas = Math.floor(minutos / 60)
+  const resto = minutos % 60
+  if (!horas) return `${resto} m`
+  return resto ? `${horas} h ${String(resto).padStart(2, '0')} m` : `${horas} h`
+}
+
+/** `"09:00:00"` → `"09:00"`. */
+export function hhmm(hora: string): string {
+  return (hora || '').slice(0, 5)
+}
+
+/** Hora local de un ISO: `"14:30"`. */
+export function horaDe(iso: string): string {
+  return new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+}
+
 /** Fecha local `aaaa-mm-dd` para los filtros del backend. */
 export function fechaLocalISO(d: Date): string {
   const mes = String(d.getMonth() + 1).padStart(2, '0')
@@ -55,4 +163,16 @@ export function haceDias(dias: number): string {
   const d = new Date()
   d.setDate(d.getDate() - dias)
   return fechaLocalISO(d)
+}
+
+/** `"2026-08-17"` (fecha LOCAL, no UTC) → `"Lunes 17 de agosto"`. */
+export function etiquetaFecha(iso: string): string {
+  const [anio, mes, dia] = iso.split('-').map(Number)
+  const fecha = new Date(anio, mes - 1, dia)
+  const texto = fecha.toLocaleDateString('es-AR', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  })
+  return texto.charAt(0).toUpperCase() + texto.slice(1)
 }

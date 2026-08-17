@@ -1,19 +1,24 @@
 import type {
   AgenteAsistencia,
   AgenteAsistenciaInput,
+  AsignacionTurno,
   FichadaDetalle,
+  LicenciaAsistencia,
   MapeoAsistencia,
   NumeroSinMapear,
   PaginaFichadas,
   PanelAsistencia,
   RelojAsistencia,
   RelojAsistenciaInput,
-  ResumenDiaAsistencia,
+  RespuestaResumenAsistencia,
+  TipoLicencia,
+  TramoTurno,
+  TurnoAsistencia,
 } from '@/types'
 import { api } from '@/lib/api'
 import { useAuth } from '@/store/auth'
 
-/** Módulo Asistencia (solo superadministrador): relojes Hikvision, agentes y fichadas. */
+/** Módulo Asistencia (solo superadministrador): relojes, fichadas, turnos y licencias. */
 
 const token = () => useAuth.getState().access
 
@@ -58,6 +63,8 @@ export function detalleFichada(id: number): Promise<FichadaDetalle> {
   return api.get<FichadaDetalle>(`/asistencia/fichadas/${id}/`, token())
 }
 
+// --- Resumen (jornadas calculadas) -------------------------------------------
+
 export interface FiltrosResumen {
   desde?: string
   hasta?: string
@@ -66,12 +73,14 @@ export interface FiltrosResumen {
   empleado?: number | ''
 }
 
-export function resumenAsistencia(filtros: FiltrosResumen = {}): Promise<{
-  desde: string
-  hasta: string
-  resultados: ResumenDiaAsistencia[]
-}> {
-  return api.get(`/asistencia/resumen/${query(filtros)}`, token())
+/**
+ * Jornadas ya analizadas por el backend: tramos, salidas parciales, turno
+ * esperado, licencias y ausencias. Una fila por (empleado, día).
+ */
+export function resumenAsistencia(
+  filtros: FiltrosResumen = {},
+): Promise<RespuestaResumenAsistencia> {
+  return api.get<RespuestaResumenAsistencia>(`/asistencia/resumen/${query(filtros)}`, token())
 }
 
 export function numerosSinMapear(): Promise<{ resultados: NumeroSinMapear[] }> {
@@ -129,7 +138,7 @@ export function regenerarTokenAgente(
   return api.post(`/asistencia/agentes/${id}/regenerar-token/`, undefined, token())
 }
 
-// --- Asignaciones de números -------------------------------------------------
+// --- Asignaciones de identificador -------------------------------------------
 
 export type MapeoConAplicadas = MapeoAsistencia & { fichadas_actualizadas?: number }
 
@@ -154,6 +163,103 @@ export function actualizarMapeo(
 
 export function eliminarMapeo(id: number): Promise<void> {
   return api.del<void>(`/asistencia/mapeos/${id}/`, token())
+}
+
+// --- Turnos (horarios) -------------------------------------------------------
+
+export interface TurnoInput {
+  nombre: string
+  activo?: boolean
+  tolerancia_entrada?: number
+  tolerancia_salida?: number
+  minutos_antirebote?: number
+  tramos: TramoTurno[]
+}
+
+export function listarTurnos(): Promise<TurnoAsistencia[]> {
+  return api.get<TurnoAsistencia[]>('/asistencia/turnos/', token())
+}
+
+export function crearTurno(input: TurnoInput): Promise<TurnoAsistencia> {
+  return api.post<TurnoAsistencia>('/asistencia/turnos/', input, token())
+}
+
+export function actualizarTurno(
+  id: number,
+  input: Partial<TurnoInput>,
+): Promise<TurnoAsistencia> {
+  return api.patch<TurnoAsistencia>(`/asistencia/turnos/${id}/`, input, token())
+}
+
+export function eliminarTurno(id: number): Promise<void> {
+  return api.del<void>(`/asistencia/turnos/${id}/`, token())
+}
+
+// --- Asignación de turno a empleado ------------------------------------------
+
+export interface AsignacionInput {
+  empleado: number
+  turno: number
+  desde: string
+  hasta?: string | null
+}
+
+export function listarAsignaciones(soloVigentes = false): Promise<AsignacionTurno[]> {
+  return api.get<AsignacionTurno[]>(
+    `/asistencia/asignaciones/${soloVigentes ? '?vigentes=1' : ''}`,
+    token(),
+  )
+}
+
+export function crearAsignacion(input: AsignacionInput): Promise<AsignacionTurno> {
+  return api.post<AsignacionTurno>('/asistencia/asignaciones/', input, token())
+}
+
+export function actualizarAsignacion(
+  id: number,
+  input: Partial<AsignacionInput>,
+): Promise<AsignacionTurno> {
+  return api.patch<AsignacionTurno>(`/asistencia/asignaciones/${id}/`, input, token())
+}
+
+export function eliminarAsignacion(id: number): Promise<void> {
+  return api.del<void>(`/asistencia/asignaciones/${id}/`, token())
+}
+
+// --- Licencias ---------------------------------------------------------------
+
+export interface LicenciaInput {
+  empleado: number
+  tipo: TipoLicencia
+  desde: string
+  hasta: string
+  observacion?: string
+}
+
+export interface FiltrosLicencias {
+  empleado?: number | ''
+  tipo?: string
+  desde?: string
+  hasta?: string
+}
+
+export function listarLicencias(filtros: FiltrosLicencias = {}): Promise<LicenciaAsistencia[]> {
+  return api.get<LicenciaAsistencia[]>(`/asistencia/licencias/${query(filtros)}`, token())
+}
+
+export function crearLicencia(input: LicenciaInput): Promise<LicenciaAsistencia> {
+  return api.post<LicenciaAsistencia>('/asistencia/licencias/', input, token())
+}
+
+export function actualizarLicencia(
+  id: number,
+  input: Partial<LicenciaInput>,
+): Promise<LicenciaAsistencia> {
+  return api.patch<LicenciaAsistencia>(`/asistencia/licencias/${id}/`, input, token())
+}
+
+export function eliminarLicencia(id: number): Promise<void> {
+  return api.del<void>(`/asistencia/licencias/${id}/`, token())
 }
 
 // --- Config del agente (descarga desde la UI) --------------------------------

@@ -152,13 +152,16 @@ def cmd_diag(args: argparse.Namespace) -> int:
 
     if args.save_fixture:
         destino = Path(args.save_fixture)
+        alias: dict[str, str] = {}
         pagina = {
             "AcsEvent": {
                 "searchID": "captura-diag",
                 "responseStatusStrg": "OK",
                 "numOfMatches": len(crudos),
                 "totalMatches": len(crudos),
-                "InfoList": [_anonimizar(i) if args.anonymize else i for i in crudos],
+                "InfoList": (
+                    [_anonimizar(i, alias) for i in crudos] if args.anonymize else crudos
+                ),
             }
         }
         destino.parent.mkdir(parents=True, exist_ok=True)
@@ -178,11 +181,22 @@ def cmd_diag(args: argparse.Namespace) -> int:
     return 1 if fallas else 0
 
 
-def _anonimizar(item: dict) -> dict:
+def _anonimizar(item: dict, alias: dict) -> dict:
+    """Quita datos personales del fixture, conservando su forma.
+
+    En este reloj el "numero de empleado" suele ser el NOMBRE de la persona
+    (`employeeNoString: "Nacho"`), asi que tambien hay que seudonimizarlo o el
+    fixture termina con datos reales en el repositorio. El mapa `alias` es
+    compartido entre items para que la misma persona conserve el mismo alias
+    y el fixture siga siendo util para probar el agrupado por empleado.
+    """
     copia = dict(item)
-    if "name" in copia:
+    if copia.get("name"):
         copia["name"] = "EMPLEADO"
-    for clave in ("pictureURL", "faceURL", "thermalData"):
+    numero = copia.get("employeeNoString")
+    if numero:
+        copia["employeeNoString"] = alias.setdefault(numero, f"EMP{len(alias) + 1}")
+    for clave in ("pictureURL", "faceURL", "thermalData", "cardNo"):
         copia.pop(clave, None)
     return copia
 

@@ -60,7 +60,7 @@ class Dispositivo(ModeloBase):
     poll_seconds = models.PositiveIntegerField('consultar el reloj cada (seg)', default=20)
     overlap_seconds = models.PositiveIntegerField('ventana de solapamiento (seg)', default=180)
     timeout_seconds = models.PositiveIntegerField('timeout de red (seg)', default=10)
-    backfill_dias = models.PositiveIntegerField('días a recuperar en la primera sync', default=7)
+    backfill_dias = models.PositiveIntegerField('días a recuperar en la primera sync', default=90)
     zona_horaria = models.CharField('zona horaria', max_length=60, default='America/Argentina/Buenos_Aires')
 
     # Identidad reportada por el propio reloj (la completa el agente).
@@ -181,6 +181,9 @@ class MetodoVerificacion(models.TextChoices):
     HUELLA = 'fingerprint', 'Huella'
     CLAVE = 'password', 'Clave'
     REMOTO = 'remote', 'Remoto'
+    # El DS-K1A340WX reporta los metodos HABILITADOS en el lector, no el que
+    # la persona uso. Se registra como "varios" en vez de mentir "rostro".
+    MULTIPLE = 'multiple', 'Varios habilitados'
     DESCONOCIDO = 'unknown', 'Otro'
 
 
@@ -214,7 +217,7 @@ class Fichada(models.Model):
         related_name='fichadas', verbose_name='empleado',
     )
 
-    numero_reloj = models.CharField('número en el reloj', max_length=32, blank=True)
+    numero_reloj = models.CharField('identificador en el reloj', max_length=32, blank=True)
     nombre_reloj = models.CharField('nombre en el reloj', max_length=120, blank=True)
     estado_mapeo = models.CharField(
         'estado de asignación', max_length=12, choices=EstadoMapeo.choices,
@@ -275,7 +278,7 @@ class MapeoEmpleado(ModeloBase):
         related_name='mapeos', verbose_name='reloj',
         help_text='Vacío: vale para todos los relojes.',
     )
-    numero_reloj = models.CharField('número en el reloj', max_length=32)
+    numero_reloj = models.CharField('identificador en el reloj', max_length=32)
     empleado = models.ForeignKey(
         'empleados.Empleado', on_delete=models.PROTECT,
         related_name='mapeos_asistencia', verbose_name='empleado',
@@ -283,8 +286,8 @@ class MapeoEmpleado(ModeloBase):
 
     class Meta:
         db_table = 'asistencia_mapeos_empleado'
-        verbose_name = 'asignación de número de reloj'
-        verbose_name_plural = 'asignaciones de números de reloj'
+        verbose_name = 'asignación de identificador de reloj'
+        verbose_name_plural = 'asignaciones de identificadores de reloj'
         ordering = ('numero_reloj',)
         constraints = [
             models.UniqueConstraint(
@@ -343,3 +346,180 @@ def aplicar_mapeo(mapeo: MapeoEmpleado) -> int:
             empleado_id=empleado_id, estado_mapeo=EstadoMapeo.MAPEADA
         )
     return actualizadas
+
+
+# =============================================================================
+# HORARIOS Y LICENCIAS
+# =============================================================================
+
+class Turno(ModeloBase):
+    """Un horario semanal reutilizable (ej: «Comercio 9 a 18»).
+
+    El horario concreto de cada día vive en `TramoTurno`: un día sin tramos es
+    franco. Dos tramos en el mismo día = jornada partida (mañana y tarde).
+    """
+
+    nombre = models.CharField('nombre', max_length=120)
+    activo = models.BooleanField('activo', default=True)
+    tolerancia_entrada = models.PositiveIntegerField(
+        'tolerancia de llegada (min)', default=10,
+        help_text='Minutos de gracia antes de marcar la llegada como tarde.',
+    )
+    tolerancia_salida = models.PositiveIntegerField(
+        'tolerancia de salida (min)', default=10,
+        help_text='Minutos de gracia para irse antes del horario de salida.',
+    )
+    minutos_antirebote = models.PositiveIntegerField(
+        'ignorar refichadas dentro de (min)', default=2,
+        help_text='Si alguien ficha dos veces seguidas en menos de estos minutos, '
+                  'se cuenta una sola vez (doble lectura del rostro).',
+    )
+
+    class Meta:
+        db_table = 'asistencia_turnos'
+        verbose_name = 'turno'
+        verbose_name_plural = 'turnos'
+        ordering = ('nombre',)
+        constraints = [
+            models.UniqueConstraint(
+                fields=('nombre',), condition=models.Q(borrado=False), name='uq_turno_vivo'
+            ),
+        ]
+
+    def __str__(self):
+        return self.nombre
+
+    @property
+    def minutos_semanales(self) -> int:
+        return sum(t.minutos for t in self.tramos.all())
+
+
+class TramoTurno(ModeloBase):
+    """Un bloque horario de un día de la semana dentro de un turno."""
+
+    DIAS = (
+        (0, 'Lunes'), (1, 'Martes'), (2, 'Miércoles'), (3, 'Jueves'),
+        (4, 'Viernes'), (5, 'Sábado'), (6, 'Domingo'),
+    )
+
+    turno = models.ForeignKey(
+        Turno, on_delete=models.CASCADE, related_name='tramos', verbose_name='turno'
+    )
+    dia_semana = models.PositiveSmallIntegerField('día', choices=DIAS)
+    hora_entrada = models.TimeField('entrada')
+    hora_salida = models.TimeField('salida')
+
+    class Meta:
+        db_table = 'asistencia_tramos_turno'
+        verbose_name = 'horario del turno'
+        verbose_name_plural = 'horarios del turno'
+        ordering = ('dia_semana', 'hora_entrada')
+
+    def __str__(self):
+        return f'{self.get_dia_semana_display()} {self.hora_entrada:%H:%M}-{self.hora_salida:%H:%M}'
+
+    @property
+    def minutos(self) -> int:
+        """Duración del tramo. Si cruza medianoche, suma el día siguiente."""
+        inicio = self.hora_entrada.hour * 60 + self.hora_entrada.minute
+        fin = self.hora_salida.hour * 60 + self.hora_salida.minute
+        return (fin - inicio) if fin > inicio else (fin + 24 * 60 - inicio)
+
+
+class AsignacionTurno(ModeloBase):
+    """Qué turno le corresponde a un empleado, y desde cuándo.
+
+    `hasta` vacío = vigente. Al cambiarle el turno a alguien se cierra la
+    asignación anterior y se abre una nueva: así el histórico se sigue
+    calculando con el horario que regía ese día.
+    """
+
+    empleado = models.ForeignKey(
+        'empleados.Empleado', on_delete=models.PROTECT,
+        related_name='turnos_asistencia', verbose_name='empleado',
+    )
+    turno = models.ForeignKey(
+        Turno, on_delete=models.PROTECT, related_name='asignaciones', verbose_name='turno'
+    )
+    desde = models.DateField('desde')
+    hasta = models.DateField('hasta', null=True, blank=True, help_text='Vacío: vigente.')
+
+    class Meta:
+        db_table = 'asistencia_asignaciones_turno'
+        verbose_name = 'asignación de turno'
+        verbose_name_plural = 'asignaciones de turno'
+        ordering = ('-desde',)
+
+    def __str__(self):
+        return f'{self.empleado} · {self.turno} (desde {self.desde})'
+
+    def cubre(self, fecha) -> bool:
+        return self.desde <= fecha and (self.hasta is None or fecha <= self.hasta)
+
+
+class TipoLicencia(models.TextChoices):
+    VACACIONES = 'vacaciones', 'Vacaciones'
+    ENFERMEDAD = 'enfermedad', 'Enfermedad'
+    ESPECIAL = 'especial', 'Licencia especial'
+    FRANCO = 'franco', 'Franco / día libre'
+    SUSPENSION = 'suspension', 'Suspensión'
+    OTRO = 'otro', 'Otro'
+
+
+class Licencia(ModeloBase):
+    """Período en el que la ausencia del empleado está justificada."""
+
+    empleado = models.ForeignKey(
+        'empleados.Empleado', on_delete=models.PROTECT,
+        related_name='licencias', verbose_name='empleado',
+    )
+    tipo = models.CharField('tipo', max_length=16, choices=TipoLicencia.choices)
+    desde = models.DateField('desde')
+    hasta = models.DateField('hasta')
+    observacion = models.TextField('observación', blank=True)
+
+    class Meta:
+        db_table = 'asistencia_licencias'
+        verbose_name = 'licencia'
+        verbose_name_plural = 'licencias'
+        ordering = ('-desde',)
+        indexes = [
+            models.Index(fields=('empleado', 'desde', 'hasta'), name='idx_licencia_empleado'),
+        ]
+
+    def __str__(self):
+        return f'{self.empleado} · {self.get_tipo_display()} ({self.desde} a {self.hasta})'
+
+    @property
+    def dias(self) -> int:
+        return (self.hasta - self.desde).days + 1
+
+    def cubre(self, fecha) -> bool:
+        return self.desde <= fecha <= self.hasta
+
+
+def turno_de(empleado_id: int, fecha):
+    """Turno vigente de un empleado en una fecha (o None)."""
+    if not empleado_id:
+        return None
+    asignacion = (
+        AsignacionTurno.objects
+        .filter(empleado_id=empleado_id, desde__lte=fecha)
+        .filter(models.Q(hasta__isnull=True) | models.Q(hasta__gte=fecha))
+        .select_related('turno')
+        .order_by('-desde')
+        .first()
+    )
+    return asignacion.turno if asignacion else None
+
+
+def licencia_de(empleado_id: int, fecha):
+    """Licencia que cubre a un empleado en una fecha (o None)."""
+    if not empleado_id:
+        return None
+    return (
+        Licencia.objects
+        .filter(empleado_id=empleado_id, desde__lte=fecha, hasta__gte=fecha)
+        .order_by('desde')
+        .first()
+    )

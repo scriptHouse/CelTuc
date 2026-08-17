@@ -8,10 +8,14 @@ from rest_framework import serializers
 
 from .models import (
     Agente,
+    AsignacionTurno,
     Dispositivo,
+    Licencia,
     MapeoEmpleado,
     MetodoVerificacion,
     TipoFichada,
+    TramoTurno,
+    Turno,
 )
 
 
@@ -165,3 +169,146 @@ class HeartbeatSerializer(serializers.Serializer):
     error_events = serializers.IntegerField(required=False, min_value=0, default=0)
     last_device_sync_at = serializers.DateTimeField(required=False, allow_null=True, default=None)
     config_version = serializers.IntegerField(required=False, default=0)
+
+
+# --- Horarios y licencias ----------------------------------------------------
+
+class TramoTurnoSerializer(serializers.ModelSerializer):
+    """Un bloque horario de un día. Varios en el mismo día = jornada partida."""
+
+    class Meta:
+        model = TramoTurno
+        fields = ('id', 'dia_semana', 'hora_entrada', 'hora_salida')
+
+    def validate(self, datos):
+        if datos['hora_entrada'] == datos['hora_salida']:
+            raise serializers.ValidationError('La entrada y la salida no pueden ser iguales.')
+        return datos
+
+
+class TurnoSerializer(serializers.ModelSerializer):
+    """El turno viaja con su semana completa: se crea y edita de una sola vez."""
+
+    tramos = TramoTurnoSerializer(many=True)
+    minutos_semanales = serializers.IntegerField(read_only=True)
+    empleados_asignados = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Turno
+        fields = (
+            'id', 'nombre', 'activo',
+            'tolerancia_entrada', 'tolerancia_salida', 'minutos_antirebote',
+            'tramos', 'minutos_semanales', 'empleados_asignados', 'creado',
+        )
+        read_only_fields = ('creado',)
+
+    def get_empleados_asignados(self, obj):
+        return obj.asignaciones.filter(hasta__isnull=True).count()
+
+    def validate_nombre(self, valor):
+        nombre = valor.strip()
+        repetido = Turno.objects.filter(nombre__iexact=nombre)
+        if self.instance is not None:
+            repetido = repetido.exclude(pk=self.instance.pk)
+        if repetido.exists():
+            raise serializers.ValidationError(f'Ya existe un turno llamado «{nombre}».')
+        return nombre
+
+    def _reemplazar_tramos(self, turno, tramos):
+        # Los tramos son configuración del turno: se reemplazan físicamente,
+        # sin dejar borrados lógicos que ensucien el horario.
+        turno.tramos.all().delete()
+        TramoTurno.objects.bulk_create(
+            [TramoTurno(turno=turno, **tramo) for tramo in tramos]
+        )
+
+    def create(self, validated_data):
+        tramos = validated_data.pop('tramos', [])
+        turno = super().create(validated_data)
+        self._reemplazar_tramos(turno, tramos)
+        return turno
+
+    def update(self, instance, validated_data):
+        tramos = validated_data.pop('tramos', None)
+        turno = super().update(instance, validated_data)
+        if tramos is not None:
+            self._reemplazar_tramos(turno, tramos)
+        return turno
+
+
+class AsignacionTurnoSerializer(serializers.ModelSerializer):
+    empleado_nombre = serializers.SerializerMethodField()
+    turno_nombre = serializers.CharField(source='turno.nombre', read_only=True)
+    vigente = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AsignacionTurno
+        fields = (
+            'id', 'empleado', 'empleado_nombre', 'turno', 'turno_nombre',
+            'desde', 'hasta', 'vigente', 'creado',
+        )
+        read_only_fields = ('creado',)
+
+    def get_empleado_nombre(self, obj):
+        return obj.empleado.nombre_completo
+
+    def get_vigente(self, obj):
+        return obj.hasta is None
+
+    def validate(self, datos):
+        empleado = datos.get('empleado') or getattr(self.instance, 'empleado', None)
+        desde = datos.get('desde') or getattr(self.instance, 'desde', None)
+        hasta = datos.get('hasta', getattr(self.instance, 'hasta', None))
+        if hasta and desde and hasta < desde:
+            raise serializers.ValidationError({'hasta': 'No puede ser anterior a «desde».'})
+
+        # Una persona no puede tener dos turnos al mismo tiempo.
+        choques = AsignacionTurno.objects.filter(empleado=empleado)
+        if self.instance is not None:
+            choques = choques.exclude(pk=self.instance.pk)
+        if hasta:
+            choques = choques.filter(desde__lte=hasta)
+        for otra in choques:
+            if otra.hasta is None or otra.hasta >= desde:
+                raise serializers.ValidationError(
+                    'Ese empleado ya tiene el turno «%s» asignado en ese período. '
+                    'Cerrá la asignación anterior poniéndole fecha «hasta».' % otra.turno.nombre
+                )
+        return datos
+
+
+class LicenciaSerializer(serializers.ModelSerializer):
+    empleado_nombre = serializers.SerializerMethodField()
+    tipo_display = serializers.CharField(source='get_tipo_display', read_only=True)
+    dias = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = Licencia
+        fields = (
+            'id', 'empleado', 'empleado_nombre', 'tipo', 'tipo_display',
+            'desde', 'hasta', 'dias', 'observacion', 'creado',
+        )
+        read_only_fields = ('creado',)
+
+    def get_empleado_nombre(self, obj):
+        return obj.empleado.nombre_completo
+
+    def validate(self, datos):
+        empleado = datos.get('empleado') or getattr(self.instance, 'empleado', None)
+        desde = datos.get('desde') or getattr(self.instance, 'desde', None)
+        hasta = datos.get('hasta') or getattr(self.instance, 'hasta', None)
+        if desde and hasta and hasta < desde:
+            raise serializers.ValidationError({'hasta': 'No puede ser anterior a «desde».'})
+
+        superpuesta = Licencia.objects.filter(
+            empleado=empleado, desde__lte=hasta, hasta__gte=desde
+        )
+        if self.instance is not None:
+            superpuesta = superpuesta.exclude(pk=self.instance.pk)
+        otra = superpuesta.first()
+        if otra is not None:
+            raise serializers.ValidationError(
+                'Ese empleado ya tiene cargada «%s» del %s al %s.'
+                % (otra.get_tipo_display(), otra.desde, otra.hasta)
+            )
+        return datos
