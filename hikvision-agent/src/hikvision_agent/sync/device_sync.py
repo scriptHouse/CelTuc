@@ -97,10 +97,16 @@ class DeviceSync:
                     nuevos += 1
                 else:
                     duplicados += 1
-            cursor = fin_tramo
 
-        # Solo si TODO el rango se leyó bien movemos la marca de agua.
-        self._repo.set_watermark(ahora)
+            # La marca de agua avanza tramo a tramo, no al final del todo.
+            #
+            # Una recuperación histórica larga son cientos de consultas ISAPI
+            # seguidas, y el reloj llega a cortarlas (401). Si el progreso solo
+            # se guardara al terminar el rango completo, cada reintento
+            # empezaría de cero, volvería a martillar al equipo y nunca
+            # terminaría. Guardando por tramo, el reintento RETOMA donde quedó.
+            cursor = fin_tramo
+            self._repo.set_watermark(fin_tramo)
         self._status.device_ok(info, datetime.now(tz))
 
         if nuevos or duplicados or ignorados:

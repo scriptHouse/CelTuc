@@ -270,3 +270,76 @@ def test_sin_internet_el_agente_arranca_igual():
             raise BackendTransientError("sin red todavía")
 
     assert precargar_config_remota(HeartbeatCaido()) is False
+
+
+class RelojQueCorta:
+    """Simula al reloj real: responde unos tramos y después corta con 401.
+
+    Es lo que hace el DS-K1A340WX cuando se lo atropella con cientos de
+    consultas seguidas durante una recuperación histórica.
+    """
+
+    def __init__(self, tramos_ok=1):
+        self.tramos_ok = tramos_ok
+        self.consultas = 0
+
+    def get_device_info(self):
+        from hikvision_agent.hikvision.models import DeviceInfo
+
+        return DeviceInfo(model="DS-K1A340WX", serial="SERIE-1", firmware="V1.2.7")
+
+    def search_events(self, start_at, end_at):
+        from hikvision_agent.hikvision.client import DeviceAuthError
+
+        self.consultas += 1
+        if self.consultas > self.tramos_ok:
+            raise DeviceAuthError("El reloj rechazó las credenciales ISAPI (401)")
+        return iter(())
+
+
+def _congelar_ahora(monkeypatch, momento):
+    class _FakeDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return momento.astimezone(tz) if tz else momento
+
+    monkeypatch.setattr("hikvision_agent.sync.device_sync.datetime", _FakeDatetime)
+
+
+def test_un_corte_a_mitad_del_backfill_no_pierde_el_progreso(db, monkeypatch):
+    """Regresión: el watermark avanza por tramo, no solo al terminar todo.
+
+    Antes se guardaba únicamente al completar el rango entero, así que un 401
+    a mitad de una recuperación de 90 días tiraba TODO el progreso: el
+    reintento arrancaba de cero, volvía a martillar al reloj y nunca terminaba.
+    """
+    from hikvision_agent.hikvision.client import DeviceAuthError
+
+    reloj = RelojQueCorta(tramos_ok=2)
+    monkeypatch.setattr(
+        "hikvision_agent.sync.device_sync.HikvisionClient", lambda *_a, **_k: reloj
+    )
+    ahora = datetime(2026, 8, 17, 18, 0, tzinfo=TZ)
+    _congelar_ahora(monkeypatch, ahora)
+
+    holder = ConfigHolder({
+        "hikvision": {"host": "192.168.1.31", "initial_backfill_days": 90},
+        "backend": {"base_url": "https://celtuc.test"},
+    })
+    sincronizador = DeviceSync(holder, _secrets(), StatusBoard(), db)
+
+    with pytest.raises(DeviceAuthError):
+        sincronizador.run_once()
+
+    # Se leyeron 2 tramos de 7 días antes del corte: el progreso quedó guardado.
+    marca = Repository(db).get_watermark()
+    assert marca is not None, "el corte tiró todo el progreso del backfill"
+    esperado = ahora - timedelta(days=90) + timedelta(days=14)
+    assert marca == esperado
+
+    # Y el reintento RETOMA desde ahí en vez de empezar de cero.
+    reloj.tramos_ok = 99
+    sincronizador.run_once()
+    assert Repository(db).get_watermark() == ahora
+    # 2 consultas antes del corte + 1 fallida + los tramos restantes (no 13 de nuevo).
+    assert reloj.consultas < 20

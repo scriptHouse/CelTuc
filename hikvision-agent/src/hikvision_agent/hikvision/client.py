@@ -13,6 +13,7 @@ firmware real con ``hikvision-agent diag``):
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator
@@ -32,6 +33,12 @@ _ACS_EVENT_PATH = "/ISAPI/AccessControl/AcsEvent?format=json"
 
 _PAGE_SIZE = 30          # varios firmwares limitan maxResults a 30
 _MAX_PAGES = 2000        # tope de seguridad por búsqueda
+
+# Pausa entre páginas. Una recuperación histórica son cientos de consultas
+# seguidas y el DS-K1A340WX real empieza a devolver 401 cuando se lo atropella
+# (no es la contraseña: es el equipo cortando). Un respiro corto lo evita y
+# apenas agrega unos segundos sobre miles de fichadas.
+_PAUSA_ENTRE_PAGINAS = 0.2
 
 
 class DeviceError(Exception):
@@ -90,7 +97,11 @@ class HikvisionClient:
             raise DeviceError(f"Error HTTP con el reloj: {exc}") from exc
 
         if respuesta.status_code == 401:
-            raise DeviceAuthError("El reloj rechazó las credenciales ISAPI (401)")
+            raise DeviceAuthError(
+                "El reloj rechazó las credenciales ISAPI (401). Si venía "
+                "funcionando, suele ser el equipo cortando conexiones tras "
+                "muchas consultas seguidas, no la contraseña: se reintenta solo."
+            )
         if respuesta.status_code == 403:
             raise DeviceAuthError("El usuario ISAPI no tiene permisos suficientes (403)")
         return respuesta
@@ -162,4 +173,5 @@ class HikvisionClient:
             posicion += cantidad
             if estado != "MORE" or cantidad == 0:
                 return
+            time.sleep(_PAUSA_ENTRE_PAGINAS)
         log.warning("Búsqueda ISAPI cortada por tope de páginas (%s)", _MAX_PAGES)
