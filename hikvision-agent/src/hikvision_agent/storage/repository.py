@@ -7,6 +7,7 @@ del servidor y nunca se borra un evento local (spec §27/§49).
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,13 +32,34 @@ def _ahora() -> str:
 
 
 class Repository:
-    """Cada hilo crea su propio Repository (una conexión SQLite por hilo)."""
+    """Buffer local. Seguro de usar desde varios hilos.
+
+    sqlite3 prohíbe usar una conexión desde un hilo distinto al que la creó, y
+    este repositorio viaja entre el hilo principal (arranque) y los tres loops
+    del agente. Por eso la conexión vive en un `threading.local`: cada hilo
+    abre la suya la primera vez que la usa y deja de importar dónde se
+    construyó el Repository.
+    """
 
     def __init__(self, db_path: Path):
-        self._conn = database.connect(db_path)
+        self._db_path = Path(db_path)
+        self._local = threading.local()
+
+    @property
+    def _conn(self):
+        """La conexión de ESTE hilo (se abre en el primer uso)."""
+        conexion = getattr(self._local, "conexion", None)
+        if conexion is None:
+            conexion = database.connect(self._db_path)
+            self._local.conexion = conexion
+        return conexion
 
     def close(self) -> None:
-        self._conn.close()
+        """Cierra la conexión de este hilo (las de otros hilos siguen vivas)."""
+        conexion = getattr(self._local, "conexion", None)
+        if conexion is not None:
+            conexion.close()
+            self._local.conexion = None
 
     # ----------------------------------------------------------------- eventos
     def insert_event_if_new(self, evento: ClockEvent) -> bool:

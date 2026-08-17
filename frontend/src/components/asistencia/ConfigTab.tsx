@@ -347,7 +347,7 @@ function RelojModal({
   const [poll, setPoll] = useState('20')
   const [overlap, setOverlap] = useState('180')
   const [timeout_, setTimeout_] = useState('10')
-  const [backfill, setBackfill] = useState('7')
+  const [backfill, setBackfill] = useState('90')
   const [usarHttps, setUsarHttps] = useState(false)
 
   useEffect(() => {
@@ -361,7 +361,7 @@ function RelojModal({
     setPoll(String(reloj?.poll_seconds ?? 20))
     setOverlap(String(reloj?.overlap_seconds ?? 180))
     setTimeout_(String(reloj?.timeout_seconds ?? 10))
-    setBackfill(String(reloj?.backfill_dias ?? 7))
+    setBackfill(String(reloj?.backfill_dias ?? 90))
     setUsarHttps(reloj?.usar_https ?? false)
     setAvanzado(false)
   }, [abierto, reloj])
@@ -378,7 +378,7 @@ function RelojModal({
         poll_seconds: Number(poll) || 20,
         overlap_seconds: Number(overlap) || 180,
         timeout_seconds: Number(timeout_) || 10,
-        backfill_dias: Number(backfill) || 7,
+        backfill_dias: Number(backfill) || 90,
         usar_https: usarHttps,
       }
       return reloj ? actualizarReloj(reloj.id, cuerpo) : crearReloj(cuerpo)

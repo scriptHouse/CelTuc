@@ -4,6 +4,8 @@ Cubre los escenarios obligatorios de la spec: recuperación histórica,
 backend caído sin pérdida, rechazos controlados y config remota aplicada.
 """
 import json
+import sqlite3
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -15,6 +17,7 @@ from hikvision_agent.config import ConfigHolder, Secrets
 from hikvision_agent.storage.repository import Repository
 from hikvision_agent.sync.backend_sync import BackendSync
 from hikvision_agent.sync.device_sync import DeviceSync
+from hikvision_agent.sync.heartbeat import Heartbeat
 from hikvision_agent.sync.status import StatusBoard
 
 FIXTURE = Path(__file__).parent / "fixtures" / "hikvision_event_sample.json"
@@ -89,7 +92,7 @@ def test_reloj_a_sqlite_recupera_historico_e_idempotente(db, monkeypatch):
 
     monkeypatch.setattr("hikvision_agent.sync.device_sync.datetime", _FakeDatetime)
 
-    sincronizador = DeviceSync(_holder(), _secrets(), StatusBoard(), Repository(db))
+    sincronizador = DeviceSync(_holder(), _secrets(), StatusBoard(), db)
     assert sincronizador.run_once() == 48  # los 2 `minor 76` (rostro no reconocido) se descartan
 
     # Segunda pasada: solapamiento + mismos eventos → cero nuevos, cero duplicados en el buffer.
@@ -136,7 +139,7 @@ def test_sqlite_a_backend_marca_synced_y_maneja_rechazos(db, monkeypatch):
         "hikvision_agent.sync.backend_sync.BackendClient", lambda *_a, **_k: backend
     )
 
-    sincronizador = BackendSync(_holder(), _secrets(), Repository(db))
+    sincronizador = BackendSync(_holder(), _secrets(), db)
     assert sincronizador.run_once() == 2  # accepted + duplicate confirmados
 
     conteo = Repository(db).counts()
@@ -166,7 +169,7 @@ def test_backend_caido_no_pierde_nada(db, monkeypatch):
     monkeypatch.setattr(
         "hikvision_agent.sync.backend_sync.BackendClient", lambda *_a, **_k: backend
     )
-    sincronizador = BackendSync(_holder(), _secrets(), Repository(db))
+    sincronizador = BackendSync(_holder(), _secrets(), db)
 
     with pytest.raises(BackendTransientError):
         sincronizador.run_once()
@@ -192,3 +195,78 @@ def test_config_remota_pisa_la_local():
     assert holder.current.remote_version == 5
     # Aplicar lo mismo otra vez no reporta cambios.
     assert holder.apply_remote({"version": 5, "device": {"poll_seconds": 45, "host": "192.168.1.99"}, "backend": {"sync_seconds": 30}, "logging": {"level": "DEBUG"}}) is False
+
+
+def test_los_repos_se_abren_en_el_hilo_que_los_usa(db):
+    """Regresión: sqlite prohíbe usar una conexión desde otro hilo.
+
+    Los sincronizadores se CONSTRUYEN en el hilo principal pero corren dentro
+    del hilo de su loop. Cuando el Repository se abría en `__init__`, el primer
+    acceso desde el loop reventaba con `sqlite3.ProgrammingError` y el agente
+    quedaba en un bucle de errores sin sincronizar nada. Los tests no lo veían
+    porque llamaban a `run_once()` desde el mismo hilo.
+    """
+    trabajos = [
+        BackendSync(_holder(), _secrets(), db).run_once,
+        Heartbeat(_holder(), _secrets(), StatusBoard(), db).run_once,
+        DeviceSync(_holder(), _secrets(), StatusBoard(), db).run_once,
+    ]
+
+    errores_de_hilo = []
+
+    def correr(trabajo):
+        try:
+            trabajo()
+        except sqlite3.ProgrammingError as exc:
+            errores_de_hilo.append(exc)
+        except Exception:
+            # Fallas de red o de reloj no importan acá: lo que se prueba es
+            # que la conexión SQLite sea utilizable desde este hilo.
+            pass
+
+    for trabajo in trabajos:
+        hilo = threading.Thread(target=correr, args=(trabajo,))
+        hilo.start()
+        hilo.join(timeout=30)
+
+    assert not errores_de_hilo, f"SQLite usado desde otro hilo: {errores_de_hilo}"
+
+
+def test_cada_sincronizador_abre_su_propia_conexion(db):
+    """Dos sincronizadores no comparten conexión (una por hilo)."""
+    uno = BackendSync(_holder(), _secrets(), db)
+    otro = BackendSync(_holder(), _secrets(), db)
+    assert uno._repo is not otro._repo
+    # Y dentro del mismo objeto se reutiliza (no abre una por llamada).
+    assert uno._repo is uno._repo
+
+
+def test_precarga_la_config_remota_antes_de_arrancar_los_loops():
+    """El backfill inicial se decide con la config de CelTuc, no con la local.
+
+    Regresión: el loop del reloj arrancaba antes del primer heartbeat, hacía el
+    backfill con el default local (7 días) en vez del configurado (90) y dejaba
+    el watermark seteado, perdiendo el histórico para siempre.
+    """
+    from hikvision_agent.service.runner import precargar_config_remota
+
+    llamadas = []
+
+    class HeartbeatFalso:
+        def run_once(self):
+            llamadas.append(1)
+
+    assert precargar_config_remota(HeartbeatFalso()) is True
+    assert llamadas == [1]
+
+
+def test_sin_internet_el_agente_arranca_igual():
+    """Si el heartbeat inicial falla, no puede impedir que el agente arranque."""
+    from hikvision_agent.backend.client import BackendTransientError
+    from hikvision_agent.service.runner import precargar_config_remota
+
+    class HeartbeatCaido:
+        def run_once(self):
+            raise BackendTransientError("sin red todavía")
+
+    assert precargar_config_remota(HeartbeatCaido()) is False

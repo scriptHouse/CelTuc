@@ -9,7 +9,10 @@ dist/
 .pytest_cache/
 
 # Datos y secretos locales (NUNCA commitear)
-config.toml
+# `config*.toml` cubre tambien los configs con nombre propio por sucursal
+# (configSalta.toml, configCasaIscha.toml...): TODOS llevan el token del agente.
+config*.toml
+!config.example.toml
 secrets.dat
 .env
 *.db

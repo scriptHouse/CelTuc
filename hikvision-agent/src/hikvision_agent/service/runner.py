@@ -20,7 +20,6 @@ from ..backend.client import BackendAuthError, BackendPayloadError, BackendTrans
 from ..config import ConfigHolder, Secrets
 from ..hikvision.client import DeviceAuthError, DeviceUnreachable, IsapiUnsupported
 from ..paths import default_db_path, ensure_dirs
-from ..storage.repository import Repository
 from ..sync.backend_sync import BackendSync
 from ..sync.device_sync import DeviceSync
 from ..sync.heartbeat import Heartbeat
@@ -69,6 +68,29 @@ class Loop(threading.Thread):
         return _BACKOFF_STEPS[paso]
 
 
+def precargar_config_remota(heartbeat) -> bool:
+    """Un heartbeat ANTES de arrancar los loops. Devuelve si se pudo.
+
+    Importa en el primer arranque: sin watermark, el loop del reloj hace el
+    backfill inicial con `initial_backfill_days`. Si arranca antes de que
+    llegue la config remota, usa el default LOCAL (7 días) en vez del que se
+    configuró en CelTuc (por ejemplo 90) — y como el watermark queda seteado,
+    el histórico que se quería importar se pierde para siempre.
+
+    Si falla (sin Internet todavía), se sigue igual: el loop de heartbeat va a
+    reintentar y el agente arranca con la última config cacheada.
+    """
+    try:
+        heartbeat.run_once()
+        return True
+    except Exception as exc:
+        log.warning(
+            "No se pudo traer la config remota al arrancar (%s); "
+            "se sigue con la última conocida.", exc
+        )
+        return False
+
+
 def run_agent(holder: ConfigHolder, secrets: Secrets) -> None:
     ensure_dirs()
     stop_event = threading.Event()
@@ -83,10 +105,12 @@ def run_agent(holder: ConfigHolder, secrets: Secrets) -> None:
     status = StatusBoard()
     db = default_db_path()
 
-    # Un Repository (una conexión SQLite) por hilo.
-    device_sync = DeviceSync(holder, secrets, status, Repository(db))
-    backend_sync = BackendSync(holder, secrets, Repository(db))
-    heartbeat = Heartbeat(holder, secrets, status, Repository(db))
+    # Una conexión SQLite por hilo: se les pasa la RUTA, no un Repository ya
+    # abierto. Cada uno abre la suya la primera vez que la usa, que ocurre ya
+    # dentro de su propio hilo (sqlite3 no deja compartirlas entre hilos).
+    device_sync = DeviceSync(holder, secrets, status, db)
+    backend_sync = BackendSync(holder, secrets, db)
+    heartbeat = Heartbeat(holder, secrets, status, db)
 
     loops = [
         Loop("reloj", lambda: holder.current.device.poll_seconds, device_sync.run_once, stop_event),
@@ -104,7 +128,10 @@ def run_agent(holder: ConfigHolder, secrets: Secrets) -> None:
         config.backend.sync_seconds,
     )
 
-    # El heartbeat inicial también sirve para traer la config remota temprano.
+    # Traer la config remota ANTES de que el loop del reloj decida su ventana
+    # de backfill inicial (ver `precargar_config_remota`).
+    precargar_config_remota(heartbeat)
+
     for loop in loops:
         loop.start()
 

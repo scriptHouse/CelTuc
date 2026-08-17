@@ -1,4 +1,5 @@
 """El buffer local nunca duplica un evento y no pierde nada sin confirmación."""
+import threading
 from datetime import datetime, timezone
 
 import pytest
@@ -65,3 +66,35 @@ def test_watermark_y_config_cacheada(repo):
     assert repo.get_cached_remote_config() == {}
     repo.set_cached_remote_config({"version": 7, "device": {"poll_seconds": 15}})
     assert repo.get_cached_remote_config()["version"] == 7
+
+
+def test_el_mismo_repositorio_sirve_desde_varios_hilos(tmp_path):
+    """Raíz del bug que rompía el agente entero en producción.
+
+    sqlite3 prohíbe usar una conexión desde otro hilo. El Repository viaja
+    entre el hilo principal (arranque, precarga de config) y los tres loops,
+    así que la conexión tiene que ser por hilo. Antes explotaba con
+    `ProgrammingError` y el agente quedaba en un bucle de errores.
+    """
+    repo = Repository(tmp_path / "agent.db")
+    repo.set_state("prueba", "desde-el-hilo-principal")  # abre la del principal
+
+    errores = []
+    leido = []
+
+    def desde_otro_hilo():
+        try:
+            leido.append(repo.get_state("prueba"))
+            repo.insert_event_if_new(_evento(uid="otro-hilo"))
+            leido.append(repo.counts()["PENDING"])
+        except Exception as exc:
+            errores.append(exc)
+
+    hilo = threading.Thread(target=desde_otro_hilo)
+    hilo.start()
+    hilo.join(timeout=10)
+
+    assert not errores, f"la conexión no se pudo usar desde otro hilo: {errores}"
+    assert leido == ["desde-el-hilo-principal", 1]
+    # Y el hilo principal sigue viendo lo que escribió el otro.
+    assert repo.counts()["PENDING"] == 1

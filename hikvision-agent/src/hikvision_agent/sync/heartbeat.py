@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import socket
+from pathlib import Path
 from datetime import datetime, timezone
 
 from .. import AGENT_VERSION
@@ -23,11 +24,31 @@ _MAX_SKEW_SECONDS = 120
 
 
 class Heartbeat:
-    def __init__(self, holder: ConfigHolder, secrets: Secrets, status: StatusBoard, repo: Repository):
+    def __init__(
+        self,
+        holder: ConfigHolder,
+        secrets: Secrets,
+        status: StatusBoard,
+        db_path: Path,
+    ):
         self._holder = holder
         self._secrets = secrets
         self._status = status
-        self._repo = repo
+        self._db_path = db_path
+        self._repositorio: Repository | None = None
+
+    @property
+    def _repo(self) -> Repository:
+        """La conexión SQLite se abre PEREZOSAMENTE, ya dentro del hilo que la usa.
+
+        sqlite3 prohíbe usar una conexión desde un hilo distinto al que la
+        creó, y cada loop del agente corre en su propio hilo. Si el repo se
+        construyera en `__init__` (que corre en el hilo principal), el primer
+        acceso desde el loop reventaría con `ProgrammingError`.
+        """
+        if self._repositorio is None:
+            self._repositorio = Repository(self._db_path)
+        return self._repositorio
 
     def run_once(self) -> None:
         config = self._holder.current
