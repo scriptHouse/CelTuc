@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
 import { Check, ChevronDown, Search } from 'lucide-react'
 import { Input } from '@/components/ui/Input'
@@ -22,6 +23,20 @@ interface SelectProps {
   triggerClassName?: string
 }
 
+/** Separación entre el disparador y el desplegable, y respiro contra el borde. */
+const MARGEN = 8
+/** Alto mínimo utilizable: por debajo de esto conviene abrir para el otro lado. */
+const ALTO_MINIMO = 180
+
+interface Posicion {
+  left: number
+  width: number
+  /** Se fija `top` (abre hacia abajo) o `bottom` (abre hacia arriba), nunca ambos. */
+  top?: number
+  bottom?: number
+  maxAlto: number
+}
+
 /** Etiqueta de opción con las coincidencias de la búsqueda resaltadas. */
 function EtiquetaResaltada({ label, termino }: { label: string; termino: string }) {
   const rangos = rangosBusqueda(label, termino)
@@ -42,8 +57,16 @@ function EtiquetaResaltada({ label, termino }: { label: string; termino: string 
 }
 
 /**
- * Select de selección única con buscador opcional. El panel es `absolute`
- * (left-0/right-0), así se adapta al ancho del disparador y es 100% responsive.
+ * Select de selección única con buscador opcional.
+ *
+ * El desplegable se renderiza en un PORTAL, no como hijo del disparador. Antes
+ * era `absolute` y cualquier ancestro con `overflow-hidden` lo recortaba: se
+ * veía cortado dentro de los modales (que recortan por diseño, para respetar
+ * sus esquinas redondeadas). Con el portal queda fuera de esa caja y se
+ * posiciona con coordenadas de viewport (`fixed`).
+ *
+ * Abre hacia abajo o hacia arriba según dónde haya más lugar, y limita su alto
+ * al espacio disponible, así nunca se sale de la pantalla.
  *
  * Teclado: ↓/↑ recorre opciones, Enter selecciona la resaltada, Escape cierra
  * (solo el desplegable: no burbujea al Modal). La búsqueda tolera acentos y
@@ -64,6 +87,7 @@ export function Select({
   const [isOpen, setIsOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [resaltada, setResaltada] = useState(0)
+  const [posicion, setPosicion] = useState<Posicion | null>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -79,9 +103,51 @@ export function Select({
     return options.filter((option) => coincideBusqueda(option.label, termino))
   }, [options, search, searchable])
 
+  /** Coloca el desplegable contra el disparador, del lado con más espacio. */
+  const posicionar = useCallback(() => {
+    const disparador = triggerRef.current
+    if (!disparador) return
+    const caja = disparador.getBoundingClientRect()
+    const espacioAbajo = window.innerHeight - caja.bottom - MARGEN
+    const espacioArriba = caja.top - MARGEN
+
+    // Se prefiere abajo salvo que no entre y arriba haya más lugar.
+    const haciaAbajo = espacioAbajo >= ALTO_MINIMO || espacioAbajo >= espacioArriba
+    setPosicion({
+      left: caja.left,
+      width: caja.width,
+      top: haciaAbajo ? caja.bottom + MARGEN : undefined,
+      bottom: haciaAbajo ? undefined : window.innerHeight - caja.top + MARGEN,
+      maxAlto: Math.max(ALTO_MINIMO, (haciaAbajo ? espacioAbajo : espacioArriba) - MARGEN),
+    })
+  }, [])
+
+  // Posicionar antes del primer pintado evita que se vea saltar.
+  useLayoutEffect(() => {
+    if (isOpen) posicionar()
+  }, [isOpen, posicionar])
+
+  // Si algo se mueve mientras está abierto (scroll de la página o de un
+  // contenedor interno, cambio de tamaño), se recalcula. `capture` hace que
+  // también lleguen los scrolls de contenedores anidados.
+  useEffect(() => {
+    if (!isOpen) return
+    window.addEventListener('scroll', posicionar, true)
+    window.addEventListener('resize', posicionar)
+    return () => {
+      window.removeEventListener('scroll', posicionar, true)
+      window.removeEventListener('resize', posicionar)
+    }
+  }, [isOpen, posicionar])
+
+  // El panel vive en un portal: para el click-afuera hay que mirar también ahí,
+  // o cualquier clic dentro del desplegable lo cerraría.
   useEffect(() => {
     function handlePointerDown(event: PointerEvent) {
-      if (!wrapperRef.current?.contains(event.target as Node)) setIsOpen(false)
+      const destino = event.target as Node
+      if (wrapperRef.current?.contains(destino)) return
+      if (panelRef.current?.contains(destino)) return
+      setIsOpen(false)
     }
     document.addEventListener('pointerdown', handlePointerDown)
     return () => document.removeEventListener('pointerdown', handlePointerDown)
@@ -104,17 +170,6 @@ export function Select({
     const activa = listRef.current?.children[resaltada]
     if (activa instanceof HTMLElement) activa.scrollIntoView({ block: 'nearest' })
   }, [isOpen, resaltada, filteredOptions.length])
-
-  // El panel es `absolute`: dentro de un contenedor con scroll (el cuerpo de
-  // un modal) puede quedar cortado abajo. Al abrir, se acerca el scroll del
-  // contenedor lo justo para que el desplegable se vea entero.
-  useEffect(() => {
-    if (!isOpen) return
-    const frame = window.requestAnimationFrame(() => {
-      panelRef.current?.scrollIntoView({ block: 'nearest' })
-    })
-    return () => window.cancelAnimationFrame(frame)
-  }, [isOpen])
 
   function abrir() {
     // Al abrir, el buscador está vacío: las opciones filtradas son todas.
@@ -164,6 +219,73 @@ export function Select({
     }
   }
 
+  const panel = isOpen && posicion && (
+    <div
+      ref={panelRef}
+      // El mismo manejador que el disparador: al estar en un portal, los
+      // eventos de teclado del buscador ya no burbujean hasta el wrapper.
+      onKeyDown={handleKeyDown}
+      style={{
+        left: posicion.left,
+        width: posicion.width,
+        top: posicion.top,
+        bottom: posicion.bottom,
+        maxHeight: posicion.maxAlto,
+      }}
+      // z-60: por encima del Modal (z-50), que es donde más se usa.
+      className="ct-dropdown fixed z-[60] flex flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-[0_18px_50px_rgba(10,10,11,0.16)]"
+    >
+      {searchable && (
+        <div className="shrink-0 border-b border-line p-2">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
+            <Input
+              ref={searchInputRef}
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value)
+                setResaltada(0)
+              }}
+              placeholder={searchPlaceholder}
+              className="h-10 pl-9"
+            />
+          </div>
+        </div>
+      )}
+
+      <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-1.5" role="listbox">
+        {filteredOptions.length ? (
+          filteredOptions.map((option, indice) => {
+            const isSelected = option.value === value
+            const isActive = indice === resaltada
+            return (
+              <button
+                type="button"
+                key={option.value}
+                role="option"
+                aria-selected={isSelected}
+                onClick={() => selectValue(option.value)}
+                onMouseEnter={() => setResaltada(indice)}
+                className={cn(
+                  'flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors',
+                  isActive && 'bg-ink-50',
+                  isSelected ? 'bg-ink-100 font-medium text-ink-900' : 'text-ink-700',
+                )}
+              >
+                <span className="min-w-0 truncate">
+                  <EtiquetaResaltada label={option.label} termino={search} />
+                </span>
+                {isSelected && <Check className="h-4 w-4 shrink-0 text-ink-900" />}
+              </button>
+            )
+          })
+        ) : (
+          <p className="px-3 py-6 text-center text-sm text-ink-400">Sin resultados</p>
+        )}
+      </div>
+    </div>
+  )
+
   return (
     <div ref={wrapperRef} onKeyDown={handleKeyDown} className={cn('relative min-w-0', className)}>
       {label && (
@@ -189,61 +311,7 @@ export function Select({
         />
       </button>
 
-      {isOpen && (
-        <div
-          ref={panelRef}
-          className="ct-dropdown absolute left-0 right-0 z-40 mt-2 overflow-hidden rounded-xl border border-line bg-surface shadow-[0_18px_50px_rgba(10,10,11,0.16)]"
-        >
-          {searchable && (
-            <div className="border-b border-line p-2">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
-                <Input
-                  ref={searchInputRef}
-                  value={search}
-                  onChange={(event) => {
-                    setSearch(event.target.value)
-                    setResaltada(0)
-                  }}
-                  placeholder={searchPlaceholder}
-                  className="h-10 pl-9"
-                />
-              </div>
-            </div>
-          )}
-
-          <div ref={listRef} className="max-h-64 overflow-y-auto p-1.5" role="listbox">
-            {filteredOptions.length ? (
-              filteredOptions.map((option, indice) => {
-                const isSelected = option.value === value
-                const isActive = indice === resaltada
-                return (
-                  <button
-                    type="button"
-                    key={option.value}
-                    role="option"
-                    aria-selected={isSelected}
-                    onClick={() => selectValue(option.value)}
-                    onMouseEnter={() => setResaltada(indice)}
-                    className={cn(
-                      'flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors',
-                      isActive && 'bg-ink-50',
-                      isSelected ? 'bg-ink-100 font-medium text-ink-900' : 'text-ink-700',
-                    )}
-                  >
-                    <span className="min-w-0 truncate">
-                      <EtiquetaResaltada label={option.label} termino={search} />
-                    </span>
-                    {isSelected && <Check className="h-4 w-4 shrink-0 text-ink-900" />}
-                  </button>
-                )
-              })
-            ) : (
-              <p className="px-3 py-6 text-center text-sm text-ink-400">Sin resultados</p>
-            )}
-          </div>
-        </div>
-      )}
+      {panel && createPortal(panel, document.body)}
     </div>
   )
 }

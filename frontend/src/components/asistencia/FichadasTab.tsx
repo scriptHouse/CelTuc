@@ -321,7 +321,7 @@ function DetalleFichadaModal({ id, onClose }: { id: number | null; onClose: () =
 
   return (
     <Modal open={id !== null} onClose={onClose} size="lg">
-      <div className="p-5 sm:p-6">
+      <div className="min-h-0 overflow-y-auto p-5 sm:p-6">
         <h3 className="text-lg font-semibold text-ink-950">Detalle de la fichada</h3>
         {isLoading || !data ? (
           <Skeleton className="mt-4 h-48 rounded-xl" />

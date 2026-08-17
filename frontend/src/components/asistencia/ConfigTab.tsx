@@ -400,7 +400,7 @@ function RelojModal({
 
   return (
     <Modal open={abierto} onClose={onClose} size="lg">
-      <div className="p-5 sm:p-6">
+      <div className="min-h-0 overflow-y-auto p-5 sm:p-6">
         <h3 className="text-lg font-semibold text-ink-950">
           {reloj ? `Editar «${reloj.nombre}»` : 'Nuevo reloj'}
         </h3>
@@ -575,7 +575,7 @@ function AgenteModal({
 
   return (
     <Modal open={abierto} onClose={onClose} size="md">
-      <div className="p-5 sm:p-6">
+      <div className="min-h-0 overflow-y-auto p-5 sm:p-6">
         <h3 className="text-lg font-semibold text-ink-950">
           {agente ? `Editar «${agente.nombre}»` : 'Nuevo agente'}
         </h3>
@@ -670,7 +670,7 @@ function TokenModal({ datos, onClose }: { datos: TokenNuevo | null; onClose: () 
 
   return (
     <Modal open={datos !== null} onClose={onClose} size="md" dismissable={false}>
-      <div className="p-5 sm:p-6">
+      <div className="min-h-0 overflow-y-auto p-5 sm:p-6">
         <div className="flex items-center gap-3">
           <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-ink-950 text-on-ink">
             <KeyRound className="h-5 w-5" strokeWidth={1.85} />

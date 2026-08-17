@@ -382,7 +382,7 @@ function LicenciaModal({
 
   return (
     <Modal open={abierto} onClose={onClose} size="md">
-      <div className="p-5 sm:p-6">
+      <div className="min-h-0 overflow-y-auto p-5 sm:p-6">
         <h3 className="text-lg font-semibold text-ink-950">
           {licencia ? 'Editar licencia' : 'Cargar licencia'}
         </h3>

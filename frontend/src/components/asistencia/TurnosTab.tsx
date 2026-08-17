@@ -504,7 +504,7 @@ function TurnoModal({
 
   return (
     <Modal open={abierto} onClose={onClose} size="lg">
-      <div className="p-5 sm:p-6">
+      <div className="min-h-0 overflow-y-auto p-5 sm:p-6">
         <h3 className="text-lg font-semibold text-ink-950">
           {turno ? `Editar «${turno.nombre}»` : 'Nuevo turno'}
         </h3>
@@ -751,7 +751,7 @@ function AsignarTurnoModal({
 
   return (
     <Modal open={abierto} onClose={onClose} size="md">
-      <div className="p-5 sm:p-6">
+      <div className="min-h-0 overflow-y-auto p-5 sm:p-6">
         <h3 className="text-lg font-semibold text-ink-950">Asignar turno</h3>
         <p className="mt-1 text-sm text-ink-500">
           Desde esa fecha, los días del empleado se comparan contra este horario.
