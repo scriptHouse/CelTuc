@@ -34,11 +34,24 @@ _ACS_EVENT_PATH = "/ISAPI/AccessControl/AcsEvent?format=json"
 _PAGE_SIZE = 30          # varios firmwares limitan maxResults a 30
 _MAX_PAGES = 2000        # tope de seguridad por búsqueda
 
-# Pausa entre páginas. Una recuperación histórica son cientos de consultas
-# seguidas y el DS-K1A340WX real empieza a devolver 401 cuando se lo atropella
-# (no es la contraseña: es el equipo cortando). Un respiro corto lo evita y
-# apenas agrega unos segundos sobre miles de fichadas.
-_PAUSA_ENTRE_PAGINAS = 0.2
+# El DS-K1A340WX corta la búsqueda con un 401 y hay que renovar la sesión para
+# seguir. NO es la contraseña: con una conexión y un `searchID` nuevos, la
+# MISMA posición responde 200 y la paginación continúa.
+#
+# Medido contra el equipo real (5.469 eventos, 90 días):
+#
+#     sin pausa entre páginas ->  3 renovaciones, 10 s
+#     con 0,2 s de pausa      -> 14 renovaciones, 49 s
+#
+# O sea que el límite es el TIEMPO DE VIDA de la sesión de búsqueda, no la
+# cantidad de consultas: ir más lento solo quema ese presupuesto y multiplica
+# los cortes. Por eso se pagina lo más rápido posible y se renueva al cortar.
+_PAUSA_TRAS_RENOVAR = 0.2
+
+# Tope de seguridad para que un 401 permanente no sea un bucle infinito. Con
+# ~1.800 eventos por sesión da margen de sobra; una contraseña realmente mal
+# puesta falla antes, en `get_device_info()`.
+_MAX_RENOVACIONES_SESION = 200
 
 
 class DeviceError(Exception):
@@ -76,13 +89,26 @@ class HikvisionClient:
         if not password:
             raise DeviceAuthError("Falta la contraseña del reloj (HIKVISION_PASSWORD / secrets set)")
         self._config = config
-        self._session = requests.Session()
-        self._session.auth = HTTPDigestAuth(config.username, password)
-        if config.use_https and not config.verify_tls:
-            self._session.verify = False
+        self._password = password
+        self._session = self._nueva_sesion()
+
+    def _nueva_sesion(self) -> requests.Session:
+        sesion = requests.Session()
+        sesion.auth = HTTPDigestAuth(self._config.username, self._password)
+        if self._config.use_https and not self._config.verify_tls:
+            sesion.verify = False
             import urllib3
 
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        return sesion
+
+    def _renovar_sesion(self) -> None:
+        """Conexión y autenticación nuevas, descartando la anterior."""
+        try:
+            self._session.close()
+        except Exception:
+            pass
+        self._session = self._nueva_sesion()
 
     # ------------------------------------------------------------------ http
     def _request(self, method: str, path: str, **kwargs) -> requests.Response:
@@ -132,23 +158,46 @@ class HikvisionClient:
             raise DeviceError(f"time devolvió HTTP {respuesta.status_code}")
         return _xml_a_dict(respuesta.text).get("localTime", "")
 
+    def _pedir_pagina(self, search_id, posicion, start_at, end_at):
+        cuerpo = {
+            "AcsEventCond": {
+                "searchID": search_id,
+                "searchResultPosition": posicion,
+                "maxResults": _PAGE_SIZE,
+                "major": 0,
+                "minor": 0,
+                "startTime": start_at.isoformat(timespec="seconds"),
+                "endTime": end_at.isoformat(timespec="seconds"),
+            }
+        }
+        return self._request("POST", _ACS_EVENT_PATH, json=cuerpo)
+
     def search_events(self, start_at: datetime, end_at: datetime) -> Iterator[dict]:
-        """Itera los eventos crudos (items de InfoList) del rango pedido."""
+        """Itera los eventos crudos (items de InfoList) del rango pedido.
+
+        Si el reloj corta la búsqueda a mitad (401 tras miles de eventos), se
+        renueva la sesión y se continúa DESDE LA MISMA POSICIÓN, sin releer lo
+        ya entregado ni perder el resto.
+        """
         search_id = str(uuid.uuid4())
         posicion = 0
+        renovaciones = 0
         for _ in range(_MAX_PAGES):
-            cuerpo = {
-                "AcsEventCond": {
-                    "searchID": search_id,
-                    "searchResultPosition": posicion,
-                    "maxResults": _PAGE_SIZE,
-                    "major": 0,
-                    "minor": 0,
-                    "startTime": start_at.isoformat(timespec="seconds"),
-                    "endTime": end_at.isoformat(timespec="seconds"),
-                }
-            }
-            respuesta = self._request("POST", _ACS_EVENT_PATH, json=cuerpo)
+            try:
+                respuesta = self._pedir_pagina(search_id, posicion, start_at, end_at)
+            except DeviceAuthError:
+                if renovaciones >= _MAX_RENOVACIONES_SESION:
+                    raise
+                renovaciones += 1
+                log.info(
+                    "El reloj cortó la búsqueda tras %s eventos; renovando sesión "
+                    "y continuando desde ahí (renovación %s).", posicion, renovaciones
+                )
+                self._renovar_sesion()
+                search_id = str(uuid.uuid4())
+                time.sleep(_PAUSA_TRAS_RENOVAR)
+                respuesta = self._pedir_pagina(search_id, posicion, start_at, end_at)
+
             if respuesta.status_code in (400, 404):
                 raise IsapiUnsupported(
                     "El firmware no aceptó AcsEvent en JSON "
@@ -173,5 +222,4 @@ class HikvisionClient:
             posicion += cantidad
             if estado != "MORE" or cantidad == 0:
                 return
-            time.sleep(_PAUSA_ENTRE_PAGINAS)
         log.warning("Búsqueda ISAPI cortada por tope de páginas (%s)", _MAX_PAGES)
