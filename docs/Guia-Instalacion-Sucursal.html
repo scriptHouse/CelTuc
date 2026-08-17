@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Instalación en sucursal — CelTuc</title>
+</head>
+<body style="-webkit-print-color-adjust: exact; print-color-adjust: exact;">
+
+<style>
+  :root {
+    --paper: #f4f4f2;
+    --surface: #ffffff;
+    --surface-2: #ebebe8;
+    --ink: #16171a;
+    --ink-2: #3f4045;
+    --muted: #6b6d73;
+    --line: #dededb;
+    --line-2: #c9c9c5;
+    --signal: #b45309;
+    --signal-bg: #fdf6ec;
+    --signal-line: #ecd7b8;
+    --stop: #9f1239;
+    --stop-bg: #fdf2f4;
+    --stop-line: #f0cdd5;
+    --ok: #15803d;
+    --ok-bg: #f1f8f3;
+    --ok-line: #cbe4d3;
+
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #131416;
+      --surface: #1b1d20;
+      --surface-2: #24262a;
+      --ink: #f0f0ee;
+      --ink-2: #cbccc9;
+      --muted: #9a9ca1;
+      --line: #303338;
+      --line-2: #43464c;
+      --signal: #f0a04b;
+      --signal-bg: #2a2015;
+      --signal-line: #4d3a20;
+      --stop: #f2778f;
+      --stop-bg: #2b1720;
+      --stop-line: #4d2430;
+      --ok: #6ec48a;
+      --ok-bg: #16241b;
+      --ok-line: #27412f;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper: #131416;
+    --surface: #1b1d20;
+    --surface-2: #24262a;
+    --ink: #f0f0ee;
+    --ink-2: #cbccc9;
+    --muted: #9a9ca1;
+    --line: #303338;
+    --line-2: #43464c;
+    --signal: #f0a04b;
+    --signal-bg: #2a2015;
+    --signal-line: #4d3a20;
+    --stop: #f2778f;
+    --stop-bg: #2b1720;
+    --stop-line: #4d2430;
+    --ok: #6ec48a;
+    --ok-bg: #16241b;
+    --ok-line: #27412f;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .hoja {
+    max-width: 62rem;
+    margin: 0 auto;
+    padding: 3rem 1.25rem 5rem;
+  }
+
+  /* ---------- Encabezado ---------- */
+  .cabecera { border-bottom: 2px solid var(--ink); padding-bottom: 1.25rem; margin-bottom: 2rem; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: .72rem;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 .5rem;
+  }
+  h1 {
+    font-size: clamp(1.75rem, 5vw, 2.5rem);
+    line-height: 1.1;
+    letter-spacing: -.02em;
+    margin: 0 0 .6rem;
+    text-wrap: balance;
+  }
+  .bajada { color: var(--ink-2); margin: 0; max-width: 46rem; }
+
+  /* ---------- Bloques ---------- */
+  section { margin-top: 2.75rem; }
+  h2 {
+    font-size: 1.3rem;
+    letter-spacing: -.01em;
+    margin: 0 0 .35rem;
+    text-wrap: balance;
+  }
+  .seccion-nota { color: var(--muted); font-size: .93rem; margin: 0 0 1.25rem; }
+
+  .rotulo {
+    font-family: var(--mono);
+    font-size: .7rem;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: block;
+    margin-bottom: .75rem;
+  }
+
+  /* ---------- Pasos ---------- */
+  ol.pasos { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1rem; }
+
+  .paso {
+    display: grid;
+    grid-template-columns: 2.5rem 1fr;
+    gap: 1rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 1.25rem 1.25rem 1.25rem 1rem;
+  }
+  @media (max-width: 34rem) { .paso { grid-template-columns: 2rem 1fr; gap: .75rem; padding: 1rem .9rem; } }
+
+  .num {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: .95rem;
+    font-weight: 700;
+    color: var(--surface);
+    background: var(--ink);
+    width: 1.9rem; height: 1.9rem;
+    border-radius: 50%;
+    display: grid; place-items: center;
+  }
+  .paso h3 { margin: .15rem 0 .5rem; font-size: 1.06rem; letter-spacing: -.01em; text-wrap: balance; }
+  .paso p { margin: 0 0 .6rem; color: var(--ink-2); }
+  .paso p:last-child, .paso ul:last-child, .paso div:last-child { margin-bottom: 0; }
+  .paso ul { margin: 0 0 .6rem; padding-left: 1.1rem; color: var(--ink-2); }
+  .paso li { margin-bottom: .3rem; }
+  .paso li::marker { color: var(--line-2); }
+
+  .donde {
+    font-family: var(--mono);
+    font-size: .82rem;
+    color: var(--muted);
+    background: var(--surface-2);
+    border-radius: 6px;
+    padding: .3rem .55rem;
+    display: inline-block;
+    margin-bottom: .6rem;
+  }
+
+  /* ---------- Código ---------- */
+  code {
+    font-family: var(--mono);
+    font-size: .88em;
+    background: var(--surface-2);
+    padding: .1em .35em;
+    border-radius: 4px;
+  }
+  pre {
+    font-family: var(--mono);
+    font-size: .82rem;
+    line-height: 1.55;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: .8rem .9rem;
+    margin: 0 0 .7rem;
+    overflow-x: auto;
+  }
+  pre code { background: none; padding: 0; }
+
+  /* ---------- Avisos ---------- */
+  .aviso {
+    border-left: 3px solid var(--signal);
+    background: var(--signal-bg);
+    border-radius: 0 8px 8px 0;
+    padding: .7rem .9rem;
+    margin: 0 0 .7rem;
+    font-size: .93rem;
+    color: var(--ink-2);
+  }
+  .aviso strong { color: var(--signal); }
+  .aviso.alto { border-left-color: var(--stop); background: var(--stop-bg); }
+  .aviso.alto strong { color: var(--stop); }
+  .aviso.bien { border-left-color: var(--ok); background: var(--ok-bg); }
+  .aviso.bien strong { color: var(--ok); }
+  .aviso :last-child { margin-bottom: 0; }
+  .aviso p { margin: 0 0 .4rem; }
+
+  /* ---------- Checklist ---------- */
+  .lista { display: flex; flex-direction: column; gap: .1rem; }
+  .item {
+    display: flex; align-items: flex-start; gap: .7rem;
+    padding: .55rem .7rem;
+    border-radius: 7px;
+    cursor: pointer;
+  }
+  .item:hover { background: var(--surface-2); }
+  .item input {
+    appearance: none; -webkit-appearance: none;
+    width: 1.15rem; height: 1.15rem;
+    margin: .18rem 0 0;
+    flex-shrink: 0;
+    border: 1.5px solid var(--line-2);
+    border-radius: 4px;
+    background: var(--surface);
+    cursor: pointer;
+    position: relative;
+  }
+  .item input:checked { background: var(--ink); border-color: var(--ink); }
+  .item input:checked::after {
+    content: "";
+    position: absolute; left: .33rem; top: .1rem;
+    width: .28rem; height: .58rem;
+    border: solid var(--surface);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+  }
+  .item input:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+  .item span { color: var(--ink-2); }
+  .item input:checked + span { color: var(--muted); text-decoration: line-through; }
+
+  .tarjeta {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 1rem .6rem;
+  }
+
+  /* ---------- Tabla ---------- */
+  .tabla-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: .93rem; min-width: 34rem; }
+  th, td { text-align: left; padding: .75rem .9rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  th {
+    font-family: var(--mono);
+    font-size: .7rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+    background: var(--surface-2);
+  }
+  td:first-child { color: var(--ink); font-weight: 500; width: 38%; }
+  td:last-child { color: var(--ink-2); }
+
+  .datos { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+
+  /* ---------- Impresion / PDF ---------- */
+  @page { size: A4; margin: 14mm 15mm 16mm; }
+
+  @media print {
+    /* En papel siempre la paleta clara, sin importar el tema del navegador. */
+    :root {
+      --paper: #ffffff; --surface: #ffffff; --surface-2: #f2f2f0;
+      --ink: #16171a; --ink-2: #34353a; --muted: #66686e;
+      --line: #d8d8d4; --line-2: #bcbcb8;
+      --signal: #94480a; --signal-bg: #fbf4ea; --signal-line: #e4cfb2;
+      --stop: #8c1030; --stop-bg: #fbf0f2; --stop-line: #eac6cf;
+      --ok: #14652f; --ok-bg: #f0f6f1; --ok-line: #c6dfcd;
+    }
+    body { font-size: 10.5pt; line-height: 1.5; }
+    .hoja { max-width: none; padding: 0; }
+
+    /* Los bloques cortos nunca se parten. Un paso largo SI puede continuar en
+       la pagina siguiente: forzarlo entero dejaba medias paginas en blanco. */
+    .tarjeta, .aviso, .tabla-wrap, tr, pre, li { break-inside: avoid; }
+    .paso { break-inside: auto; orphans: 3; widows: 3; }
+    /* El titulo de una seccion nunca queda solo al pie. */
+    h2, h3, .seccion-nota, .rotulo { break-after: avoid; }
+    section { break-before: auto; }
+    pre { white-space: pre-wrap; word-break: break-word; }
+
+    .item:hover { background: none; }
+    .cierre, .solo-pantalla { display: none; }
+    h1 { font-size: 22pt; }
+    h2 { font-size: 13pt; }
+    .paso h3 { font-size: 11pt; }
+  }
+
+  hr { border: none; border-top: 1px solid var(--line); margin: 3rem 0 0; }
+
+  .cierre { color: var(--muted); font-size: .9rem; margin-top: 1.25rem; }
+</style>
+
+<div class="hoja">
+
+  <header class="cabecera">
+    <p class="eyebrow">CelTuc · Módulo Asistencia</p>
+    <h1>Instalación en sucursal</h1>
+    <p class="bajada">
+      Todo lo que hay que hacer, en orden, para dejar un reloj de asistencia funcionando solo.
+      Los pasos van encadenados: cada uno necesita el resultado del anterior. Calculá una hora
+      la primera vez.
+    </p>
+  </header>
+
+  <!-- ============ ANTES DE SALIR ============ -->
+  <section>
+    <h2>Antes de salir</h2>
+    <p class="seccion-nota">Esto se prepara en la oficina. Si falta algo de acá, el viaje se pierde.</p>
+
+    <div class="tarjeta">
+      <div class="lista">
+        <label class="item"><input type="checkbox"><span>Generar el ejecutable del agente en tu PC: desde la carpeta <code>hikvision-agent</code>, correr <code>powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1</code>. Queda en <code>dist\hikvision-agent.exe</code>.</span></label>
+        <label class="item"><input type="checkbox"><span>Copiar a un pendrive: <code>hikvision-agent.exe</code> y <code>scripts\install_task.ps1</code>.</span></label>
+        <label class="item"><input type="checkbox"><span>Conseguir el usuario y la contraseña de administrador del <strong>router</strong> de la sucursal. Sin esto no se puede fijar la IP.</span></label>
+        <label class="item"><input type="checkbox"><span>Averiguar el nombre y la clave de la red <strong>Wi-Fi de 2,4 GHz</strong> de la sucursal.</span></label>
+        <label class="item"><input type="checkbox"><span>Verificar que el reloj venga con su fuente de <span class="datos">12 V</span>. Es la única alimentación: el equipo no tiene puerto de red ni PoE.</span></label>
+        <label class="item"><input type="checkbox"><span>Llevar herramientas para montarlo y una notebook que quede en la sucursal.</span></label>
+        <label class="item"><input type="checkbox"><span>Tener a mano el listado de empleados con el identificador que va a usar cada uno en el reloj.</span></label>
+      </div>
+    </div>
+
+    <div class="aviso" style="margin-top:1rem">
+      <p><strong>El archivo de configuración no se prepara antes.</strong> Necesita la IP que el reloj recién va a tener una vez conectado, así que se genera en el paso 8, ya estando en la sucursal.</p>
+    </div>
+  </section>
+
+  <!-- ============ EN LA SUCURSAL ============ -->
+  <section>
+    <h2>En la sucursal</h2>
+    <p class="seccion-nota">Los pasos 1 al 7 son sobre el reloj y el router. Del 8 en adelante, sobre la notebook.</p>
+
+    <ol class="pasos">
+
+      <!-- 1 -->
+      <li class="paso">
+        <span class="num">1</span>
+        <div>
+          <h3>Montar y encender el reloj</h3>
+          <p>Enchufá la fuente de 12 V. Arranca solo.</p>
+          <ul>
+            <li>A la altura de la cara de una persona parada.</li>
+            <li>Es de <strong>interior</strong>. Evitá pared con sol directo o una ventana fuerte de fondo: la contraluz arruina el reconocimiento facial.</li>
+          </ul>
+        </div>
+      </li>
+
+      <!-- 2 -->
+      <li class="paso">
+        <span class="num">2</span>
+        <div>
+          <h3>Activar el reloj</h3>
+          <p>Aparece una pantalla con un código QR. Tocá <code>Local</code> y creá la contraseña de administrador.</p>
+          <ul>
+            <li>Mínimo 8 caracteres, con al menos <strong>3 de estos 4</strong>: mayúsculas, minúsculas, números, símbolos.</li>
+            <li>No puede contener las palabras <code>admin</code> ni <code>nimda</code>.</li>
+          </ul>
+          <div class="aviso alto">
+            <p><strong>Anotá esta contraseña ahora.</strong> Es la que va a usar el agente para leer las fichadas. Si se pierde, el único camino es resetear el reloj de fábrica y perder todo lo cargado.</p>
+          </div>
+        </div>
+      </li>
+
+      <!-- 3 -->
+      <li class="paso">
+        <span class="num">3</span>
+        <div>
+          <h3>Pasar el asistente inicial</h3>
+          <ul>
+            <li><strong>Idioma:</strong> elegí Español. El equipo se reinicia, es normal.</li>
+            <li><strong>Modo de aplicación:</strong> <code>Indoor</code>. Si quedó cerca de una ventana, usá <code>Others</code>.</li>
+            <li><strong>Privacidad:</strong> dejá todo apagado. El sistema solo necesita identificador, fecha y hora — ninguna foto viaja al servidor.</li>
+            <li><strong>Administrador:</strong> podés tocar <code>Skip</code>. Si cargás un admin con rostro, después vas a necesitar esa cara para entrar al menú.</li>
+          </ul>
+        </div>
+      </li>
+
+      <!-- 4 -->
+      <li class="paso">
+        <span class="num">4</span>
+        <div>
+          <h3>Conectarlo al Wi-Fi</h3>
+          <p class="donde">Mantené el dedo 3 segundos en la pantalla → deslizá → clave de admin → menú</p>
+          <p>Entrá a <code>Comm.</code> → <code>Wi-Fi</code>, activalo y elegí la red. Dejá <strong>DHCP activado</strong>.</p>
+          <div class="aviso">
+            <p><strong>Tiene que ser la red de 2,4 GHz.</strong> El reloj no ve las de 5 GHz: si no aparece en la lista, ese es el motivo.</p>
+            <p>Si la clave rebota, casi siempre es un error de tipeo: el teclado de 4,3″ es traicionero.</p>
+          </div>
+        </div>
+      </li>
+
+      <!-- 5 -->
+      <li class="paso">
+        <span class="num">5</span>
+        <div>
+          <h3>Poner la hora</h3>
+          <p class="donde">Menú → Basic → Time Settings</p>
+          <p>Zona horaria de Argentina, hora correcta y <strong>sin horario de verano (DST)</strong>.</p>
+          <p>Las fichadas se guardan con la hora que informa el reloj: si está corrida, todos los reportes salen mal.</p>
+        </div>
+      </li>
+
+      <!-- 6 -->
+      <li class="paso">
+        <span class="num">6</span>
+        <div>
+          <h3>Anotar la MAC y la IP</h3>
+          <p class="donde">Menú → Maintenance → System Information</p>
+          <p>Anotá la <strong>dirección MAC</strong>, el número de serie y la versión de firmware.</p>
+          <p>La IP la ves volviendo a <code>Comm.</code> → <code>Wi-Fi</code>, entrando a la red conectada.</p>
+        </div>
+      </li>
+
+      <!-- 7 -->
+      <li class="paso">
+        <span class="num">7</span>
+        <div>
+          <h3>Fijar la IP en el router</h3>
+          <div class="aviso">
+            <p><strong>Este es el paso que evita que todo se rompa en unos meses.</strong> Una IP asignada por DHCP cambia sola con un corte de luz o un reinicio del router, y el agente deja de encontrar el reloj.</p>
+          </div>
+
+          <p><strong>a.</strong> Desde la notebook, averiguá la dirección del router:</p>
+          <pre><code>ipconfig</code></pre>
+          <p>La línea <code>Puerta de enlace predeterminada</code> es la IP del router. Abrila en el navegador.</p>
+
+          <p><strong>b.</strong> Buscá la sección de reservas. Según la marca se llama distinto:</p>
+          <ul>
+            <li><strong>Huawei</strong> (los de fibra de Personal): <code>LAN</code> → <code>DHCP Static IP Configuration</code></li>
+            <li><strong>TP-Link:</strong> <code>Avanzado</code> → <code>Red</code> → <code>Reserva de direcciones</code></li>
+            <li><strong>Mikrotik:</strong> <code>IP</code> → <code>DHCP Server</code> → <code>Leases</code> → botón <code>Make Static</code></li>
+            <li>Otras: buscá <em>Address Reservation</em>, <em>Static DHCP</em> o <em>IP-MAC Binding</em>, casi siempre bajo <em>LAN</em>.</li>
+          </ul>
+
+          <p><strong>c.</strong> Cargá la MAC del reloj y <strong>la misma IP que ya tiene</strong>. Guardá.</p>
+
+          <div class="aviso bien">
+            <p><strong>Reservá la IP que ya tiene, no una nueva.</strong> Muchos routers listan los equipos conectados con un botón de reservar al lado: un clic y listo. Además, en los Huawei la IP reservada <em>tiene que estar dentro del rango que reparte el DHCP</em> — si el router se la dio, ya cumple.</p>
+          </div>
+
+          <p><strong>d.</strong> Aprovechá que estás adentro y verificá dos cosas más:</p>
+          <ul>
+            <li>Que el <strong>filtrado por MAC</strong> del Wi-Fi esté desactivado o vacío.</li>
+            <li>Que no esté activo el <strong>aislamiento de clientes</strong> (<em>AP isolation</em>): con eso encendido la notebook nunca podría leer el reloj.</li>
+          </ul>
+
+          <p><strong>e.</strong> Reiniciá el reloj (desenchufá 10 segundos) y confirmá que vuelve con la misma IP.</p>
+        </div>
+      </li>
+
+      <!-- 8 -->
+      <li class="paso">
+        <span class="num">8</span>
+        <div>
+          <h3>Dar de alta el reloj en CelTuc</h3>
+          <p class="donde">Desde la notebook → celtuc.scripthouse.com.ar → Asistencia → Configuración</p>
+
+          <p><strong>Nuevo reloj:</strong> sucursal, un nombre, la IP reservada y usuario ISAPI <code>admin</code>.</p>
+          <p>Si el reloj ya venía usándose y querés traer su histórico, abrí <em>Opciones avanzadas</em> y subí los días a recuperar. El equipo guarda hasta 300.000 eventos.</p>
+
+          <p><strong>Nuevo agente:</strong> ponele un nombre (por ejemplo <code>salta-notebook-01</code>) y tocá <em>Crear y generar token</em>. Se abre una ventana con el token: descargá el <code>config.toml</code> desde ahí.</p>
+
+          <div class="aviso alto">
+            <p><strong>Descargalo estando en celtuc.scripthouse.com.ar.</strong> El archivo se arma con la dirección de la pestaña donde estés: si lo bajás desde un entorno local, el agente va a apuntar a la máquina equivocada.</p>
+            <p>El token se muestra <strong>una sola vez</strong>. Si lo perdés, se regenera desde la misma pantalla.</p>
+          </div>
+        </div>
+      </li>
+
+      <!-- 9 -->
+      <li class="paso">
+        <span class="num">9</span>
+        <div>
+          <h3>Instalar el agente en la notebook</h3>
+          <p>Poné en una misma carpeta los tres archivos: <code>hikvision-agent.exe</code>, el <code>config.toml</code> recién descargado y <code>install_task.ps1</code>.</p>
+          <p>Abrí <strong>PowerShell como Administrador</strong> en esa carpeta y corré:</p>
+          <pre><code>powershell -ExecutionPolicy Bypass -File install_task.ps1</code></pre>
+          <p>El instalador te va a pedir la <strong>contraseña del reloj</strong> (la del paso 2). La guarda cifrada en la notebook; nunca viaja al servidor.</p>
+          <p>Al terminar, el agente queda como tarea programada: arranca con Windows, sin que nadie inicie sesión, sin ventana y se reinicia solo si falla.</p>
+          <div class="aviso">
+            <p>Si el archivo de configuración quedó con otro nombre, agregale <code>--config nombre.toml</code> al comando de diagnóstico del paso siguiente.</p>
+          </div>
+        </div>
+      </li>
+
+      <!-- 10 -->
+      <li class="paso">
+        <span class="num">10</span>
+        <div>
+          <h3>Verificar que quedó andando</h3>
+          <p>En CelTuc, entrá a <strong>Asistencia → Panel</strong>. En uno o dos minutos la sucursal tiene que mostrar los dos puntos en verde: <em>Reloj en línea</em> y <em>Notebook en línea</em>.</p>
+          <p>Si querés confirmarlo desde la notebook:</p>
+          <pre><code>&amp; "C:\Program Files\CelTuc\HikvisionAgent\hikvision-agent.exe" diag</code></pre>
+          <p>Tiene que responder el modelo, el número de serie y el firmware del equipo.</p>
+        </div>
+      </li>
+
+      <!-- 11 -->
+      <li class="paso">
+        <span class="num">11</span>
+        <div>
+          <h3>Cargar los empleados y vincularlos</h3>
+          <p>En el reloj, registrá el rostro de cada persona con su identificador.</p>
+          <p>Después, en CelTuc → <strong>Asistencia → Empleados</strong>, van apareciendo solos los identificadores que fichan. Vinculá cada uno con su empleado del sistema: las fichadas anteriores se reasignan automáticamente.</p>
+          <div class="aviso">
+            <p>Si una persona todavía no está vinculada, sus fichadas <strong>igual se guardan</strong> y quedan esperando. No se pierde ninguna.</p>
+          </div>
+        </div>
+      </li>
+
+      <!-- 12 -->
+      <li class="paso">
+        <span class="num">12</span>
+        <div>
+          <h3>La prueba final</h3>
+          <p>No te vayas sin hacer esto:</p>
+          <ul>
+            <li>Hacé una fichada de prueba y confirmá que aparece en CelTuc.</li>
+            <li><strong>Reiniciá la notebook.</strong></li>
+            <li>Sin abrir ningún programa, esperá dos minutos y confirmá que el Panel vuelve a ponerse en verde.</li>
+          </ul>
+          <p>Si eso funciona, la sucursal quedó en modo prender y olvidarse.</p>
+        </div>
+      </li>
+
+    </ol>
+  </section>
+
+  <!-- ============ SI ALGO FALLA ============ -->
+  <section>
+    <h2>Si algo falla</h2>
+    <p class="seccion-nota">Los cuatro problemas que más aparecen y qué mirar primero.</p>
+
+    <div class="tabla-wrap">
+      <table>
+        <thead>
+          <tr><th>Qué ves</th><th>Qué mirar</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>El reloj no encuentra la red Wi-Fi</td>
+            <td>Casi siempre es que estás mirando la red de 5 GHz. Buscá la de 2,4 GHz. Si las dos tienen el mismo nombre, renombrá temporalmente la de 2,4 desde el router.</td>
+          </tr>
+          <tr>
+            <td>Panel dice «Reloj sin conexión»</td>
+            <td>Que el reloj esté encendido y en la Wi-Fi, que la IP cargada en CelTuc sea la real, y que el aislamiento de clientes del router esté apagado.</td>
+          </tr>
+          <tr>
+            <td>Panel dice «Notebook apagada»</td>
+            <td>Que la notebook esté prendida y con internet. Después, que la tarea programada esté corriendo: <span class="datos">Start-ScheduledTask "CelTuc Hikvision Agent"</span></td>
+          </tr>
+          <tr>
+            <td>Nada de eso aclara el problema</td>
+            <td>El registro del agente en la notebook: <span class="datos">C:\ProgramData\CelTuc\HikvisionAgent\logs\agent.log</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ NO HACER ============ -->
+  <section>
+    <h2>Lo que no hay que tocar</h2>
+
+    <div class="aviso alto">
+      <p><strong>Restore to Factory Settings</strong> en el menú del reloj. Borra usuarios, rostros y todos los eventos. Es el único botón realmente peligroso del equipo.</p>
+      <p><strong>Abrir puertos del router hacia el reloj.</strong> No hace falta y lo deja expuesto: todo el tráfico sale de la sucursal hacia afuera, nunca al revés.</p>
+      <p><strong>Access to Hik-Connect.</strong> No se usa en este sistema.</p>
+    </div>
+  </section>
+
+  <!-- ============ DESPUÉS ============ -->
+  <section>
+    <h2>Después, desde la oficina</h2>
+    <p class="seccion-nota">Casi nada obliga a volver a la sucursal.</p>
+
+    <p>La IP del reloj, cada cuánto se consulta, cuántos días de histórico traer, el nivel de detalle del registro: todo eso se cambia desde <strong>Asistencia → Configuración</strong> y le llega solo al equipo en aproximadamente un minuto.</p>
+
+    <p>Los horarios, feriados y licencias se administran desde las pestañas <strong>Turnos</strong> y <strong>Calendario</strong>. El reloj no sabe nada de eso: solo registra quién pasó y a qué hora.</p>
+
+    <p>Y si algún día se corta internet, se cae el servidor o alguien apaga la notebook: no se pierde ninguna fichada. El reloj guarda por su cuenta, la notebook guarda por la suya, y cuando todo vuelve se ponen al día solos.</p>
+
+    <hr>
+    <p class="cierre">Las marcas de esta lista no se guardan: si recargás la página, vuelven a cero.</p>
+  </section>
+
+</div>
+
+</body>
+</html>
