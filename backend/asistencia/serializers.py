@@ -7,10 +7,14 @@ tipo/método desconocido degrada a "unknown" en vez de rechazar la fichada.
 from rest_framework import serializers
 
 from .models import (
+    CATALOGO_INCONSISTENCIAS,
     Agente,
     AsignacionSucursal,
     AsignacionTurno,
     Dispositivo,
+    EstadoInconsistencia,
+    JustificacionInconsistencia,
+    ReglaInconsistencia,
     Feriado,
     Licencia,
     MapeoEmpleado,
@@ -465,5 +469,82 @@ class AsignacionSucursalSerializer(serializers.ModelSerializer):
         if repetida.exists():
             raise serializers.ValidationError(
                 'Esa misma asignación ya está cargada para ese empleado.'
+            )
+        return datos
+
+
+class ReglaInconsistenciaSerializer(serializers.ModelSerializer):
+    tipo_display = serializers.CharField(source='get_tipo_display', read_only=True)
+    severidad_display = serializers.CharField(source='get_severidad_display', read_only=True)
+    turno_nombre = serializers.CharField(source='turno.nombre', read_only=True)
+    usa_umbral = serializers.BooleanField(read_only=True)
+    etiqueta_umbral = serializers.SerializerMethodField()
+    ayuda = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ReglaInconsistencia
+        fields = (
+            'id', 'tipo', 'tipo_display', 'turno', 'turno_nombre', 'activa',
+            'umbral_minutos', 'usa_umbral', 'etiqueta_umbral', 'ayuda',
+            'severidad', 'severidad_display', 'requiere_justificacion', 'creado',
+        )
+        read_only_fields = ('creado',)
+
+    def get_etiqueta_umbral(self, obj):
+        return CATALOGO_INCONSISTENCIAS.get(obj.tipo, {}).get('umbral', '')
+
+    def get_ayuda(self, obj):
+        return CATALOGO_INCONSISTENCIAS.get(obj.tipo, {}).get('ayuda', '')
+
+    def validate(self, datos):
+        tipo = datos.get('tipo') or getattr(self.instance, 'tipo', None)
+        turno = datos.get('turno', getattr(self.instance, 'turno', None))
+
+        repetida = ReglaInconsistencia.objects.filter(tipo=tipo, turno=turno)
+        if self.instance is not None:
+            repetida = repetida.exclude(pk=self.instance.pk)
+        if repetida.exists():
+            alcance = f'el turno «{turno.nombre}»' if turno else 'todos los turnos'
+            raise serializers.ValidationError(
+                {'tipo': f'Ya hay una regla de ese tipo para {alcance}.'}
+            )
+
+        # Un umbral en un tipo que no lo usa es configuracion muerta que despues
+        # nadie entiende por que no hace nada.
+        umbral = datos.get('umbral_minutos', getattr(self.instance, 'umbral_minutos', None))
+        usa_umbral = bool(CATALOGO_INCONSISTENCIAS.get(tipo, {}).get('umbral'))
+        if umbral is not None and not usa_umbral:
+            raise serializers.ValidationError(
+                {'umbral_minutos': 'Este tipo de inconsistencia no usa umbral.'}
+            )
+        return datos
+
+
+class JustificacionSerializer(serializers.ModelSerializer):
+    empleado_nombre = serializers.SerializerMethodField()
+    tipo_display = serializers.CharField(source='get_tipo_display', read_only=True)
+    estado_display = serializers.CharField(source='get_estado_display', read_only=True)
+    resuelta_por = serializers.SerializerMethodField()
+
+    class Meta:
+        model = JustificacionInconsistencia
+        fields = (
+            'id', 'empleado', 'empleado_nombre', 'fecha', 'tipo', 'tipo_display',
+            'estado', 'estado_display', 'motivo', 'resuelta_por', 'actualizado',
+        )
+        read_only_fields = ('actualizado',)
+
+    def get_empleado_nombre(self, obj):
+        return obj.empleado.nombre_completo
+
+    def get_resuelta_por(self, obj):
+        return str(obj.actualizado_por or '')
+
+    def validate(self, datos):
+        estado = datos.get('estado') or getattr(self.instance, 'estado', None)
+        motivo = (datos.get('motivo', getattr(self.instance, 'motivo', '')) or '').strip()
+        if estado == EstadoInconsistencia.JUSTIFICADA and not motivo:
+            raise serializers.ValidationError(
+                {'motivo': 'Escribí por qué se justifica: es lo que queda en el historial.'}
             )
         return datos

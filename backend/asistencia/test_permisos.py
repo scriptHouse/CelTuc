@@ -101,6 +101,7 @@ class SoloSuperadministradorTests(TestCase):
             'panel', 'fichadas', 'resumen', 'numeros-sin-mapear',
             'dispositivos', 'agentes', 'mapeos', 'turnos', 'asignaciones',
             'asignaciones-sucursal', 'licencias',
+            'inconsistencias', 'inconsistencias-catalogo', 'reglas',
         ]
         for nombre in listados:
             respuesta = cliente.get(reverse(f'asistencia:{nombre}'))

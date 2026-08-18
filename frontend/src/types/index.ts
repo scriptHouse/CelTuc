@@ -1128,6 +1128,7 @@ export type EstadoJornada =
   | 'feriado'
   | 'no_laborable'
   | 'sin_turno'
+  | 'sin_reloj'
 
 /** Un bloque continuo de presencia: entró y salió. */
 export interface TramoJornada {
@@ -1186,6 +1187,9 @@ export interface JornadaAsistencia {
   sucursales_fichadas: { id: number; nombre: string }[]
   /** Fichó, pero en ningún reloj de la sucursal donde se lo esperaba. */
   fichada_en_otra_sucursal: boolean
+  inconsistencias: InconsistenciaJornada[]
+  /** Cuántas de esas siguen esperando una decisión. */
+  pendientes: number
 }
 
 export interface RespuestaResumenAsistencia {
@@ -1198,6 +1202,182 @@ export interface RespuestaResumenAsistencia {
     minutos_esperados: number
     con_salida_parcial: number
     en_otra_sucursal: number
+    inconsistencias: number
+    pendientes: number
     por_estado: Partial<Record<EstadoJornada, number>>
   }
+}
+
+// --- Inconsistencias ---------------------------------------------------------
+
+export type TipoInconsistencia =
+  | 'llegada_tarde'
+  | 'salida_temprana'
+  | 'falta_entrada'
+  | 'falta_salida'
+  | 'ausencia'
+  | 'pausa_excesiva'
+  | 'jornada_incompleta'
+  | 'exceso_jornada'
+  | 'sucursal_incorrecta'
+  | 'trabajo_en_feriado'
+  | 'dia_no_laborable'
+
+export type SeveridadInconsistencia = 'leve' | 'moderada' | 'grave'
+
+/** `pendiente` no se guarda: es simplemente que nadie la resolvió todavía. */
+export type EstadoInconsistencia = 'pendiente' | 'justificada' | 'rechazada'
+
+/**
+ * Cuándo un día pasa a ser algo para revisar.
+ *
+ * Con `turno` vacío la regla vale para todos; una regla con turno le gana a la
+ * global para ese turno. Apagarla no la borra: deja de reportar ese tipo.
+ */
+export interface ReglaInconsistencia {
+  id: number
+  tipo: TipoInconsistencia
+  tipo_display: string
+  /** null = vale para todos los turnos. */
+  turno: number | null
+  turno_nombre: string | null
+  activa: boolean
+  /** null en llegada tarde y salida temprana = usa la tolerancia del turno. */
+  umbral_minutos: number | null
+  usa_umbral: boolean
+  etiqueta_umbral: string
+  ayuda: string
+  severidad: SeveridadInconsistencia
+  severidad_display: string
+  requiere_justificacion: boolean
+  creado: string
+}
+
+/** Una inconsistencia dentro de una jornada del resumen. */
+export interface InconsistenciaJornada {
+  tipo: TipoInconsistencia
+  tipo_display: string
+  severidad: SeveridadInconsistencia
+  severidad_display: string
+  /** Magnitud: minutos de atraso, de exceso, de pausa… según el tipo. */
+  minutos: number
+  detalle: string
+  requiere_justificacion: boolean
+  estado: EstadoInconsistencia
+  motivo: string
+  resuelta_por: string
+  /** `empleado|fecha|tipo`: la identifica entre recálculos. */
+  clave: string
+}
+
+/** La misma inconsistencia, pero en la pantalla propia: trae de quién y cuándo. */
+export interface FilaInconsistencia extends InconsistenciaJornada {
+  fecha: string
+  empleado: { id: number; nombre: string } | null
+  nombre: string
+  turno: string
+  horario_esperado: string
+  sucursal_esperada: { id: number; nombre: string } | null
+  estado_jornada: EstadoJornada
+  estado_jornada_display: string
+}
+
+export interface RespuestaInconsistencias {
+  desde: string
+  hasta: string
+  resultados: FilaInconsistencia[]
+  resumen: {
+    total: number
+    pendientes: number
+    justificadas: number
+    rechazadas: number
+    graves: number
+    por_tipo: Partial<Record<TipoInconsistencia, number>>
+  }
+}
+
+// --- Legajo de asistencia de un empleado --------------------------------------
+
+/** Los números de un conjunto de jornadas: sirven igual para un mes o un año. */
+export interface TotalesLegajo {
+  jornadas: number
+  dias_trabajados: number
+  minutos_trabajados: number
+  minutos_esperados: number
+  /** Positivo: trabajó de más. Negativo: quedó debiendo. */
+  saldo_minutos: number
+  minutos_tarde: number
+  dias_tarde: number
+  minutos_salida_temprana: number
+  ausencias: number
+  dias_licencia: number
+  salidas_parciales: number
+  minutos_fuera: number
+  inconsistencias: number
+  pendientes: number
+  por_estado: Partial<Record<EstadoJornada, number>>
+}
+
+export interface MesLegajo extends TotalesLegajo {
+  /** `2026-08`. */
+  mes: string
+  etiqueta: string
+  etiqueta_corta: string
+}
+
+/** Una línea por día: lo justo para pintar un calendario o un año entero. */
+export interface DiaLegajo {
+  fecha: string
+  estado: EstadoJornada
+  estado_display: string
+  minutos_trabajados: number
+  minutos_esperados: number
+  llegada_tarde_minutos: number
+  inconsistencias: number
+  pendientes: number
+  sucursal: string
+}
+
+export interface InconsistenciaLegajo extends InconsistenciaJornada {
+  fecha: string
+  turno: string
+  horario_esperado: string
+  estado_jornada: EstadoJornada
+}
+
+/**
+ * Todo lo de asistencia de una persona, en tres niveles de zoom del mismo dato:
+ * el agregado por mes, una línea por día y el detalle completo.
+ *
+ * `con_detalle` es false en períodos largos: un año de jornadas con tramos no
+ * lo mira nadie y pesa de más, así que ahí se trabaja con `por_mes` y `dias`.
+ */
+export interface LegajoAsistencia {
+  empleado: { id: number; nombre: string; sucursal: string; turno_vigente: string }
+  desde: string
+  hasta: string
+  con_detalle: boolean
+  resumen: TotalesLegajo
+  por_mes: MesLegajo[]
+  dias: DiaLegajo[]
+  jornadas: JornadaAsistencia[]
+  inconsistencias: InconsistenciaLegajo[]
+  licencias: LicenciaAsistencia[]
+}
+
+/** Metadatos del backend: qué tipos existen y qué significa el umbral de cada uno. */
+export interface CatalogoInconsistencias {
+  tipos: {
+    tipo: TipoInconsistencia
+    tipo_display: string
+    etiqueta_umbral: string
+    usa_umbral: boolean
+    umbral_defecto: number | null
+    severidad_defecto: SeveridadInconsistencia
+    ayuda: string
+  }[]
+  severidades: { value: SeveridadInconsistencia; label: string }[]
+  estados: { value: EstadoInconsistencia; label: string }[]
+  /** Sucursales sin reloj activo: esas jornadas no se evalúan. */
+  sucursales_sin_reloj: { id: number; nombre: string }[]
 }

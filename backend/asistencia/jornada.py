@@ -52,6 +52,8 @@ from datetime import date, datetime, time, timedelta
 from django.db import models
 from django.utils import timezone
 
+from .models import Severidad, TipoInconsistencia
+
 MINUTOS_ANTIREBOTE_DEFECTO = 2
 
 # Tipos que el reloj usa cuando SÍ tiene configurada la asistencia.
@@ -69,6 +71,7 @@ class EstadoJornada(models.TextChoices):
     FERIADO = 'feriado', 'Feriado'
     NO_LABORABLE = 'no_laborable', 'No laborable'
     SIN_TURNO = 'sin_turno', 'Sin turno asignado'
+    SIN_RELOJ = 'sin_reloj', 'Sucursal sin reloj'
 
 
 @dataclass
@@ -117,6 +120,41 @@ class SalidaParcial:
 
 
 @dataclass
+class Inconsistencia:
+    """Algo del día que amerita una mirada.
+
+    No se guarda: se recalcula siempre desde las fichadas y las reglas
+    vigentes. Lo único persistente es la justificación, que se le pega
+    después buscando por `clave`.
+    """
+
+    tipo: str
+    severidad: str = Severidad.MODERADA
+    minutos: int = 0
+    detalle: str = ''
+    requiere_justificacion: bool = True
+    # Los completa quien tenga la base a mano (ver `views.ResumenAsistenciaView`).
+    estado: str = 'pendiente'
+    motivo: str = ''
+    resuelta_por: str = ''
+
+    def to_dict(self, clave: str = '') -> dict:
+        return {
+            'tipo': self.tipo,
+            'tipo_display': TipoInconsistencia(self.tipo).label,
+            'severidad': self.severidad,
+            'severidad_display': Severidad(self.severidad).label,
+            'minutos': self.minutos,
+            'detalle': self.detalle,
+            'requiere_justificacion': self.requiere_justificacion,
+            'estado': self.estado,
+            'motivo': self.motivo,
+            'resuelta_por': self.resuelta_por,
+            'clave': clave,
+        }
+
+
+@dataclass
 class Jornada:
     fecha: date
     empleado_id: int | None = None
@@ -140,6 +178,10 @@ class Jornada:
     # de ser la misma pregunta.
     sucursal_esperada: dict | None = None
     sucursales_fichadas: list[dict] = field(default_factory=list)
+    inconsistencias: list[Inconsistencia] = field(default_factory=list)
+    # Horario del día ya resuelto (lo usa la detección; no se serializa).
+    entrada_esperada: datetime | None = None
+    salida_esperada: datetime | None = None
 
     @property
     def primera(self) -> datetime | None:
@@ -197,7 +239,22 @@ class Jornada:
             'sucursal_esperada': self.sucursal_esperada,
             'sucursales_fichadas': self.sucursales_fichadas,
             'fichada_en_otra_sucursal': self.fichada_en_otra_sucursal,
+            'inconsistencias': [
+                i.to_dict(self.clave_de(i.tipo)) for i in self.inconsistencias
+            ],
+            'pendientes': self.pendientes,
         }
+
+    def clave_de(self, tipo: str) -> str:
+        """Identifica una inconsistencia entre recálculos: quién, cuándo, qué."""
+        return f'{self.empleado_id or 0}|{self.fecha.isoformat()}|{tipo}'
+
+    @property
+    def pendientes(self) -> int:
+        return sum(
+            1 for i in self.inconsistencias
+            if i.requiere_justificacion and i.estado == 'pendiente'
+        )
 
 
 # --- Derivación de presencia -------------------------------------------------
@@ -300,8 +357,20 @@ def calcular(
     desfase: int = 0,
     sucursal_esperada: dict | None = None,
     sucursales_fichadas: list[dict] | None = None,
+    reglas: dict | None = None,
+    evaluar: bool = True,
 ) -> Jornada:
-    """Analiza el día de una persona. `fichadas` debe venir ordenada por hora."""
+    """Analiza el día de una persona. `fichadas` debe venir ordenada por hora.
+
+    `reglas` es el catálogo ya resuelto para el turno de esa persona (ver
+    `models.resolver_reglas`). Sin él, el día se analiza igual pero no se
+    generan inconsistencias y la puntualidad se juzga con la tolerancia del
+    turno.
+
+    `evaluar=False` es el caso de la sucursal sin reloj: se muestra lo que
+    haya, pero no se juzga nada — no se puede exigir una marca donde no hay
+    dónde marcar.
+    """
     jornada = Jornada(
         fecha=fecha,
         empleado_id=empleado_id,
@@ -356,13 +425,13 @@ def calcular(
     if feriado is not None:
         jornada.minutos_esperados = 0
         jornada.estado = EstadoJornada.FERIADO
-        return jornada
+        return _cerrar(jornada, reglas)
 
     # 2) Licencia de día completo.
     if licencia is not None and not licencia.es_parcial:
         jornada.minutos_esperados = 0
         jornada.estado = EstadoJornada.LICENCIA
-        return jornada
+        return _cerrar(jornada, reglas)
 
     # 3) Licencia por horas: se descuenta esa franja del horario esperado.
     if licencia is not None and licencia.es_parcial and esperados:
@@ -375,39 +444,56 @@ def calcular(
             # La franja se comió todo el horario del día.
             jornada.minutos_esperados = 0
             jornada.estado = EstadoJornada.LICENCIA
-            return jornada
+            return _cerrar(jornada, reglas)
 
     jornada.minutos_esperados = _minutos(esperados)
+    if esperados:
+        jornada.entrada_esperada = esperados[0][0]
+        jornada.salida_esperada = esperados[-1][1]
+
+    # 4) Sucursal sin reloj: se muestra el día, no se juzga.
+    if not evaluar:
+        jornada.estado = EstadoJornada.SIN_RELOJ
+        return _cerrar(jornada, reglas)
 
     if turno is None:
         # Sin turno asignado no hay contra qué comparar: mostramos los tramos
         # y las horas, pero no juzgamos puntualidad ni ausencia.
         jornada.estado = EstadoJornada.SIN_TURNO
-        return jornada
+        return _cerrar(jornada, reglas)
 
     if not esperados:
         jornada.estado = EstadoJornada.NO_LABORABLE
-        return jornada
+        return _cerrar(jornada, reglas)
 
     if not limpias:
         jornada.estado = EstadoJornada.AUSENTE
-        return jornada
+        return _cerrar(jornada, reglas)
 
-    entrada_esperada = esperados[0][0]
-    salida_esperada = esperados[-1][1]
+    tolerancia_entrada = umbral_de(
+        reglas, TipoInconsistencia.LLEGADA_TARDE, turno.tolerancia_entrada
+    )
+    tolerancia_salida = umbral_de(
+        reglas, TipoInconsistencia.SALIDA_TEMPRANA, turno.tolerancia_salida
+    )
 
-    if jornada.primera and jornada.primera > entrada_esperada:
-        atraso = int((jornada.primera - entrada_esperada).total_seconds() // 60)
-        if atraso > turno.tolerancia_entrada:
+    if tolerancia_entrada is not None and jornada.primera and jornada.entrada_esperada:
+        atraso = int((jornada.primera - jornada.entrada_esperada).total_seconds() // 60)
+        if atraso > tolerancia_entrada:
             jornada.llegada_tarde_minutos = atraso
 
     ultima = jornada.ultima
-    if ultima and not any(t.abierto for t in jornada.tramos) and ultima < salida_esperada:
-        adelanto = int((salida_esperada - ultima).total_seconds() // 60)
-        if adelanto > turno.tolerancia_salida:
+    abierta = any(t.abierto for t in jornada.tramos)
+    if (
+        tolerancia_salida is not None
+        and ultima and not abierta and jornada.salida_esperada
+        and ultima < jornada.salida_esperada
+    ):
+        adelanto = int((jornada.salida_esperada - ultima).total_seconds() // 60)
+        if adelanto > tolerancia_salida:
             jornada.salida_temprana_minutos = adelanto
 
-    if any(t.abierto for t in jornada.tramos):
+    if abierta:
         jornada.estado = EstadoJornada.INCOMPLETA
     elif jornada.llegada_tarde_minutos:
         jornada.estado = EstadoJornada.TARDE
@@ -415,7 +501,151 @@ def calcular(
         jornada.estado = EstadoJornada.SALIDA_TEMPRANA
     else:
         jornada.estado = EstadoJornada.OK
+    return _cerrar(jornada, reglas)
+
+
+def _cerrar(jornada: Jornada, reglas: dict | None) -> Jornada:
+    """Ultimo paso comun: buscarle al dia lo que haya para revisar."""
+    jornada.inconsistencias = detectar(jornada, reglas)
     return jornada
+
+
+# --- Deteccion de inconsistencias --------------------------------------------
+
+def umbral_de(reglas, tipo, defecto=None):
+    """Minutos de tolerancia de un tipo, o None si no hay que juzgarlo.
+
+    Tres casos, en este orden:
+
+    - Sin catalogo de reglas (`reglas` vacio): vale `defecto`, que es la
+      tolerancia del turno. Es como venia funcionando antes de que existieran
+      las reglas, y lo que mantiene util al motor fuera de la base.
+    - Regla apagada: devuelve None. Apagar "llego tarde" no solo deja de
+      generar la inconsistencia: tambien deja de teñir el estado del dia.
+    - Regla prendida: su umbral, y si lo dejaron vacio, el del turno.
+    """
+    cfg = (reglas or {}).get(tipo)
+    if cfg is None:
+        return defecto
+    if not cfg.get('activa'):
+        return None
+    umbral = cfg.get('umbral')
+    return defecto if umbral is None else umbral
+
+
+def detectar(jornada, reglas) -> list[Inconsistencia]:
+    """Que hay para revisar en este dia, segun las reglas vigentes."""
+    if not reglas:
+        return []
+
+    # Sin reloj en su sucursal no hay nada que reprochar, ni siquiera haber
+    # fichado en otro local: es lo unico que podia hacer.
+    if jornada.estado == EstadoJornada.SIN_RELOJ:
+        return []
+
+    detectadas: list[Inconsistencia] = []
+
+    def activa(tipo):
+        cfg = reglas.get(tipo)
+        return cfg if cfg and cfg.get('activa') else None
+
+    def agregar(tipo, minutos=0, detalle=''):
+        cfg = activa(tipo)
+        if cfg is None:
+            return
+        detectadas.append(Inconsistencia(
+            tipo=tipo,
+            severidad=cfg.get('severidad') or Severidad.MODERADA,
+            minutos=minutos,
+            detalle=detalle,
+            requiere_justificacion=bool(cfg.get('requiere_justificacion', True)),
+        ))
+
+    # Fichar en el local equivocado no depende del horario: se mira siempre.
+    if jornada.fichada_en_otra_sucursal:
+        donde = ' y '.join(s['nombre'] for s in jornada.sucursales_fichadas)
+        esperada = (jornada.sucursal_esperada or {}).get('nombre', '')
+        agregar(
+            TipoInconsistencia.SUCURSAL_INCORRECTA,
+            detalle=f'Se lo esperaba en {esperada} y ficho en {donde}.' if esperada else '',
+        )
+
+    if jornada.feriado is not None:
+        if jornada.minutos_trabajados > 0:
+            agregar(
+                TipoInconsistencia.TRABAJO_EN_FERIADO,
+                jornada.minutos_trabajados,
+                detalle=jornada.feriado.get('nombre', ''),
+            )
+        return detectadas
+
+    # Con licencia o sin turno asignado no hay contra que comparar.
+    if jornada.estado in (EstadoJornada.LICENCIA, EstadoJornada.SIN_TURNO):
+        return detectadas
+
+    if jornada.estado == EstadoJornada.NO_LABORABLE:
+        if jornada.fichadas > 0:
+            agregar(
+                TipoInconsistencia.DIA_NO_LABORABLE,
+                jornada.minutos_trabajados,
+                detalle='Su turno tenia este dia como franco.',
+            )
+        return detectadas
+
+    if jornada.estado == EstadoJornada.AUSENTE:
+        agregar(TipoInconsistencia.AUSENCIA, jornada.minutos_esperados)
+        return detectadas
+
+    # De aca en adelante: hubo marcas y habia horario que cumplir.
+    impares = jornada.fichadas % 2 == 1
+    falto_entrada = False
+
+    # Un numero impar de marcas significa que falto una punta. Cual, lo dice
+    # la distancia: si la primera marca es mucho mas tarde que la entrada
+    # prevista, lo que falta es la entrada; si no, la salida.
+    cfg_entrada = activa(TipoInconsistencia.FALTA_ENTRADA)
+    if impares and cfg_entrada and jornada.entrada_esperada and jornada.primera:
+        atraso = int((jornada.primera - jornada.entrada_esperada).total_seconds() // 60)
+        if atraso > (cfg_entrada.get('umbral') or 0):
+            falto_entrada = True
+            agregar(
+                TipoInconsistencia.FALTA_ENTRADA, atraso,
+                detalle='La primera marca del dia llega demasiado tarde para ser la entrada.',
+            )
+
+    if impares and not falto_entrada:
+        agregar(
+            TipoInconsistencia.FALTA_SALIDA,
+            detalle='La jornada quedo abierta: entro y no marco la salida.',
+        )
+
+    # Si falto la entrada, el atraso mide una marca que no es la de llegada:
+    # reportarlo ademas como tardanza seria acusar por un dato inventado.
+    if jornada.llegada_tarde_minutos and not falto_entrada:
+        agregar(TipoInconsistencia.LLEGADA_TARDE, jornada.llegada_tarde_minutos)
+
+    if jornada.salida_temprana_minutos:
+        agregar(TipoInconsistencia.SALIDA_TEMPRANA, jornada.salida_temprana_minutos)
+
+    cfg_pausa = activa(TipoInconsistencia.PAUSA_EXCESIVA)
+    if cfg_pausa and jornada.salidas_parciales:
+        peor = max(jornada.salidas_parciales, key=lambda h: h.minutos)
+        if peor.minutos > (cfg_pausa.get('umbral') or 0):
+            agregar(
+                TipoInconsistencia.PAUSA_EXCESIVA, peor.minutos,
+                detalle=f'Se fue {formatear_minutos(peor.minutos)} en el medio de la jornada.',
+            )
+
+    if jornada.minutos_esperados > 0:
+        diferencia = jornada.minutos_trabajados - jornada.minutos_esperados
+        cfg_falta = activa(TipoInconsistencia.JORNADA_INCOMPLETA)
+        if cfg_falta and -diferencia > (cfg_falta.get('umbral') or 0):
+            agregar(TipoInconsistencia.JORNADA_INCOMPLETA, -diferencia)
+        cfg_exceso = activa(TipoInconsistencia.EXCESO_JORNADA)
+        if cfg_exceso and diferencia > (cfg_exceso.get('umbral') or 0):
+            agregar(TipoInconsistencia.EXCESO_JORNADA, diferencia)
+
+    return detectadas
 
 
 def formatear_minutos(minutos: int) -> str:

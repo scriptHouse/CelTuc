@@ -18,12 +18,15 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { StatCard } from '@/components/ui/StatCard'
+import { LineaDeTiempo } from '@/components/asistencia/LineaDeTiempo'
 import {
+  ESTADO_INCONSISTENCIA,
   duracion,
   estadoDe,
   etiquetaFecha,
   haceDias,
-  horaDe,
+  iconoInconsistencia,
+  severidadDe,
 } from '@/components/asistencia/constantes'
 import { num } from '@/lib/format'
 import { cn, ctStagger } from '@/lib/utils'
@@ -124,13 +127,13 @@ export function ResumenTab() {
         />
         <StatCard
           label="A revisar"
-          value={num((porEstado.tarde ?? 0) + (porEstado.incompleta ?? 0) + (porEstado.salida_temprana ?? 0))}
+          value={num(resumen?.pendientes ?? 0)}
           hint={
-            (resumen?.en_otra_sucursal ?? 0) > 0
-              ? `${resumen?.en_otra_sucursal} fichó en otra sucursal`
+            (resumen?.inconsistencias ?? 0) > 0
+              ? `de ${num(resumen?.inconsistencias ?? 0)} inconsistencias del período`
               : trabajadosEnFeriado > 0
                 ? `${trabajadosEnFeriado} trabajaron en feriado`
-                : 'tarde, temprano o sin cerrar'
+                : 'sin inconsistencias pendientes'
           }
           icon={TriangleAlert}
           className="ct-stagger-item"
@@ -139,7 +142,7 @@ export function ResumenTab() {
       </div>
 
       <Card className="mb-5 p-4">
-        <div className="grid gap-3 lg:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <Select
             placeholder="Todas las sucursales"
             value={sucursal}
@@ -270,6 +273,32 @@ function FilaJornada({ jornada, indice }: { jornada: JornadaAsistencia; indice: 
         </span>
       </div>
 
+      {jornada.inconsistencias.length > 0 && (
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          {jornada.inconsistencias.map((inc) => {
+            const Icono = iconoInconsistencia(inc.tipo)
+            const resuelta = inc.estado !== 'pendiente'
+            return (
+              <span
+                key={inc.clave}
+                title={inc.motivo || inc.detalle || inc.tipo_display}
+                className={cn(
+                  'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium',
+                  resuelta
+                    ? ESTADO_INCONSISTENCIA[inc.estado].tono
+                    : severidadDe(inc.severidad).tono,
+                  resuelta && 'line-through decoration-1',
+                )}
+              >
+                <Icono className="h-3 w-3" strokeWidth={2} aria-hidden />
+                {inc.tipo_display}
+                {inc.minutos > 0 && <span className="tnum">· {duracion(inc.minutos)}</span>}
+              </span>
+            )
+          })}
+        </div>
+      )}
+
       {conTramos && <LineaDeTiempo jornada={jornada} />}
 
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
@@ -326,59 +355,3 @@ function FilaJornada({ jornada, indice }: { jornada: JornadaAsistencia; indice: 
  * Barra proporcional del día: bloques oscuros = presente, huecos claros =
  * salidas parciales. Es la forma más rápida de ver que alguien se fue y volvió.
  */
-function LineaDeTiempo({ jornada }: { jornada: JornadaAsistencia }) {
-  const inicio = jornada.primera ? new Date(jornada.primera).getTime() : 0
-  const fin = jornada.ultima ? new Date(jornada.ultima).getTime() : 0
-  const total = fin - inicio
-
-  if (!inicio || total <= 0) {
-    // Un solo fichaje (jornada abierta): no hay rango que dibujar.
-    return (
-      <p className="tnum mt-3 text-xs text-ink-500">
-        Fichó a las {jornada.primera ? horaDe(jornada.primera) : '—'} y no volvió a fichar.
-      </p>
-    )
-  }
-
-  const bloques: { tipo: 'presente' | 'fuera'; pct: number; minutos: number }[] = []
-  jornada.tramos.forEach((tramo, i) => {
-    const desde = new Date(tramo.entrada).getTime()
-    const hasta = tramo.salida ? new Date(tramo.salida).getTime() : desde
-    bloques.push({ tipo: 'presente', pct: ((hasta - desde) / total) * 100, minutos: tramo.minutos })
-    const hueco = jornada.salidas_parciales[i]
-    if (hueco) {
-      bloques.push({ tipo: 'fuera', pct: (hueco.minutos * 60_000 / total) * 100, minutos: hueco.minutos })
-    }
-  })
-
-  return (
-    <div className="mt-3">
-      <div className="flex h-7 w-full overflow-hidden rounded-lg border border-line" role="img"
-        aria-label={`Presencia de ${jornada.nombre}: ${duracion(jornada.minutos_trabajados)} trabajadas`}>
-        {bloques.map((b, i) => (
-          <div
-            key={i}
-            style={{ width: `${Math.max(b.pct, 1.5)}%` }}
-            title={
-              b.tipo === 'presente'
-                ? `Presente ${duracion(b.minutos)}`
-                : `Fuera ${duracion(b.minutos)}`
-            }
-            className={cn(
-              'flex items-center justify-center overflow-hidden text-[10px] font-medium transition-colors',
-              b.tipo === 'presente'
-                ? 'bg-ink-900 text-on-ink'
-                : 'bg-ink-100 text-ink-500 [background-image:repeating-linear-gradient(45deg,transparent,transparent_4px,rgba(0,0,0,0.06)_4px,rgba(0,0,0,0.06)_8px)]',
-            )}
-          >
-            {b.pct > 12 ? duracion(b.minutos) : ''}
-          </div>
-        ))}
-      </div>
-      <div className="tnum mt-1 flex justify-between text-[11px] text-ink-400">
-        <span>{jornada.primera ? horaDe(jornada.primera) : ''}</span>
-        <span>{jornada.ultima ? horaDe(jornada.ultima) : ''}</span>
-      </div>
-    </div>
-  )
-}

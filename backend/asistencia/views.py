@@ -20,34 +20,46 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from comun.mixins import AuditoriaMixin
+from empleados.models import Empleado
 from inventario.models import Sucursal
 from usuarios.permissions import EsSuperadministrador
 
 from . import jornada as jornada_mod
 from .authentication import AgenteTokenAuthentication, EsAgenteAutenticado
 from .models import (
+    CATALOGO_INCONSISTENCIAS,
     Agente,
     AsignacionSucursal,
     AsignacionTurno,
     Dispositivo,
+    EstadoInconsistencia,
     EstadoMapeo,
     Feriado,
     Fichada,
+    JustificacionInconsistencia,
     Licencia,
     MapeoEmpleado,
     MetodoVerificacion,
+    ReglaInconsistencia,
+    Severidad,
     TipoFichada,
     TipoFeriado,
+    TipoInconsistencia,
     Turno,
     aplicar_mapeo,
     elegir_asignacion_sucursal,
     hash_evento,
     resolver_mapeos,
+    resolver_reglas,
+    sembrar_reglas,
+    sucursales_con_reloj,
 )
 from .serializers import (
     AgenteSerializer,
     AsignacionSucursalSerializer,
     AsignacionTurnoSerializer,
+    JustificacionSerializer,
+    ReglaInconsistenciaSerializer,
     DispositivoSerializer,
     EventoAgenteSerializer,
     FeriadoSerializer,
@@ -100,6 +112,50 @@ def _es_de_la_sucursal(jornada, sucursal_id):
     if esperada and esperada['id'] == sucursal_id:
         return True
     return any(s['id'] == sucursal_id for s in jornada.get('sucursales_fichadas', ()))
+
+
+def _hay_reloj(esperada, con_reloj) -> bool:
+    """Si la sucursal donde se espera a alguien tiene con que fichar.
+
+    Sin reloj no se puede exigir una marca: ese dia no se evalua (ni ausencia,
+    ni tarde, ni inconsistencias). Cuando no se sabe donde le tocaba estar, se
+    evalua igual, que es como venia funcionando.
+    """
+    if not esperada:
+        return True
+    return esperada['id'] in con_reloj
+
+
+def _aplicar_justificaciones(resultados, desde, hasta):
+    """Le pega a cada inconsistencia lo que alguien haya decidido sobre ella.
+
+    Las inconsistencias se recalculan siempre; lo unico guardado es su
+    resolucion, identificada por (empleado, fecha, tipo). Por eso cambiar un
+    umbral no deja pendientes viejos dando vueltas: lo que ya se justifico
+    sigue justificado, y lo que dejo de ser inconsistencia desaparece.
+    """
+    guardadas = {}
+    justificaciones = (
+        JustificacionInconsistencia.objects
+        .filter(fecha__gte=desde, fecha__lte=hasta)
+        .select_related('actualizado_por')
+    )
+    for fila in justificaciones:
+        clave = f"{fila.empleado_id}|{fila.fecha.isoformat()}|{fila.tipo}"
+        guardadas[clave] = fila
+
+    for jornada in resultados:
+        for inc in jornada['inconsistencias']:
+            resuelta = guardadas.get(inc['clave'])
+            if resuelta is None:
+                continue
+            inc['estado'] = resuelta.estado
+            inc['motivo'] = resuelta.motivo
+            inc['resuelta_por'] = str(resuelta.actualizado_por or '')
+        jornada['pendientes'] = sum(
+            1 for i in jornada['inconsistencias']
+            if i['requiere_justificacion'] and i['estado'] == 'pendiente'
+        )
 
 
 def _inicio_de_hoy():
@@ -603,12 +659,40 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
     MAX_DIAS = 92
 
     def get(self, request):
-        params = request.query_params
+        desde, hasta, resultados = self.analizar(request.query_params)
+        conteo = Counter(j['estado'] for j in resultados)
+        return Response({
+            'desde': desde.isoformat(),
+            'hasta': hasta.isoformat(),
+            'resultados': resultados,
+            'resumen': {
+                'jornadas': len(resultados),
+                'minutos_trabajados': sum(j['minutos_trabajados'] for j in resultados),
+                'minutos_esperados': sum(j['minutos_esperados'] for j in resultados),
+                'con_salida_parcial': sum(1 for j in resultados if j['salidas_parciales']),
+                'en_otra_sucursal': sum(
+                    1 for j in resultados if j['fichada_en_otra_sucursal']
+                ),
+                'inconsistencias': sum(len(j['inconsistencias']) for j in resultados),
+                'pendientes': sum(j['pendientes'] for j in resultados),
+                'por_estado': dict(conteo),
+            },
+        })
+
+    @classmethod
+    def analizar(cls, params, max_dias=None):
+        """(desde, hasta, jornadas) del periodo pedido, ya analizadas.
+
+        Es el unico lugar donde se arma el analisis: la pantalla de
+        inconsistencias mira exactamente lo mismo que el resumen, asi no
+        pueden contradecirse.
+        """
         hasta = timezone.localtime(_fecha_local(params.get('hasta')) or _inicio_de_hoy()).date()
         desde_param = _fecha_local(params.get('desde'))
         desde = timezone.localtime(desde_param).date() if desde_param else hasta - timedelta(days=6)
-        if (hasta - desde).days > self.MAX_DIAS:
-            desde = hasta - timedelta(days=self.MAX_DIAS)
+        tope = max_dias or cls.MAX_DIAS
+        if (hasta - desde).days > tope:
+            desde = hasta - timedelta(days=tope)
 
         inicio = timezone.make_aware(datetime.combine(desde, datetime.min.time()))
         fin = timezone.make_aware(datetime.combine(hasta, datetime.min.time())) + timedelta(days=1)
@@ -626,8 +710,9 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
         if empleado_id:
             fichadas = fichadas.filter(empleado_id=empleado_id)
 
-        ctx = self._contexto(desde, hasta, empleado_id)
-        turno_en, licencia_en, feriado_en, sucursal_en, empleados_seguidos = ctx
+        ctx = cls._contexto(desde, hasta, empleado_id)
+        (turno_en, licencia_en, feriado_en, sucursal_en,
+         reglas_en, con_reloj, empleados_seguidos) = ctx
 
         # 1) Agrupar las fichadas por (dia, persona).
         grupos = {}
@@ -674,6 +759,8 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
                     desfase=desfase,
                     licencia=licencia_en(meta['empleado_id'], dia),
                     feriado=feriado_en(dia, esperada['id'] if esperada else None),
+                    reglas=reglas_en(turno.id if turno else None),
+                    evaluar=_hay_reloj(esperada, con_reloj),
                     sucursal_esperada=esperada,
                     sucursales_fichadas=[
                         {'id': sid, 'nombre': nombre}
@@ -691,6 +778,10 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
                 if (dia, emp_id) in vistos:
                     continue
                 esperada = sucursal_en(emp_id, dia, datos_emp['sucursal_id'])
+                # Sin reloj en su sucursal no se le puede pedir que fiche: no
+                # es una ausencia, es que no hay donde marcar.
+                if not _hay_reloj(esperada, con_reloj):
+                    continue
                 turno, desfase = turno_en(emp_id, dia)
                 licencia = licencia_en(emp_id, dia)
                 # Feriado sin fichadas: el dia no da noticia, se omite.
@@ -705,6 +796,7 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
                     jornada_mod.calcular(
                         dia, [], empleado_id=emp_id, nombre=datos_emp['nombre'],
                         turno=turno, desfase=desfase, licencia=licencia,
+                        reglas=reglas_en(turno.id if turno else None),
                         sucursal_esperada=esperada,
                     ).to_dict()
                 )
@@ -718,24 +810,9 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
         if filtro_sucursal:
             resultados = [j for j in resultados if _es_de_la_sucursal(j, filtro_sucursal)]
 
+        _aplicar_justificaciones(resultados, desde, hasta)
         resultados.sort(key=lambda j: (j['fecha'], j['nombre']), reverse=True)
-
-        conteo = Counter(j['estado'] for j in resultados)
-        return Response({
-            'desde': desde.isoformat(),
-            'hasta': hasta.isoformat(),
-            'resultados': resultados,
-            'resumen': {
-                'jornadas': len(resultados),
-                'minutos_trabajados': sum(j['minutos_trabajados'] for j in resultados),
-                'minutos_esperados': sum(j['minutos_esperados'] for j in resultados),
-                'con_salida_parcial': sum(1 for j in resultados if j['salidas_parciales']),
-                'en_otra_sucursal': sum(
-                    1 for j in resultados if j['fichada_en_otra_sucursal']
-                ),
-                'por_estado': dict(conteo),
-            },
-        })
+        return desde, hasta, resultados
 
     @staticmethod
     def _contexto(desde, hasta, empleado_id=None):
@@ -788,6 +865,12 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
         # asignacion con fechas: son pocas filas, se traen todas de una.
         nombres_sucursal = dict(Sucursal.objects.values_list('id', 'nombre'))
 
+        # Reglas y relojes: se resuelven una vez por turno y se cachean, en vez
+        # de una vez por jornada (el periodo puede tener cientos).
+        todas_las_reglas = list(ReglaInconsistencia.objects.all())
+        cache_reglas: dict = {}
+        con_reloj = sucursales_con_reloj()
+
         feriados = list(Feriado.objects.filter(fecha__gte=desde, fecha__lte=hasta))
 
         def turno_en(emp_id, fecha):
@@ -802,6 +885,12 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
                 if lic.cubre(fecha):
                     return lic
             return None
+
+        def reglas_en(turno_id=None):
+            """El catalogo de inconsistencias que rige para ese turno."""
+            if turno_id not in cache_reglas:
+                cache_reglas[turno_id] = resolver_reglas(todas_las_reglas, turno_id)
+            return cache_reglas[turno_id]
 
         def sucursal_en(emp_id, fecha, base_id=None):
             """Donde se espera al empleado ese dia: `{'id', 'nombre'}` o None.
@@ -829,7 +918,10 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
                     general = general or f
             return general
 
-        return turno_en, licencia_en, feriado_en, sucursal_en, seguidos
+        return (
+            turno_en, licencia_en, feriado_en, sucursal_en,
+            reglas_en, con_reloj, seguidos,
+        )
 
 
 # --- Horarios y licencias (solo superadministrador) --------------------------
@@ -974,4 +1066,322 @@ class FeriadosSembrarView(_BaseGestion, APIView):
             'resultados': creados,
             'aviso': 'Los feriados trasladables (Carnaval, Viernes Santo, 17/8, '
                      '12/10 y 20/11) cambian cada año: cargalos a mano.',
+        })
+
+
+# --- Inconsistencias (solo superadministrador) -------------------------------
+
+class ReglaListCreateView(_BaseGestion, AuditoriaMixin, generics.ListCreateAPIView):
+    serializer_class = ReglaInconsistenciaSerializer
+
+    def get_queryset(self):
+        qs = ReglaInconsistencia.objects.select_related('turno')
+        params = self.request.query_params
+        if _id(params, 'turno'):
+            qs = qs.filter(Q(turno_id=_id(params, 'turno')) | Q(turno__isnull=True))
+        elif params.get('globales') == '1':
+            qs = qs.filter(turno__isnull=True)
+        return qs
+
+
+class ReglaDetailView(_BaseGestion, AuditoriaMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = ReglaInconsistencia.objects.select_related('turno')
+    serializer_class = ReglaInconsistenciaSerializer
+
+
+class CatalogoInconsistenciasView(_BaseGestion, APIView):
+    """Que tipos existen y que significa el umbral de cada uno.
+
+    La interfaz se explica sola con esto: agregar un tipo al catalogo aparece
+    en pantalla con su ayuda sin tocar el frontend.
+    """
+
+    def get(self, request):
+        return Response({
+            'tipos': [
+                {
+                    'tipo': tipo,
+                    'tipo_display': TipoInconsistencia(tipo).label,
+                    'etiqueta_umbral': cfg['umbral'],
+                    'usa_umbral': bool(cfg['umbral']),
+                    'umbral_defecto': cfg['defecto'],
+                    'severidad_defecto': cfg['severidad'],
+                    'ayuda': cfg['ayuda'],
+                }
+                for tipo, cfg in CATALOGO_INCONSISTENCIAS.items()
+            ],
+            'severidades': [{'value': v, 'label': l} for v, l in Severidad.choices],
+            'estados': [{'value': v, 'label': l} for v, l in EstadoInconsistencia.choices],
+            # Sin esto, que alguien no aparezca en el resumen es un misterio.
+            'sucursales_sin_reloj': [
+                {'id': s.id, 'nombre': s.nombre}
+                for s in Sucursal.objects.exclude(id__in=sucursales_con_reloj())
+            ],
+        })
+
+
+class ReglasSembrarView(_BaseGestion, APIView):
+    """Carga de una las reglas recomendadas que falten."""
+
+    def post(self, request):
+        creadas = sembrar_reglas(request.user)
+        return Response(
+            {
+                'creadas': len(creadas),
+                'reglas': ReglaInconsistenciaSerializer(creadas, many=True).data,
+            },
+            status=status.HTTP_201_CREATED if creadas else status.HTTP_200_OK,
+        )
+
+
+class InconsistenciasView(_BaseGestion, APIView):
+    """Las inconsistencias del periodo, una fila por cada una.
+
+    Se recalculan con `ResumenAsistenciaView.analizar`, o sea que muestran
+    exactamente lo mismo que el resumen: no hay dos verdades posibles.
+    """
+
+    ORDEN_SEVERIDAD = {Severidad.GRAVE: 0, Severidad.MODERADA: 1, Severidad.LEVE: 2}
+
+    def get(self, request):
+        params = request.query_params
+        desde, hasta, jornadas = ResumenAsistenciaView.analizar(params)
+
+        filtro_tipo = params.get('tipo') or ''
+        filtro_estado = params.get('estado') or ''
+        filtro_severidad = params.get('severidad') or ''
+
+        filas = []
+        for jornada in jornadas:
+            for inc in jornada['inconsistencias']:
+                if filtro_tipo and inc['tipo'] != filtro_tipo:
+                    continue
+                if filtro_estado and inc['estado'] != filtro_estado:
+                    continue
+                if filtro_severidad and inc['severidad'] != filtro_severidad:
+                    continue
+                filas.append({
+                    **inc,
+                    'fecha': jornada['fecha'],
+                    'empleado': jornada['empleado'],
+                    'nombre': jornada['nombre'],
+                    'turno': jornada['turno'],
+                    'horario_esperado': jornada['horario_esperado'],
+                    'sucursal_esperada': jornada['sucursal_esperada'],
+                    'estado_jornada': jornada['estado'],
+                    'estado_jornada_display': jornada['estado_display'],
+                })
+
+        filas.sort(
+            key=lambda f: (f['fecha'], -self.ORDEN_SEVERIDAD.get(f['severidad'], 9)),
+            reverse=True,
+        )
+
+        return Response({
+            'desde': desde.isoformat(),
+            'hasta': hasta.isoformat(),
+            'resultados': filas,
+            'resumen': {
+                'total': len(filas),
+                'pendientes': sum(
+                    1 for f in filas
+                    if f['requiere_justificacion'] and f['estado'] == 'pendiente'
+                ),
+                'justificadas': sum(1 for f in filas if f['estado'] == 'justificada'),
+                'rechazadas': sum(1 for f in filas if f['estado'] == 'rechazada'),
+                'graves': sum(1 for f in filas if f['severidad'] == Severidad.GRAVE),
+                'por_tipo': dict(Counter(f['tipo'] for f in filas)),
+            },
+        })
+
+
+class ResolverInconsistenciaView(_BaseGestion, APIView):
+    """Justificar o rechazar una inconsistencia, o volverla a dejar pendiente.
+
+    La inconsistencia no existe como fila: se identifica por (empleado, fecha,
+    tipo), que es justamente lo que la hace sobrevivir a un recalculo.
+    """
+
+    def post(self, request):
+        datos = {
+            'empleado': request.data.get('empleado'),
+            'fecha': request.data.get('fecha'),
+            'tipo': request.data.get('tipo'),
+            'estado': request.data.get('estado') or EstadoInconsistencia.JUSTIFICADA,
+            'motivo': request.data.get('motivo') or '',
+        }
+        existente = JustificacionInconsistencia.objects.filter(
+            empleado_id=datos['empleado'], fecha=datos['fecha'], tipo=datos['tipo']
+        ).first()
+
+        serializer = JustificacionSerializer(existente, data=datos)
+        serializer.is_valid(raise_exception=True)
+        if existente is None:
+            serializer.save(creado_por=request.user, actualizado_por=request.user)
+        else:
+            serializer.save(actualizado_por=request.user)
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK if existente else status.HTTP_201_CREATED,
+        )
+
+    def delete(self, request):
+        """Vuelve la inconsistencia a «pendiente»: borra su resolucion.
+
+        Los datos se aceptan por querystring o por cuerpo: un DELETE con
+        cuerpo es legal pero incomodo de mandar desde varios clientes.
+        """
+        def dato(clave):
+            return request.query_params.get(clave) or request.data.get(clave)
+
+        empleado = dato('empleado')
+        fecha = _fecha_local(dato('fecha'))
+        if not empleado or fecha is None:
+            return Response({'detail': 'Indicá empleado, fecha y tipo.'}, status=400)
+
+        borradas, _ = JustificacionInconsistencia.objects.filter(
+            empleado_id=empleado,
+            fecha=timezone.localtime(fecha).date(),
+            tipo=dato('tipo') or '',
+        ).delete()
+        if not borradas:
+            return Response({'detail': 'Esa inconsistencia no estaba resuelta.'}, status=404)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# --- Legajo de asistencia de un empleado -------------------------------------
+
+MESES = (
+    'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+    'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+)
+
+
+def _totales(jornadas) -> dict:
+    """Los numeros de un conjunto de jornadas, ya sea un mes o un anio."""
+    trabajados = sum(j['minutos_trabajados'] for j in jornadas)
+    esperados = sum(j['minutos_esperados'] for j in jornadas)
+    return {
+        'jornadas': len(jornadas),
+        'dias_trabajados': sum(1 for j in jornadas if j['minutos_trabajados'] > 0),
+        'minutos_trabajados': trabajados,
+        'minutos_esperados': esperados,
+        # Positivo: trabajo de mas. Negativo: quedo debiendo.
+        'saldo_minutos': trabajados - esperados,
+        'minutos_tarde': sum(j['llegada_tarde_minutos'] for j in jornadas),
+        'dias_tarde': sum(1 for j in jornadas if j['llegada_tarde_minutos'] > 0),
+        'minutos_salida_temprana': sum(j['salida_temprana_minutos'] for j in jornadas),
+        'ausencias': sum(1 for j in jornadas if j['estado'] == 'ausente'),
+        'dias_licencia': sum(1 for j in jornadas if j['estado'] == 'licencia'),
+        'salidas_parciales': sum(len(j['salidas_parciales']) for j in jornadas),
+        'minutos_fuera': sum(j['minutos_fuera'] for j in jornadas),
+        'inconsistencias': sum(len(j['inconsistencias']) for j in jornadas),
+        'pendientes': sum(j['pendientes'] for j in jornadas),
+        'por_estado': dict(Counter(j['estado'] for j in jornadas)),
+    }
+
+
+class LegajoEmpleadoView(_BaseGestion, APIView):
+    """Todo lo de asistencia de UNA persona, en el periodo que se pida.
+
+    Devuelve tres niveles de zoom del mismo dato, para que la pantalla pueda
+    ir del anio al dia sin volver a pedir nada raro:
+
+    - `por_mes`: el agregado mensual (la vista anual).
+    - `dias`: una linea por dia, compacta — alcanza para pintar un calendario
+      o un mapa de calor de todo un anio sin traer megabytes.
+    - `jornadas`: el detalle completo (tramos, salidas parciales,
+      inconsistencias). Solo si el periodo pedido es corto: un anio de detalle
+      no lo mira nadie y pesa de mas.
+    """
+
+    MAX_DIAS = 366
+    MAX_DIAS_DETALLE = 92
+
+    def get(self, request, pk):
+        empleado = get_object_or_404(Empleado, pk=pk)
+
+        params = request.query_params.copy()
+        params['empleado'] = str(pk)
+        # El legajo es de una persona: el filtro por sucursal lo dejaria a medias.
+        params.pop('sucursal', None)
+
+        desde, hasta, jornadas = ResumenAsistenciaView.analizar(
+            params, max_dias=self.MAX_DIAS
+        )
+
+        # Del mas viejo al mas nuevo: los graficos y el calendario leen asi.
+        jornadas.sort(key=lambda j: j['fecha'])
+
+        por_mes = {}
+        for jornada in jornadas:
+            por_mes.setdefault(jornada['fecha'][:7], []).append(jornada)
+
+        meses = []
+        for clave in sorted(por_mes):
+            anio, mes = clave.split('-')
+            meses.append({
+                'mes': clave,
+                'etiqueta': f'{MESES[int(mes) - 1].capitalize()} {anio}',
+                'etiqueta_corta': MESES[int(mes) - 1][:3].capitalize(),
+                **_totales(por_mes[clave]),
+            })
+
+        inconsistencias = [
+            {
+                **inc,
+                'fecha': jornada['fecha'],
+                'turno': jornada['turno'],
+                'horario_esperado': jornada['horario_esperado'],
+                'estado_jornada': jornada['estado'],
+            }
+            for jornada in jornadas
+            for inc in jornada['inconsistencias']
+        ]
+        inconsistencias.sort(key=lambda i: i['fecha'], reverse=True)
+
+        con_detalle = (hasta - desde).days <= self.MAX_DIAS_DETALLE
+
+        licencias = Licencia.objects.filter(
+            empleado=empleado, desde__lte=hasta, hasta__gte=desde
+        ).order_by('desde')
+
+        asignacion = (
+            AsignacionTurno.objects
+            .filter(empleado=empleado, desde__lte=hasta)
+            .filter(Q(hasta__isnull=True) | Q(hasta__gte=hasta))
+            .select_related('turno')
+            .order_by('-desde')
+            .first()
+        )
+
+        return Response({
+            'empleado': {
+                'id': empleado.id,
+                'nombre': empleado.nombre_completo,
+                'sucursal': empleado.sucursal.nombre if empleado.sucursal_id else '',
+                'turno_vigente': asignacion.turno.nombre if asignacion else '',
+            },
+            'desde': desde.isoformat(),
+            'hasta': hasta.isoformat(),
+            'con_detalle': con_detalle,
+            'resumen': _totales(jornadas),
+            'por_mes': meses,
+            'dias': [
+                {
+                    'fecha': j['fecha'],
+                    'estado': j['estado'],
+                    'estado_display': j['estado_display'],
+                    'minutos_trabajados': j['minutos_trabajados'],
+                    'minutos_esperados': j['minutos_esperados'],
+                    'llegada_tarde_minutos': j['llegada_tarde_minutos'],
+                    'inconsistencias': len(j['inconsistencias']),
+                    'pendientes': j['pendientes'],
+                    'sucursal': (j['sucursal_esperada'] or {}).get('nombre', ''),
+                }
+                for j in jornadas
+            ],
+            'jornadas': jornadas if con_detalle else [],
+            'inconsistencias': inconsistencias,
+            'licencias': LicenciaSerializer(licencias, many=True).data,
         })

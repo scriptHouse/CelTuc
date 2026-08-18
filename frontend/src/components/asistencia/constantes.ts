@@ -1,6 +1,11 @@
 import {
   AlarmClock,
+  Building2,
   CalendarOff,
+  Clock4,
+  DoorOpen,
+  Hourglass,
+  MapPinOff,
   CircleCheck,
   Coffee,
   CreditCard,
@@ -23,8 +28,10 @@ import type { LucideIcon } from 'lucide-react'
 import type {
   EstadoJornada,
   MetodoFichada,
+  SeveridadInconsistencia,
   TipoFeriado,
   TipoFichada,
+  TipoInconsistencia,
   TipoLicencia,
 } from '@/types'
 
@@ -119,6 +126,12 @@ export const ESTADO_JORNADA: Record<
     tono: 'border-line bg-surface text-ink-500',
     punto: 'bg-ink-300',
   },
+  sin_reloj: {
+    label: 'Sucursal sin reloj',
+    icon: MapPinOff,
+    tono: 'border-line bg-surface text-ink-500',
+    punto: 'bg-ink-300',
+  },
 }
 
 export function estadoDe(valor: string) {
@@ -126,6 +139,64 @@ export function estadoDe(valor: string) {
     (valor as EstadoJornada) in ESTADO_JORNADA ? (valor as EstadoJornada) : 'sin_turno'
   ]
 }
+
+/** Icono de cada tipo de inconsistencia. */
+export const TIPO_INCONSISTENCIA: Record<TipoInconsistencia, LucideIcon> = {
+  llegada_tarde: AlarmClock,
+  salida_temprana: LogOut,
+  falta_entrada: DoorOpen,
+  falta_salida: TriangleAlert,
+  ausencia: UserX,
+  pausa_excesiva: Coffee,
+  jornada_incompleta: Hourglass,
+  exceso_jornada: Clock4,
+  sucursal_incorrecta: Building2,
+  trabajo_en_feriado: PartyPopper,
+  dia_no_laborable: CalendarOff,
+}
+
+export function iconoInconsistencia(tipo: string): LucideIcon {
+  return TIPO_INCONSISTENCIA[tipo as TipoInconsistencia] ?? TriangleAlert
+}
+
+/** Cómo se pinta cada severidad. */
+export const SEVERIDAD: Record<SeveridadInconsistencia, { label: string; tono: string; punto: string }> = {
+  grave: {
+    label: 'Grave',
+    tono: 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300',
+    punto: 'bg-red-500',
+  },
+  moderada: {
+    label: 'Moderada',
+    tono: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300',
+    punto: 'bg-amber-500',
+  },
+  leve: {
+    label: 'Leve',
+    tono: 'border-line bg-ink-50 text-ink-600',
+    punto: 'bg-ink-300',
+  },
+}
+
+export function severidadDe(valor: string) {
+  return SEVERIDAD[(valor as SeveridadInconsistencia) in SEVERIDAD ? (valor as SeveridadInconsistencia) : 'leve']
+}
+
+/** Cómo se pinta el estado de una inconsistencia. */
+export const ESTADO_INCONSISTENCIA = {
+  pendiente: {
+    label: 'Pendiente',
+    tono: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300',
+  },
+  justificada: {
+    label: 'Justificada',
+    tono: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300',
+  },
+  rechazada: {
+    label: 'Sin justificar',
+    tono: 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300',
+  },
+} as const
 
 export const TIPOS_LICENCIA: { value: TipoLicencia; label: string }[] = [
   { value: 'vacaciones', label: 'Vacaciones' },

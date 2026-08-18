@@ -659,6 +659,11 @@ function TurnoModal({
           Anti-rebote: si el reloj lee el mismo rostro dos veces seguidas dentro de esos minutos, se
           cuenta una sola vez. Evita que una relectura invierta entrada y salida.
         </p>
+        <p className="mt-1 text-[11px] text-ink-400">
+          Las tolerancias son las de este turno. En <strong>Inconsistencias → Configurar reglas</strong>{' '}
+          podés fijar un criterio único para todos, o dejar el umbral vacío ahí para que cada turno
+          siga usando el suyo.
+        </p>
 
         <div className="mt-6 flex justify-end gap-2">
           <Button variant="outline" onClick={onClose}>

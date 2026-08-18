@@ -3,8 +3,12 @@ import type {
   AgenteAsistenciaInput,
   AsignacionSucursal,
   AsignacionTurno,
+  CatalogoInconsistencias,
+  EstadoInconsistencia,
   FeriadoAsistencia,
   FichadaDetalle,
+  FilaInconsistencia,
+  LegajoAsistencia,
   LicenciaAsistencia,
   MapeoAsistencia,
   NumeroSinMapear,
@@ -12,7 +16,11 @@ import type {
   PanelAsistencia,
   RelojAsistencia,
   RelojAsistenciaInput,
+  ReglaInconsistencia,
+  RespuestaInconsistencias,
   RespuestaResumenAsistencia,
+  SeveridadInconsistencia,
+  TipoInconsistencia,
   TipoCicloTurno,
   TipoFeriado,
   TipoLicencia,
@@ -281,6 +289,107 @@ export function actualizarAsignacionSucursal(
 
 export function eliminarAsignacionSucursal(id: number): Promise<void> {
   return api.del<void>(`/asistencia/sucursales-empleado/${id}/`, token())
+}
+
+// --- Legajo de un empleado ---------------------------------------------------
+
+/**
+ * Toda la asistencia de una persona en un período. El backend recorta a un año
+ * y manda el detalle día por día solo cuando el período es corto.
+ */
+export function legajoEmpleado(
+  id: number,
+  rango: { desde: string; hasta: string },
+): Promise<LegajoAsistencia> {
+  return api.get<LegajoAsistencia>(
+    `/asistencia/empleados/${id}/${query(rango)}`,
+    token(),
+  )
+}
+
+// --- Inconsistencias ---------------------------------------------------------
+
+export interface FiltrosInconsistencias {
+  desde?: string
+  hasta?: string
+  empleado?: number | ''
+  sucursal?: number | ''
+  tipo?: TipoInconsistencia | ''
+  estado?: EstadoInconsistencia | ''
+  severidad?: SeveridadInconsistencia | ''
+}
+
+export function listarInconsistencias(
+  filtros: FiltrosInconsistencias = {},
+): Promise<RespuestaInconsistencias> {
+  return api.get<RespuestaInconsistencias>(
+    `/asistencia/inconsistencias/${query(filtros)}`,
+    token(),
+  )
+}
+
+export interface ResolucionInput {
+  empleado: number
+  fecha: string
+  tipo: TipoInconsistencia
+  estado: EstadoInconsistencia
+  motivo?: string
+}
+
+/** Justifica o rechaza una inconsistencia. Idempotente: vuelve a escribir la misma. */
+export function resolverInconsistencia(input: ResolucionInput): Promise<FilaInconsistencia> {
+  return api.post<FilaInconsistencia>('/asistencia/inconsistencias/resolver/', input, token())
+}
+
+/** La devuelve a «pendiente»: borra la decisión, no la inconsistencia. */
+export function reabrirInconsistencia(input: {
+  empleado: number
+  fecha: string
+  tipo: TipoInconsistencia
+}): Promise<void> {
+  return api.del<void>(`/asistencia/inconsistencias/resolver/${query(input)}`, token())
+}
+
+export function catalogoInconsistencias(): Promise<CatalogoInconsistencias> {
+  return api.get<CatalogoInconsistencias>('/asistencia/inconsistencias/catalogo/', token())
+}
+
+// --- Reglas de inconsistencia ------------------------------------------------
+
+export interface ReglaInput {
+  tipo: TipoInconsistencia
+  turno?: number | null
+  activa?: boolean
+  umbral_minutos?: number | null
+  severidad?: SeveridadInconsistencia
+  requiere_justificacion?: boolean
+}
+
+export function listarReglas(filtros: { turno?: number | ''; globales?: boolean } = {}) {
+  const { globales, ...resto } = filtros
+  return api.get<ReglaInconsistencia[]>(
+    `/asistencia/reglas/${query({ ...resto, globales: globales ? 1 : '' })}`,
+    token(),
+  )
+}
+
+export function crearRegla(input: ReglaInput): Promise<ReglaInconsistencia> {
+  return api.post<ReglaInconsistencia>('/asistencia/reglas/', input, token())
+}
+
+export function actualizarRegla(
+  id: number,
+  input: Partial<ReglaInput>,
+): Promise<ReglaInconsistencia> {
+  return api.patch<ReglaInconsistencia>(`/asistencia/reglas/${id}/`, input, token())
+}
+
+export function eliminarRegla(id: number): Promise<void> {
+  return api.del<void>(`/asistencia/reglas/${id}/`, token())
+}
+
+export function sembrarReglas(): Promise<{ creadas: number }> {
+  return api.post<{ creadas: number }>('/asistencia/reglas/sembrar/', {}, token())
 }
 
 // --- Licencias ---------------------------------------------------------------

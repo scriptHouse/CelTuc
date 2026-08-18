@@ -24,7 +24,9 @@ import { StatCard } from '@/components/ui/StatCard'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Badge } from '@/components/ui/Badge'
+import { EmpleadoTab } from '@/components/asistencia/EmpleadoTab'
 import { FichadasTab } from '@/components/asistencia/FichadasTab'
+import { InconsistenciasTab } from '@/components/asistencia/InconsistenciasTab'
 import { ResumenTab } from '@/components/asistencia/ResumenTab'
 import { TurnosTab } from '@/components/asistencia/TurnosTab'
 import { LicenciasTab } from '@/components/asistencia/LicenciasTab'
@@ -33,15 +35,26 @@ import { ConfigTab } from '@/components/asistencia/ConfigTab'
 import { num, tiempoRelativo } from '@/lib/format'
 import { cn, ctStagger } from '@/lib/utils'
 
-type Tab = 'panel' | 'resumen' | 'fichadas' | 'turnos' | 'licencias' | 'empleados' | 'config'
+type Tab =
+  | 'panel'
+  | 'resumen'
+  | 'inconsistencias'
+  | 'fichadas'
+  | 'turnos'
+  | 'licencias'
+  | 'empleados'
+  | 'identificadores'
+  | 'config'
 
 const TABS: { id: Tab; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'panel', label: 'Panel', icon: LayoutDashboard },
   { id: 'resumen', label: 'Resumen', icon: CalendarRange },
+  { id: 'inconsistencias', label: 'Inconsistencias', icon: AlertTriangle },
   { id: 'fichadas', label: 'Fichadas', icon: ListChecks },
   { id: 'turnos', label: 'Turnos', icon: CalendarClock },
   { id: 'licencias', label: 'Calendario', icon: Palmtree },
   { id: 'empleados', label: 'Empleados', icon: UserRoundSearch },
+  { id: 'identificadores', label: 'Identificadores', icon: Fingerprint },
   { id: 'config', label: 'Configuración', icon: Settings2 },
 ]
 
@@ -61,7 +74,7 @@ export function AsistenciaPage() {
       <div
         role="tablist"
         aria-label="Secciones de asistencia"
-        className="mb-5 flex flex-wrap items-center gap-1.5"
+        className="mb-5 -mx-1 flex items-center gap-1.5 overflow-x-auto px-1 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0"
       >
         {TABS.map((t) => {
           const activa = t.id === tab
@@ -74,7 +87,7 @@ export function AsistenciaPage() {
               aria-selected={activa}
               onClick={() => setTab(t.id)}
               className={cn(
-                'inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition-colors',
+                'inline-flex shrink-0 items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition-colors',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900',
                 activa
                   ? 'border-ink-950 bg-ink-950 text-on-ink shadow-[0_10px_30px_rgba(10,10,11,0.18)]'
@@ -90,10 +103,12 @@ export function AsistenciaPage() {
 
       {tab === 'panel' && <PanelTab />}
       {tab === 'resumen' && <ResumenTab />}
+      {tab === 'inconsistencias' && <InconsistenciasTab />}
       {tab === 'fichadas' && <FichadasTab />}
       {tab === 'turnos' && <TurnosTab />}
       {tab === 'licencias' && <LicenciasTab />}
-      {tab === 'empleados' && <MapeoTab />}
+      {tab === 'empleados' && <EmpleadoTab />}
+      {tab === 'identificadores' && <MapeoTab />}
       {tab === 'config' && <ConfigTab />}
     </div>
   )

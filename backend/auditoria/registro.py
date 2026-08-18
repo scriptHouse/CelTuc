@@ -72,6 +72,8 @@ AUDITADOS = {
     'asistencia.AsignacionSucursal': {},
     'asistencia.Licencia': {},
     'asistencia.Feriado': {},
+    'asistencia.ReglaInconsistencia': {},
+    'asistencia.JustificacionInconsistencia': {},
 }
 
 

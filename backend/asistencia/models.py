@@ -790,3 +790,300 @@ def sucursal_de(empleado_id: int, fecha):
         Empleado.objects.filter(pk=empleado_id).select_related('sucursal').first()
         or Empleado()
     ).sucursal
+
+
+# =============================================================================
+# INCONSISTENCIAS
+# =============================================================================
+
+class TipoInconsistencia(models.TextChoices):
+    LLEGADA_TARDE = 'llegada_tarde', 'Llegó tarde'
+    SALIDA_TEMPRANA = 'salida_temprana', 'Se retiró antes'
+    FALTA_ENTRADA = 'falta_entrada', 'Falta la marca de entrada'
+    FALTA_SALIDA = 'falta_salida', 'Falta la marca de salida'
+    AUSENCIA = 'ausencia', 'Ausente sin aviso'
+    PAUSA_EXCESIVA = 'pausa_excesiva', 'Salida parcial demasiado larga'
+    JORNADA_INCOMPLETA = 'jornada_incompleta', 'Trabajó menos de lo previsto'
+    EXCESO_JORNADA = 'exceso_jornada', 'Trabajó de más'
+    SUCURSAL_INCORRECTA = 'sucursal_incorrecta', 'Fichó en otra sucursal'
+    TRABAJO_EN_FERIADO = 'trabajo_en_feriado', 'Trabajó en un feriado'
+    DIA_NO_LABORABLE = 'dia_no_laborable', 'Trabajó en su día franco'
+
+
+class Severidad(models.TextChoices):
+    LEVE = 'leve', 'Leve'
+    MODERADA = 'moderada', 'Moderada'
+    GRAVE = 'grave', 'Grave'
+
+
+class EstadoInconsistencia(models.TextChoices):
+    PENDIENTE = 'pendiente', 'Pendiente de revisión'
+    JUSTIFICADA = 'justificada', 'Justificada'
+    RECHAZADA = 'rechazada', 'Sin justificación válida'
+
+
+# Qué significa el umbral de cada tipo y con qué valor conviene arrancar. Es la
+# misma tabla que usa la interfaz para explicarse sola, así agregar un tipo
+# nuevo no obliga a tocar el frontend.
+CATALOGO_INCONSISTENCIAS = {
+    TipoInconsistencia.LLEGADA_TARDE: {
+        'umbral': 'Minutos de atraso a partir de los cuales se reporta.',
+        'defecto': None,
+        'severidad': Severidad.MODERADA,
+        'activa': True,
+        'justificar': True,
+        'ayuda': 'Vacío: usa la tolerancia de llegada configurada en cada turno.',
+    },
+    TipoInconsistencia.SALIDA_TEMPRANA: {
+        'umbral': 'Minutos antes del horario de salida a partir de los cuales se reporta.',
+        'defecto': None,
+        'severidad': Severidad.MODERADA,
+        'activa': True,
+        'justificar': True,
+        'ayuda': 'Vacío: usa la tolerancia de salida configurada en cada turno.',
+    },
+    TipoInconsistencia.FALTA_ENTRADA: {
+        'umbral': 'Minutos después de la entrada tras los cuales se asume que faltó marcar.',
+        'defecto': 180,
+        'severidad': Severidad.GRAVE,
+        'activa': True,
+        'justificar': True,
+        'ayuda': 'Quedó un número impar de marcas y la primera es muy posterior a la '
+                 'entrada: lo más probable es que se haya olvidado de fichar al llegar.',
+    },
+    TipoInconsistencia.FALTA_SALIDA: {
+        'umbral': '',
+        'defecto': None,
+        'severidad': Severidad.GRAVE,
+        'activa': True,
+        'justificar': True,
+        'ayuda': 'La jornada quedó abierta: entró y nunca marcó la salida.',
+    },
+    TipoInconsistencia.AUSENCIA: {
+        'umbral': '',
+        'defecto': None,
+        'severidad': Severidad.GRAVE,
+        'activa': True,
+        'justificar': True,
+        'ayuda': 'Tenía turno ese día y no marcó nunca, sin licencia ni feriado.',
+    },
+    TipoInconsistencia.PAUSA_EXCESIVA: {
+        'umbral': 'Minutos de ausencia dentro de la jornada a partir de los cuales se reporta.',
+        'defecto': 90,
+        'severidad': Severidad.MODERADA,
+        'activa': True,
+        'justificar': True,
+        'ayuda': 'Se fue y volvió el mismo día, pero estuvo afuera más de la cuenta.',
+    },
+    TipoInconsistencia.JORNADA_INCOMPLETA: {
+        'umbral': 'Minutos de déficit sobre el horario esperado a partir de los cuales se reporta.',
+        'defecto': 30,
+        'severidad': Severidad.LEVE,
+        'activa': False,
+        'justificar': False,
+        'ayuda': 'Se superpone con «llegó tarde» y «se retiró antes»: viene apagada '
+                 'para no reportar dos veces lo mismo. Sirve si preferís mirar el '
+                 'total del día en vez de las puntas.',
+    },
+    TipoInconsistencia.EXCESO_JORNADA: {
+        'umbral': 'Minutos por encima del horario esperado a partir de los cuales se reporta.',
+        'defecto': 60,
+        'severidad': Severidad.LEVE,
+        'activa': True,
+        'justificar': False,
+        'ayuda': 'Horas de más: sirve para detectar horas extra no acordadas.',
+    },
+    TipoInconsistencia.SUCURSAL_INCORRECTA: {
+        'umbral': '',
+        'defecto': None,
+        'severidad': Severidad.MODERADA,
+        'activa': True,
+        'justificar': True,
+        'ayuda': 'Fichó en un local distinto al que le tocaba ese día.',
+    },
+    TipoInconsistencia.TRABAJO_EN_FERIADO: {
+        'umbral': '',
+        'defecto': None,
+        'severidad': Severidad.LEVE,
+        'activa': True,
+        'justificar': False,
+        'ayuda': 'Informativo: es el dato que hace falta para liquidar el feriado.',
+    },
+    TipoInconsistencia.DIA_NO_LABORABLE: {
+        'umbral': '',
+        'defecto': None,
+        'severidad': Severidad.LEVE,
+        'activa': True,
+        'justificar': False,
+        'ayuda': 'Trabajó un día que su turno tenía como franco.',
+    },
+}
+
+
+class ReglaInconsistencia(ModeloBase):
+    """Cuándo un día de trabajo pasa a ser algo para revisar.
+
+    Cada tipo tiene una regla global; opcionalmente se le puede poner una
+    propia a un turno (por ejemplo, más tolerancia en el turno noche). Ante
+    un día concreto, la regla del turno le gana a la global.
+
+    Apagar una regla no la borra: deja de generar inconsistencias de ese tipo
+    y deja de teñir el estado del día. Es la forma de decir «esto no me
+    interesa mirar» sin perder lo ya justificado.
+    """
+
+    tipo = models.CharField('tipo', max_length=24, choices=TipoInconsistencia.choices)
+    turno = models.ForeignKey(
+        Turno, on_delete=models.CASCADE, null=True, blank=True,
+        related_name='reglas', verbose_name='turno',
+        help_text='Vacío: vale para todos los turnos.',
+    )
+    activa = models.BooleanField('activa', default=True)
+    umbral_minutos = models.PositiveIntegerField(
+        'umbral (min)', null=True, blank=True,
+        help_text='Qué significa depende del tipo. Vacío en llegada tarde y salida '
+                  'temprana: usa la tolerancia del turno.',
+    )
+    severidad = models.CharField(
+        'severidad', max_length=10, choices=Severidad.choices, default=Severidad.MODERADA
+    )
+    requiere_justificacion = models.BooleanField(
+        'pedir justificación', default=True,
+        help_text='Si no, se reporta como dato informativo y no queda pendiente.',
+    )
+
+    class Meta:
+        db_table = 'asistencia_reglas_inconsistencia'
+        verbose_name = 'regla de inconsistencia'
+        verbose_name_plural = 'reglas de inconsistencia'
+        ordering = ('tipo', 'turno__nombre')
+        constraints = [
+            models.UniqueConstraint(
+                fields=('tipo', 'turno'), condition=models.Q(borrado=False),
+                name='uq_regla_tipo_turno',
+            ),
+            models.UniqueConstraint(
+                fields=('tipo',),
+                condition=models.Q(borrado=False, turno__isnull=True),
+                name='uq_regla_global',
+            ),
+        ]
+
+    def __str__(self):
+        alcance = self.turno.nombre if self.turno_id else 'todos los turnos'
+        return f'{self.get_tipo_display()} ({alcance})'
+
+    @property
+    def usa_umbral(self) -> bool:
+        return bool(CATALOGO_INCONSISTENCIAS.get(self.tipo, {}).get('umbral'))
+
+    def a_dict(self) -> dict:
+        """Lo que necesita el motor de jornada, sin acceso a la base."""
+        return {
+            'tipo': self.tipo,
+            'activa': self.activa,
+            'umbral': self.umbral_minutos,
+            'severidad': self.severidad,
+            'requiere_justificacion': self.requiere_justificacion,
+        }
+
+
+def resolver_reglas(reglas, turno_id=None) -> dict:
+    """`{tipo: dict}` para un turno: la regla del turno pisa a la global.
+
+    Recibe las reglas ya cargadas para poder resolver muchos días sin volver
+    a la base una vez por jornada.
+    """
+    resueltas: dict[str, dict] = {}
+    for regla in reglas:
+        if regla.turno_id is not None and regla.turno_id != turno_id:
+            continue
+        previa = resueltas.get(regla.tipo)
+        if previa is None or regla.turno_id is not None:
+            resueltas[regla.tipo] = regla.a_dict()
+    return resueltas
+
+
+def reglas_de(turno_id=None) -> dict:
+    """Las reglas vigentes para un turno (consulta directa, para un solo día)."""
+    reglas = ReglaInconsistencia.objects.filter(
+        models.Q(turno_id=turno_id) | models.Q(turno__isnull=True)
+    )
+    return resolver_reglas(reglas, turno_id)
+
+
+def sembrar_reglas(usuario=None) -> list:
+    """Crea las reglas globales que falten, con los valores recomendados."""
+    creadas = []
+    existentes = set(
+        ReglaInconsistencia.objects.filter(turno__isnull=True).values_list('tipo', flat=True)
+    )
+    for tipo, cfg in CATALOGO_INCONSISTENCIAS.items():
+        if tipo in existentes:
+            continue
+        creadas.append(ReglaInconsistencia.objects.create(
+            tipo=tipo,
+            activa=cfg['activa'],
+            umbral_minutos=cfg['defecto'],
+            severidad=cfg['severidad'],
+            requiere_justificacion=cfg['justificar'],
+            creado_por=usuario,
+            actualizado_por=usuario,
+        ))
+    return creadas
+
+
+class JustificacionInconsistencia(ModeloBase):
+    """La resolución de una inconsistencia puntual.
+
+    Las inconsistencias no se guardan: se recalculan siempre desde las
+    fichadas, los turnos y las reglas vigentes. Lo único que se guarda es lo
+    que una persona decidió sobre una de ellas, identificada por
+    (empleado, fecha, tipo). Así, cambiar un umbral recalcula todo al
+    instante sin dejar filas viejas contradiciendo la configuración nueva.
+    """
+
+    empleado = models.ForeignKey(
+        'empleados.Empleado', on_delete=models.PROTECT,
+        related_name='inconsistencias', verbose_name='empleado',
+    )
+    fecha = models.DateField('fecha')
+    tipo = models.CharField('tipo', max_length=24, choices=TipoInconsistencia.choices)
+    estado = models.CharField(
+        'estado', max_length=12, choices=EstadoInconsistencia.choices,
+        default=EstadoInconsistencia.JUSTIFICADA,
+    )
+    motivo = models.TextField('motivo', blank=True)
+
+    class Meta:
+        db_table = 'asistencia_justificaciones'
+        verbose_name = 'justificación de inconsistencia'
+        verbose_name_plural = 'justificaciones de inconsistencias'
+        ordering = ('-fecha', 'empleado__apellido')
+        constraints = [
+            models.UniqueConstraint(
+                fields=('empleado', 'fecha', 'tipo'), condition=models.Q(borrado=False),
+                name='uq_justificacion_viva',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=('fecha', 'tipo'), name='idx_justificacion_fecha'),
+        ]
+
+    def __str__(self):
+        return f'{self.empleado} · {self.get_tipo_display()} {self.fecha:%d/%m} ({self.estado})'
+
+
+def sucursales_con_reloj() -> set:
+    """Ids de sucursales con al menos un reloj activo.
+
+    A una sucursal sin reloj no se le puede pedir que fiche: sus jornadas no
+    se evalúan (ni ausencias, ni tarde, ni inconsistencias). Se deriva del
+    equipamiento en vez de pedir otra configuración: en cuanto se da de alta
+    el reloj, esa sucursal empieza a controlarse sola.
+    """
+    return set(
+        Dispositivo.objects.filter(activo=True)
+        .values_list('sucursal_id', flat=True)
+        .distinct()
+    )
