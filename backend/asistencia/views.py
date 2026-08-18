@@ -515,7 +515,15 @@ class PanelAsistenciaView(_BaseGestion, APIView):
                 en_linea = a.en_linea
                 if en_linea:
                     agentes_en_linea += 1
-                    reloj_en_linea = bool(a.reloj_alcanzable) or (reloj_en_linea or False)
+                    # `reloj_alcanzable = None` significa "el agente todavia no
+                    # consulto el reloj", no "el reloj esta caido". Hay que
+                    # conservar ese None: convertirlo a False hacia que el panel
+                    # mostrara "Reloj sin conexion" en rojo durante los primeros
+                    # segundos de cada arranque, cuando en realidad no se sabia.
+                    if a.reloj_alcanzable is True:
+                        reloj_en_linea = True
+                    elif a.reloj_alcanzable is False and reloj_en_linea is not True:
+                        reloj_en_linea = False
                 pendientes += a.eventos_pendientes
                 agentes.append(
                     {

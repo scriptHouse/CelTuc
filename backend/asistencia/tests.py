@@ -326,7 +326,10 @@ class PanelYListadosTests(BaseAsistenciaTest):
         self.assertEqual(vacia.data['total'], 0)
 
     def test_resumen_diario(self):
-        hoy = timezone.now().replace(hour=8, minute=0, second=0, microsecond=0)
+        # Hora LOCAL, no UTC: pasadas las 21 h de Argentina, `timezone.now()`
+        # ya cayó en el día siguiente y las fichadas quedaban fuera de la
+        # ventana «hoy» del resumen, haciendo fallar el test según la hora.
+        hoy = timezone.localtime().replace(hour=8, minute=0, second=0, microsecond=0)
         self.cliente_agente.post(
             reverse('asistencia:agente-eventos-bulk'),
             {

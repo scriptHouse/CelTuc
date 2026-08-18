@@ -410,3 +410,48 @@ class ResumenConCalendarioTests(TestCase):
         self.assertTrue(fila['trabajo_en_feriado'])
         self.assertEqual(fila['minutos_trabajados'], 9 * 60)
         self.assertEqual(fila['feriado']['nombre'], 'Feriado nacional')
+
+
+class PanelEstadoRelojTests(TestCase):
+    """El panel distingue «no se sabe todavia» de «el reloj esta caido»."""
+
+    def setUp(self):
+        self.superadmin = Usuario.objects.create_superuser(
+            email='duenio@celtuc.test', username='duenio', password='clave123'
+        )
+        self.cliente = APIClient()
+        self.cliente.force_authenticate(self.superadmin)
+        sucursal = Sucursal.objects.get_or_create(nombre='Salta')[0]
+        self.dispositivo = Dispositivo.objects.create(
+            sucursal=sucursal, nombre='Reloj', host='192.168.1.31'
+        )
+        from .models import Agente
+        self.agente = Agente(dispositivo=self.dispositivo, nombre='notebook-01')
+        self.agente.asignar_token()
+        self.agente.save()
+
+    def _panel(self):
+        return self.cliente.get(reverse('asistencia:panel')).data['dispositivos'][0]
+
+    def _heartbeat(self, alcanzable):
+        from .models import Agente
+        Agente.todos.filter(pk=self.agente.pk).update(
+            ultimo_heartbeat=timezone.now(), reloj_alcanzable=alcanzable
+        )
+
+    def test_sin_reporte_todavia_no_es_sin_conexion(self):
+        """Regresion: el primer heartbeat llega ANTES de consultar el reloj.
+
+        Convertir ese `None` en False pintaba «Reloj sin conexion» en rojo
+        durante los primeros segundos de cada arranque.
+        """
+        self._heartbeat(None)
+        self.assertIsNone(self._panel()['reloj_en_linea'])
+
+    def test_reloj_alcanzable_es_en_linea(self):
+        self._heartbeat(True)
+        self.assertIs(self._panel()['reloj_en_linea'], True)
+
+    def test_reloj_inalcanzable_es_sin_conexion(self):
+        self._heartbeat(False)
+        self.assertIs(self._panel()['reloj_en_linea'], False)
