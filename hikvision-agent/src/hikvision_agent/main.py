@@ -20,17 +20,17 @@ from zoneinfo import ZoneInfo
 
 from . import AGENT_VERSION, dpapi, paths
 from .models_comunes import TOKEN_PREFIJO
-from .config import ConfigHolder, Secrets, load_toml
+from .config import ConfigHolder, Secrets, existe, load_toml
 from .logging_config import setup_logging
 from .storage.repository import Repository
 
 
 def _cargar(config_path: Path | None) -> tuple[ConfigHolder, Secrets, Path]:
     ruta = config_path or paths.default_config_path()
-    if not ruta.exists() and config_path is None:
+    if not existe(ruta) and config_path is None:
         # Modo desarrollo: permitir un config.toml junto al proyecto.
         alternativa = Path("config.toml")
-        if alternativa.exists():
+        if existe(alternativa):
             ruta = alternativa
     local = load_toml(ruta)
     holder = ConfigHolder(local)
@@ -95,7 +95,14 @@ def cmd_diag(args: argparse.Namespace) -> int:
     password = args.password or secrets.hikvision_password
 
     print(f"hikvision-agent {AGENT_VERSION} — diagnóstico")
-    print(f"Config local: {ruta if ruta.exists() else '(sin config.toml)'}")
+    if existe(ruta):
+        print(f"Config local: {ruta}")
+    elif ruta.parent.name == "HikvisionAgent" and not config.backend.base_url:
+        # Existe la instalación pero no se pudo leer: casi siempre, elevación.
+        print(f"Config local: {ruta} (sin permiso de lectura)")
+        print("  Para ver la config instalada, abrí la terminal como Administrador.")
+    else:
+        print("Config local: (sin config.toml)")
     print(f"Reloj: {device.host or '(sin host)'} usuario={device.username}")
     fallas = 0
 

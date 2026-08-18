@@ -66,8 +66,42 @@ class DeviceAuthError(DeviceError):
     """Credenciales ISAPI inválidas."""
 
 
+class DeviceLocked(DeviceAuthError):
+    """El reloj bloqueó el acceso por intentos fallidos de login.
+
+    Es la proteccion antifuerza-bruta del equipo. Trae cuantos segundos falta
+    para que se libere: hay que ESPERAR ese tiempo sin insistir, porque cada
+    intento nuevo durante el bloqueo puede reiniciar el contador y dejarlo
+    bloqueado para siempre.
+    """
+
+    def __init__(self, mensaje: str, segundos: int = 0):
+        super().__init__(mensaje)
+        self.segundos = segundos
+
+
 class IsapiUnsupported(DeviceError):
     """El firmware no aceptó el recurso: revisar con el diagnóstico."""
+
+
+def _segundos_de_bloqueo(cuerpo: str) -> int | None:
+    """Segundos que faltan para que el reloj se desbloquee, o None si no lo está.
+
+    Ante un 401 el equipo devuelve un `userCheck` con `lockStatus` y
+    `unlockTime`. Distinguir eso de una contraseña equivocada es lo que evita
+    mandar a alguien a revisar credenciales que estan bien.
+    """
+    try:
+        raiz = ET.fromstring(cuerpo)
+    except ET.ParseError:
+        return None
+    datos = {_strip_ns(h.tag): (h.text or "").strip() for h in raiz}
+    if datos.get("lockStatus", "").lower() != "lock":
+        return None
+    try:
+        return max(0, int(datos.get("unlockTime") or 0))
+    except ValueError:
+        return 0
 
 
 def _strip_ns(tag: str) -> str:
@@ -123,6 +157,16 @@ class HikvisionClient:
             raise DeviceError(f"Error HTTP con el reloj: {exc}") from exc
 
         if respuesta.status_code == 401:
+            segundos = _segundos_de_bloqueo(respuesta.text)
+            if segundos is not None:
+                minutos = segundos // 60
+                raise DeviceLocked(
+                    "El reloj bloqueó el acceso por intentos fallidos de login "
+                    f"(protección del equipo). Se libera en {minutos} min "
+                    f"{segundos % 60} s. La contraseña puede estar bien: se "
+                    "reintenta solo cuando pase el bloqueo.",
+                    segundos=segundos,
+                )
             raise DeviceAuthError(
                 "El reloj rechazó las credenciales ISAPI (401). Si venía "
                 "funcionando, suele ser el equipo cortando conexiones tras "

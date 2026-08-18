@@ -106,11 +106,33 @@ def remote_to_local(remota: dict) -> dict:
     return salida
 
 
+def existe(path: Path) -> bool:
+    """`Path.exists()` que no explota si falta permiso sobre la carpeta.
+
+    Tras instalar, C:\ProgramData\CelTuc\HikvisionAgent queda accesible solo
+    para SYSTEM y administradores. Un usuario comun consultando el estado
+    recibia un PermissionError crudo desde `pathlib`.
+    """
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
 def load_toml(path: Path) -> dict:
-    if not path.exists():
+    """Config local, o vacio si no existe o no se puede leer.
+
+    Nunca lanza: `diag` es la herramienta que alguien usa cuando algo no
+    anda, y no puede morirse porque le falte elevacion para leer la config
+    instalada. Quien la corra puede pasar --host/--password a mano.
+    """
+    try:
+        if not path.exists():
+            return {}
+        with path.open("rb") as archivo:
+            return tomllib.load(archivo)
+    except OSError:
         return {}
-    with path.open("rb") as archivo:
-        return tomllib.load(archivo)
 
 
 @dataclass(frozen=True)

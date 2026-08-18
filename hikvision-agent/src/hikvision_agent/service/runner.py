@@ -18,7 +18,12 @@ import threading
 from .. import AGENT_VERSION
 from ..backend.client import BackendAuthError, BackendPayloadError, BackendTransientError
 from ..config import ConfigHolder, Secrets
-from ..hikvision.client import DeviceAuthError, DeviceUnreachable, IsapiUnsupported
+from ..hikvision.client import (
+    DeviceAuthError,
+    DeviceLocked,
+    DeviceUnreachable,
+    IsapiUnsupported,
+)
 from ..paths import default_db_path, ensure_dirs
 from ..sync.backend_sync import BackendSync
 from ..sync.device_sync import DeviceSync
@@ -50,6 +55,12 @@ class Loop(threading.Thread):
             except (DeviceUnreachable, BackendTransientError) as exc:
                 espera = self._backoff()
                 log.warning("[%s] %s — reintento en %ss", self.name, exc, espera)
+            except DeviceLocked as exc:
+                # Esperar lo que el propio equipo informa, con un margen. Cada
+                # intento durante el bloqueo puede reiniciar su contador y
+                # dejar al reloj inaccesible indefinidamente.
+                espera = max(exc.segundos + 30, 60)
+                log.warning("[%s] %s — esperando %ss", self.name, exc, espera)
             except (DeviceAuthError, BackendAuthError) as exc:
                 espera = _AUTH_BACKOFF
                 log.critical("[%s] %s — reintento en %ss", self.name, exc, espera)

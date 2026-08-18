@@ -137,3 +137,56 @@ def test_una_clave_de_verdad_equivocada_no_se_reintenta_para_siempre(reloj, monk
     cliente = HikvisionClient(_config(), "clave-mala")
     with pytest.raises(DeviceAuthError):
         list(cliente.search_events(INICIO, FIN))
+
+
+def test_detecta_el_bloqueo_del_reloj_y_cuanto_falta(reloj, monkeypatch):
+    """Un 401 por bloqueo no es una contraseña equivocada.
+
+    Ante intentos fallidos, el equipo bloquea el acceso y responde un
+    `userCheck` con `lockStatus` y `unlockTime`. Confundirlo con credenciales
+    malas manda a revisar una contraseña que está bien; y peor: insistir
+    durante el bloqueo reinicia su contador y lo deja inaccesible.
+    """
+    from hikvision_agent.hikvision.client import DeviceLocked
+
+    CUERPO = """<?xml version="1.0" encoding="UTF-8"?>
+<userCheck version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">
+  <statusValue>401</statusValue>
+  <isActivated>true</isActivated>
+  <lockStatus>lock</lockStatus>
+  <unlockTime>1509</unlockTime>
+</userCheck>"""
+
+    class Bloqueado(RelojSimulado):
+        def request(self, method, url, timeout=None, **kwargs):
+            r = RespuestaFalsa(401)
+            r.text = CUERPO
+            return r
+
+    monkeypatch.setattr(mod.requests, "Session", Bloqueado)
+    cliente = HikvisionClient(_config(), "clave")
+
+    with pytest.raises(DeviceLocked) as caso:
+        cliente.get_device_info()
+
+    assert caso.value.segundos == 1509
+    assert "bloque" in str(caso.value).lower()
+    assert "25 min" in str(caso.value)
+
+
+def test_un_401_sin_bloqueo_sigue_siendo_credenciales(reloj, monkeypatch):
+    """Contraprueba: sin `lockStatus`, el 401 se reporta como antes."""
+    from hikvision_agent.hikvision.client import DeviceAuthError, DeviceLocked
+
+    class Rechaza(RelojSimulado):
+        def request(self, method, url, timeout=None, **kwargs):
+            r = RespuestaFalsa(401)
+            r.text = "<userCheck><statusValue>401</statusValue></userCheck>"
+            return r
+
+    monkeypatch.setattr(mod.requests, "Session", Rechaza)
+    cliente = HikvisionClient(_config(), "clave")
+
+    with pytest.raises(DeviceAuthError) as caso:
+        cliente.get_device_info()
+    assert not isinstance(caso.value, DeviceLocked)

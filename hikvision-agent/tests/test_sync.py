@@ -408,3 +408,25 @@ def test_un_token_con_basura_pegada_falla_claro():
     # Espacios y saltos SOBRANTES se limpian: pegar con un enter de más es
     # normal y no tiene por qué fallar.
     assert BackendClient(config, "  asist_abc123 \n") is not None
+
+
+def test_una_config_ilegible_no_tumba_el_diagnostico(tmp_path, monkeypatch):
+    """Regresión: tras instalar, la carpeta es solo de SYSTEM y admins.
+
+    `diag` es LA herramienta que se usa cuando algo no anda. Leer la config
+    instalada sin elevación lanzaba un PermissionError crudo desde pathlib y
+    el ejecutable moría con una traza, en vez de seguir con los datos que le
+    pasan por línea de comandos.
+    """
+    from hikvision_agent.config import existe, load_toml
+
+    archivo = tmp_path / "config.toml"
+    archivo.write_text('[backend]\nbase_url = "https://x"\n', encoding="utf-8")
+
+    def sin_permiso(*_a, **_kw):
+        raise PermissionError(5, "Acceso denegado")
+
+    monkeypatch.setattr(type(archivo), "exists", sin_permiso)
+
+    assert existe(archivo) is False
+    assert load_toml(archivo) == {}
