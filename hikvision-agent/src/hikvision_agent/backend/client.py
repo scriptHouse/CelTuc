@@ -40,8 +40,23 @@ class BackendClient:
     def __init__(self, config: BackendConfig, token: str):
         if not config.base_url:
             raise BackendError("Falta configurar backend.base_url en config.toml")
+
+        token = (token or "").strip()
         if not token:
             raise BackendAuthError("Falta el token del agente (BACKEND_AGENT_TOKEN / secrets set)")
+
+        # Una cabecera HTTP solo admite ASCII. Si al copiar el token se colo un
+        # caracter raro (el simbolo del prompt de la terminal, por ejemplo),
+        # `requests` reventaba con un UnicodeEncodeError incomprensible en lo
+        # hondo de urllib3, y el loop lo reintentaba para siempre. Mejor
+        # detectarlo aca y decir que pasa.
+        if not token.isascii() or any(c.isspace() for c in token):
+            malos = "".join(sorted({c for c in token if not c.isascii() or c.isspace()}))
+            raise BackendAuthError(
+                f"El token del agente tiene caracteres invalidos ({malos!r}): "
+                "seguramente se colo algo al copiarlo. Volvé a cargarlo con "
+                "`hikvision-agent secrets set`."
+            )
         self._config = config
         self._session = requests.Session()
         self._session.headers.update(

@@ -19,6 +19,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from . import AGENT_VERSION, dpapi, paths
+from .models_comunes import TOKEN_PREFIJO
 from .config import ConfigHolder, Secrets, load_toml
 from .logging_config import setup_logging
 from .storage.repository import Repository
@@ -207,12 +208,32 @@ def cmd_secrets(args: argparse.Namespace) -> int:
     if args.accion == "set":
         paths.ensure_dirs()
         actuales = dpapi.load_secrets(ruta)
-        print("Guardado cifrado con DPAPI (dejar vacío para mantener el valor actual).")
+        print("Guardado cifrado con DPAPI.")
+        print("  Enter        = mantener el valor actual")
+        print("  un guion (-) = borrar el guardado")
         password = getpass.getpass("Contraseña del reloj Hikvision: ").strip()
         token = getpass.getpass("Token del agente (asist_…): ").strip()
-        if password:
+
+        if password == "-":
+            actuales.pop("hikvision_password", None)
+        elif password:
             actuales["hikvision_password"] = password
-        if token:
+
+        if token == "-":
+            # Sin esto no habia forma de QUITAR un token mal pegado: dejarlo
+            # vacio conservaba el viejo, y el guardado le gana al config.toml.
+            actuales.pop("backend_token", None)
+        elif token:
+            invalidos = {c for c in token if not c.isascii() or c.isspace()}
+            if invalidos:
+                print()
+                print(f"[ERROR] El token tiene caracteres inválidos: {''.join(sorted(invalidos))!r}")
+                print("        Suele ser el símbolo del prompt copiado sin querer.")
+                print("        No se guardó nada. Copiá solo el token (empieza con `asist_`).")
+                return 1
+            if not token.startswith(TOKEN_PREFIJO):
+                print(f"[AVISO] El token no empieza con `{TOKEN_PREFIJO}`. Se guarda igual, "
+                      "pero revisá que sea el correcto.")
             actuales["backend_token"] = token
         dpapi.save_secrets(ruta, actuales)
         print(f"[OK] Secretos guardados en {ruta}")

@@ -385,3 +385,26 @@ def test_sin_contrasena_el_panel_se_entera(db):
     foto = status.snapshot()
     assert foto["device_reachable"] is False, "el panel no se enteró del fallo"
     assert "contraseña" in foto["device_error"].lower()
+
+
+def test_un_token_con_basura_pegada_falla_claro():
+    """Regresión de la instalación real: se coló un `❯` al copiar el token.
+
+    Una cabecera HTTP solo admite ASCII, así que `requests` reventaba con un
+    `UnicodeEncodeError` en lo hondo de urllib3 —ilegible— y el loop lo
+    reintentaba para siempre sin que nadie supiera por qué.
+    """
+    from hikvision_agent.backend.client import BackendAuthError, BackendClient
+
+    config = _holder().current.backend
+
+    # Caracteres que jamás pueden viajar en una cabecera HTTP.
+    venenos = ["\u276fasist_abc123", "asist_abc 123", "asist_\nabc", "asist_\u00f1123"]
+    for veneno in venenos:
+        with pytest.raises(BackendAuthError) as caso:
+            BackendClient(config, veneno)
+        assert "inv" in str(caso.value).lower(), f"sin aviso claro para {veneno!r}"
+
+    # Espacios y saltos SOBRANTES se limpian: pegar con un enter de más es
+    # normal y no tiene por qué fallar.
+    assert BackendClient(config, "  asist_abc123 \n") is not None
