@@ -216,11 +216,32 @@ def cmd_secrets(args: argparse.Namespace) -> int:
             actuales["backend_token"] = token
         dpapi.save_secrets(ruta, actuales)
         print(f"[OK] Secretos guardados en {ruta}")
+
+        # Confirmar QUE quedó guardado: antes decía "OK" aunque se hubieran
+        # dejado los dos campos vacíos, y el agente arrancaba sin poder leer
+        # el reloj sin que nadie se enterara hasta ver el panel en rojo.
+        tiene_clave = bool(actuales.get("hikvision_password"))
+        tiene_token = bool(actuales.get("backend_token"))
+        print(f"     Contraseña del reloj: {'guardada' if tiene_clave else 'FALTA'}")
+        print(f"     Token del agente:     {'guardado' if tiene_token else 'no guardado'}")
+        if not tiene_clave:
+            print()
+            print("[AVISO] Sin la contraseña del reloj el agente no puede leer las")
+            print("        fichadas. Volvé a correr `hikvision-agent secrets set`.")
+        if not tiene_token:
+            print("        (El token puede venir en config.toml: eso también sirve.)")
         return 0
 
     # status
+    if not dpapi.puede_leerse(ruta):
+        print(f"Archivo: {ruta}")
+        print("[FALTA PERMISO] La carpeta es solo para SYSTEM y administradores.")
+        print("  Volvé a correr esto desde una terminal abierta como Administrador.")
+        return 1
+
     guardados = dpapi.load_secrets(ruta)
-    print(f"Archivo: {ruta} ({'existe' if ruta.exists() else 'no existe'})")
+    existe = ruta.exists()
+    print(f"Archivo: {ruta} ({'existe' if existe else 'no existe'})")
     print(f"Contraseña del reloj: {'guardada' if guardados.get('hikvision_password') else 'FALTA'}")
     print(f"Token del backend:    {'guardado' if guardados.get('backend_token') else 'FALTA (¿viene en config.toml?)'}")
     return 0

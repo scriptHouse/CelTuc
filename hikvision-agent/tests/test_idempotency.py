@@ -98,3 +98,24 @@ def test_el_mismo_repositorio_sirve_desde_varios_hilos(tmp_path):
     assert leido == ["desde-el-hilo-principal", 1]
     # Y el hilo principal sigue viendo lo que escribió el otro.
     assert repo.counts()["PENDING"] == 1
+
+
+def test_los_secretos_ilegibles_no_tumban_al_agente(tmp_path, monkeypatch):
+    """Sin permiso sobre secrets.dat hay que devolver vacío, nunca lanzar.
+
+    El instalador restringe la carpeta a SYSTEM y administradores. Un usuario
+    común corriendo `diag` (justo la herramienta de diagnóstico) chocaba con
+    un PermissionError y moría con una traza en vez de un mensaje útil.
+    """
+    from hikvision_agent import dpapi
+
+    archivo = tmp_path / "secrets.dat"
+    archivo.write_bytes(b"lo que sea")
+
+    def sin_permiso(*_a, **_kw):
+        raise PermissionError(5, "Acceso denegado")
+
+    monkeypatch.setattr(type(archivo), "read_bytes", sin_permiso)
+
+    assert dpapi.load_secrets(archivo) == {}
+    assert dpapi.puede_leerse(archivo) is False

@@ -71,11 +71,32 @@ def save_secrets(path: Path, valores: dict[str, str]) -> None:
 
 
 def load_secrets(path: Path) -> dict[str, str]:
-    if not path.exists():
-        return {}
+    """Secretos guardados, o vacío si no se pueden leer.
+
+    Nunca lanza. El instalador deja la carpeta accesible solo para SYSTEM y
+    administradores, así que un usuario común que corra `diag` o `secrets
+    status` choca con un PermissionError — y esa es justo la herramienta que
+    alguien usa cuando algo no anda: no puede morirse con una traza.
+    """
     try:
+        if not path.exists():
+            return {}
         return json.loads(unprotect(path.read_bytes()).decode("utf-8"))
-    except Exception:
-        # Archivo corrupto o de otra máquina: mejor pedir recargar secretos
-        # que tumbar el agente.
+    except (OSError, PermissionError):
+        # Sin permiso sobre el archivo (falta elevación).
         return {}
+    except Exception:
+        # Archivo corrupto o cifrado en otra máquina: mejor pedir recargar
+        # los secretos que tumbar el agente.
+        return {}
+
+
+def puede_leerse(path: Path) -> bool:
+    """¿El usuario actual tiene permiso sobre el archivo de secretos?"""
+    try:
+        if not path.exists():
+            return True  # no existe todavía: no es un problema de permisos
+        path.read_bytes()
+        return True
+    except (OSError, PermissionError):
+        return False
