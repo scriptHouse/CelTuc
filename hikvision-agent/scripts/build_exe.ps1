@@ -14,10 +14,13 @@ if (-not (Test-Path ".venv-build")) {
 & ".venv-build\Scripts\python.exe" -m pip install --upgrade pip | Out-Null
 & ".venv-build\Scripts\python.exe" -m pip install ".[dev]"
 
+# Se apunta a `launcher.py`, NO a src\hikvision_agent\main.py: PyInstaller
+# corre el script objetivo como `__main__` y los imports relativos del modulo
+# fallan. El launcher importa el paquete de forma absoluta.
 & ".venv-build\Scripts\pyinstaller.exe" --onefile --console --name hikvision-agent `
     --paths src `
     --collect-data tzdata `
-    src\hikvision_agent\main.py
+    launcher.py
 
 Write-Host ""
 Write-Host "Listo: dist\hikvision-agent.exe"
