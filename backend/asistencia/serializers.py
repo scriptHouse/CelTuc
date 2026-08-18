@@ -8,6 +8,7 @@ from rest_framework import serializers
 
 from .models import (
     Agente,
+    AsignacionSucursal,
     AsignacionTurno,
     Dispositivo,
     Feriado,
@@ -384,5 +385,85 @@ class FeriadoSerializer(serializers.ModelSerializer):
             alcance = sucursal.nombre if sucursal else 'todas las sucursales'
             raise serializers.ValidationError(
                 {'fecha': f'Ya hay un feriado ese día para {alcance}.'}
+            )
+        return datos
+
+
+class DiasSemanaField(serializers.Field):
+    """`'0,2,4'` en la base ⇄ `[0, 2, 4]` en la API. Vacío = todos los días.
+
+    Elegir los siete días es lo mismo que no elegir ninguno, así que se
+    normaliza a vacío: evita dos filas que dicen lo mismo con distinta forma.
+    """
+
+    def to_representation(self, value):
+        return [int(p) for p in str(value or '').split(',') if p.strip().isdigit()]
+
+    def to_internal_value(self, data):
+        if data in (None, '', []):
+            return ''
+        if isinstance(data, str):
+            data = [p for p in data.split(',') if p.strip()]
+        if not isinstance(data, (list, tuple)):
+            raise serializers.ValidationError(
+                'Enviá una lista de días (0 = lunes … 6 = domingo).'
+            )
+        dias = set()
+        for item in data:
+            try:
+                numero = int(item)
+            except (TypeError, ValueError):
+                raise serializers.ValidationError(f'«{item}» no es un día válido.')
+            if not 0 <= numero <= 6:
+                raise serializers.ValidationError(
+                    'Los días van de 0 (lunes) a 6 (domingo).'
+                )
+            dias.add(numero)
+        if len(dias) == 7:
+            return ''
+        return ','.join(str(d) for d in sorted(dias))
+
+
+class AsignacionSucursalSerializer(serializers.ModelSerializer):
+    empleado_nombre = serializers.SerializerMethodField()
+    sucursal_nombre = serializers.CharField(source='sucursal.nombre', read_only=True)
+    dias_semana = DiasSemanaField(required=False)
+    vigente = serializers.BooleanField(read_only=True)
+    todos_los_dias = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = AsignacionSucursal
+        fields = (
+            'id', 'empleado', 'empleado_nombre', 'sucursal', 'sucursal_nombre',
+            'desde', 'hasta', 'dias_semana', 'todos_los_dias', 'vigente',
+            'motivo', 'creado',
+        )
+        read_only_fields = ('creado',)
+
+    def get_empleado_nombre(self, obj):
+        return obj.empleado.nombre_completo
+
+    def validate(self, datos):
+        desde = datos.get('desde') or getattr(self.instance, 'desde', None)
+        hasta = datos.get('hasta', getattr(self.instance, 'hasta', None))
+        if hasta and desde and hasta < desde:
+            raise serializers.ValidationError({'hasta': 'No puede ser anterior a «desde».'})
+
+        # A diferencia de los turnos, acá NO se rechaza la superposición: es el
+        # mecanismo previsto para las excepciones (un reemplazo de tres días
+        # pisa la asignación permanente). Lo único sin sentido es duplicar la
+        # misma regla exacta.
+        empleado = datos.get('empleado') or getattr(self.instance, 'empleado', None)
+        sucursal = datos.get('sucursal') or getattr(self.instance, 'sucursal', None)
+        dias = datos.get('dias_semana', getattr(self.instance, 'dias_semana', ''))
+        repetida = AsignacionSucursal.objects.filter(
+            empleado=empleado, sucursal=sucursal, desde=desde,
+            hasta=hasta, dias_semana=dias,
+        )
+        if self.instance is not None:
+            repetida = repetida.exclude(pk=self.instance.pk)
+        if repetida.exists():
+            raise serializers.ValidationError(
+                'Esa misma asignación ya está cargada para ese empleado.'
             )
         return datos

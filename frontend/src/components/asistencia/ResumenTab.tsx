@@ -1,6 +1,14 @@
 import { useMemo, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { CalendarRange, Loader2, LogOut, Timer, TriangleAlert, UserX } from 'lucide-react'
+import {
+  CalendarRange,
+  Loader2,
+  LogOut,
+  MapPin,
+  Timer,
+  TriangleAlert,
+  UserX,
+} from 'lucide-react'
 import type { JornadaAsistencia } from '@/types'
 import { resumenAsistencia } from '@/services/asistencia'
 import { listarEmpleados } from '@/services/empleados'
@@ -37,6 +45,7 @@ const ESTADOS_FILTRO = [
   { value: 'licencia', label: 'Con licencia' },
   { value: 'feriado', label: 'Feriados' },
   { value: 'con_parcial', label: 'Con salida parcial' },
+  { value: 'otra_sucursal', label: 'Fichó en otra sucursal' },
 ]
 
 export function ResumenTab() {
@@ -64,6 +73,7 @@ export function ResumenTab() {
     const todas = data?.resultados ?? []
     if (!estado) return todas
     if (estado === 'con_parcial') return todas.filter((j) => j.salidas_parciales.length > 0)
+    if (estado === 'otra_sucursal') return todas.filter((j) => j.fichada_en_otra_sucursal)
     return todas.filter((j) => j.estado === estado)
   }, [data, estado])
 
@@ -116,9 +126,11 @@ export function ResumenTab() {
           label="A revisar"
           value={num((porEstado.tarde ?? 0) + (porEstado.incompleta ?? 0) + (porEstado.salida_temprana ?? 0))}
           hint={
-            trabajadosEnFeriado > 0
-              ? `${trabajadosEnFeriado} trabajaron en feriado`
-              : 'tarde, temprano o sin cerrar'
+            (resumen?.en_otra_sucursal ?? 0) > 0
+              ? `${resumen?.en_otra_sucursal} fichó en otra sucursal`
+              : trabajadosEnFeriado > 0
+                ? `${trabajadosEnFeriado} trabajaron en feriado`
+                : 'tarde, temprano o sin cerrar'
           }
           icon={TriangleAlert}
           className="ct-stagger-item"
@@ -228,14 +240,21 @@ function FilaJornada({ jornada, indice }: { jornada: JornadaAsistencia; indice: 
               </span>
             )}
           </p>
-          <p className="mt-0.5 text-xs text-ink-400">
+          <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-ink-400">
             {jornada.turno ? (
-              <>
+              <span>
                 {jornada.turno}
                 {jornada.horario_esperado ? ` · ${jornada.horario_esperado}` : ''}
-              </>
+              </span>
             ) : (
-              'Sin turno asignado'
+              <span>Sin turno asignado</span>
+            )}
+            {jornada.sucursal_esperada && (
+              <span className="inline-flex items-center gap-1">
+                <span aria-hidden>·</span>
+                <MapPin className="h-3 w-3" strokeWidth={2} aria-hidden />
+                {jornada.sucursal_esperada.nombre}
+              </span>
             )}
           </p>
         </div>
@@ -275,6 +294,12 @@ function FilaJornada({ jornada, indice }: { jornada: JornadaAsistencia; indice: 
         {jornada.salida_temprana_minutos > 0 && (
           <span className="tnum text-amber-600 dark:text-amber-400">
             se fue {duracion(jornada.salida_temprana_minutos)} antes
+          </span>
+        )}
+        {jornada.fichada_en_otra_sucursal && (
+          <span className="inline-flex items-center gap-1 font-medium text-orange-600 dark:text-orange-400">
+            <MapPin className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
+            fichó en {jornada.sucursales_fichadas.map((s) => s.nombre).join(' y ')}
           </span>
         )}
         {jornada.feriado && (

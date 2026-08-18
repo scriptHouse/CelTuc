@@ -36,6 +36,13 @@ horario se aplican, en orden:
 2. **Licencia de día completo**: tampoco se espera a nadie.
 3. **Licencia por horas**: se descuenta solo esa franja del horario
    esperado; el resto del día se sigue esperando.
+
+## Dónde se lo esperaba
+
+Aparte del horario, cada jornada lleva la sucursal que le tocaba ese día y
+las que informan los relojes donde fichó. Cuando no coinciden, la jornada
+queda marcada: con gente que rota entre locales, "vino a trabajar" y "vino
+al local que le tocaba" dejan de ser la misma pregunta.
 """
 from __future__ import annotations
 
@@ -128,6 +135,11 @@ class Jornada:
     licencia: dict | None = None
     feriado: dict | None = None
     horario_esperado: str = ''
+    # Dónde se lo esperaba ese día y dónde fichó realmente. Con gente que rota
+    # entre locales, "vino a trabajar" y "vino al local que le tocaba" dejan
+    # de ser la misma pregunta.
+    sucursal_esperada: dict | None = None
+    sucursales_fichadas: list[dict] = field(default_factory=list)
 
     @property
     def primera(self) -> datetime | None:
@@ -146,6 +158,15 @@ class Jornada:
     @property
     def trabajo_en_feriado(self) -> bool:
         return self.feriado is not None and self.minutos_trabajados > 0
+
+    @property
+    def fichada_en_otra_sucursal(self) -> bool:
+        """Fichó, pero en ningún reloj de la sucursal donde se lo esperaba."""
+        if not self.sucursal_esperada or not self.sucursales_fichadas:
+            return False
+        return self.sucursal_esperada['id'] not in {
+            s['id'] for s in self.sucursales_fichadas if s.get('id')
+        }
 
     def to_dict(self) -> dict:
         return {
@@ -173,6 +194,9 @@ class Jornada:
             'licencia': self.licencia,
             'feriado': self.feriado,
             'trabajo_en_feriado': self.trabajo_en_feriado,
+            'sucursal_esperada': self.sucursal_esperada,
+            'sucursales_fichadas': self.sucursales_fichadas,
+            'fichada_en_otra_sucursal': self.fichada_en_otra_sucursal,
         }
 
 
@@ -274,6 +298,8 @@ def calcular(
     licencia=None,
     feriado=None,
     desfase: int = 0,
+    sucursal_esperada: dict | None = None,
+    sucursales_fichadas: list[dict] | None = None,
 ) -> Jornada:
     """Analiza el día de una persona. `fichadas` debe venir ordenada por hora."""
     jornada = Jornada(
@@ -283,6 +309,8 @@ def calcular(
         numero_reloj=numero_reloj,
         sin_mapear=sin_mapear,
         turno_nombre=turno.nombre if turno else '',
+        sucursal_esperada=sucursal_esperada,
+        sucursales_fichadas=list(sucursales_fichadas or []),
     )
 
     antirebote = turno.minutos_antirebote if turno else MINUTOS_ANTIREBOTE_DEFECTO

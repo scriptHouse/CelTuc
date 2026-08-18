@@ -27,6 +27,7 @@ from . import jornada as jornada_mod
 from .authentication import AgenteTokenAuthentication, EsAgenteAutenticado
 from .models import (
     Agente,
+    AsignacionSucursal,
     AsignacionTurno,
     Dispositivo,
     EstadoMapeo,
@@ -39,11 +40,13 @@ from .models import (
     TipoFeriado,
     Turno,
     aplicar_mapeo,
+    elegir_asignacion_sucursal,
     hash_evento,
     resolver_mapeos,
 )
 from .serializers import (
     AgenteSerializer,
+    AsignacionSucursalSerializer,
     AsignacionTurnoSerializer,
     DispositivoSerializer,
     EventoAgenteSerializer,
@@ -84,6 +87,19 @@ def _id(params, clave):
         return int(params.get(clave, ''))
     except (TypeError, ValueError):
         return None
+
+
+def _es_de_la_sucursal(jornada, sucursal_id):
+    """Si esa jornada le interesa a una sucursal.
+
+    Le interesa por dos motivos distintos: porque esa persona tenia que estar
+    ahi, o porque ficho ahi. Con gente que rota, una misma jornada puede caer
+    en las dos vistas — y esa es justamente la que hay que mirar.
+    """
+    esperada = jornada.get('sucursal_esperada')
+    if esperada and esperada['id'] == sucursal_id:
+        return True
+    return any(s['id'] == sucursal_id for s in jornada.get('sucursales_fichadas', ()))
 
 
 def _inicio_de_hoy():
@@ -599,19 +615,19 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
 
         fichadas = (
             Fichada.objects.filter(ocurrida_en__gte=inicio, ocurrida_en__lt=fin)
-            .select_related('empleado', 'dispositivo')
+            .select_related(
+                'empleado', 'empleado__sucursal', 'dispositivo', 'dispositivo__sucursal'
+            )
             .order_by('ocurrida_en')
         )
         empleado_id = _id(params, 'empleado')
         if _id(params, 'dispositivo'):
             fichadas = fichadas.filter(dispositivo_id=_id(params, 'dispositivo'))
-        if _id(params, 'sucursal'):
-            fichadas = fichadas.filter(dispositivo__sucursal_id=_id(params, 'sucursal'))
         if empleado_id:
             fichadas = fichadas.filter(empleado_id=empleado_id)
 
         ctx = self._contexto(desde, hasta, empleado_id)
-        turno_en, licencia_en, feriado_en, empleados_seguidos = ctx
+        turno_en, licencia_en, feriado_en, sucursal_en, empleados_seguidos = ctx
 
         # 1) Agrupar las fichadas por (dia, persona).
         grupos = {}
@@ -625,7 +641,7 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
                     'numero_reloj': f.numero_reloj,
                     'sin_mapear': False,
                 }
-                sucursal_id = f.empleado.sucursal_id or f.dispositivo.sucursal_id
+                base_id = f.empleado.sucursal_id or f.dispositivo.sucursal_id
             else:
                 clave = (dia, 'n', '%s:%s' % (f.dispositivo_id, f.numero_reloj))
                 meta = {
@@ -634,24 +650,35 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
                     'numero_reloj': f.numero_reloj,
                     'sin_mapear': True,
                 }
-                sucursal_id = f.dispositivo.sucursal_id
+                base_id = f.dispositivo.sucursal_id
             grupo = grupos.setdefault(
-                clave, {'meta': meta, 'sucursal_id': sucursal_id, 'fichadas': []}
+                clave,
+                {'meta': meta, 'sucursal_id': base_id, 'fichadas': [], 'marcadas': {}},
             )
             grupo['fichadas'].append(f)
+            # Donde ficho de verdad: el reloj sabe en que local esta parado.
+            if f.dispositivo.sucursal_id:
+                grupo['marcadas'][f.dispositivo.sucursal_id] = f.dispositivo.sucursal.nombre
 
         resultados = []
         for clave, grupo in grupos.items():
             meta = grupo['meta']
-            turno, desfase = turno_en(meta['empleado_id'], clave[0])
+            dia = clave[0]
+            turno, desfase = turno_en(meta['empleado_id'], dia)
+            esperada = sucursal_en(meta['empleado_id'], dia, grupo['sucursal_id'])
             resultados.append(
                 jornada_mod.calcular(
-                    clave[0],
+                    dia,
                     grupo['fichadas'],
                     turno=turno,
                     desfase=desfase,
-                    licencia=licencia_en(meta['empleado_id'], clave[0]),
-                    feriado=feriado_en(clave[0], grupo.get('sucursal_id')),
+                    licencia=licencia_en(meta['empleado_id'], dia),
+                    feriado=feriado_en(dia, esperada['id'] if esperada else None),
+                    sucursal_esperada=esperada,
+                    sucursales_fichadas=[
+                        {'id': sid, 'nombre': nombre}
+                        for sid, nombre in sorted(grupo['marcadas'].items())
+                    ],
                     **meta
                 ).to_dict()
             )
@@ -663,10 +690,11 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
             for emp_id, datos_emp in empleados_seguidos.items():
                 if (dia, emp_id) in vistos:
                     continue
+                esperada = sucursal_en(emp_id, dia, datos_emp['sucursal_id'])
                 turno, desfase = turno_en(emp_id, dia)
                 licencia = licencia_en(emp_id, dia)
                 # Feriado sin fichadas: el dia no da noticia, se omite.
-                if feriado_en(dia, datos_emp['sucursal_id']) is not None:
+                if feriado_en(dia, esperada['id'] if esperada else None) is not None:
                     continue
                 if turno is None and licencia is None:
                     continue
@@ -677,9 +705,18 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
                     jornada_mod.calcular(
                         dia, [], empleado_id=emp_id, nombre=datos_emp['nombre'],
                         turno=turno, desfase=desfase, licencia=licencia,
+                        sucursal_esperada=esperada,
                     ).to_dict()
                 )
             dia += timedelta(days=1)
+
+        # El filtro por sucursal se aplica ACA y no en la consulta: una jornada
+        # pertenece a un local por dos motivos distintos (donde se esperaba a la
+        # persona y donde ficho), y filtrando por el reloj se perdia el primero
+        # — quien ese dia tenia que estar ahi y no aparecio.
+        filtro_sucursal = _id(params, 'sucursal')
+        if filtro_sucursal:
+            resultados = [j for j in resultados if _es_de_la_sucursal(j, filtro_sucursal)]
 
         resultados.sort(key=lambda j: (j['fecha'], j['nombre']), reverse=True)
 
@@ -693,6 +730,9 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
                 'minutos_trabajados': sum(j['minutos_trabajados'] for j in resultados),
                 'minutos_esperados': sum(j['minutos_esperados'] for j in resultados),
                 'con_salida_parcial': sum(1 for j in resultados if j['salidas_parciales']),
+                'en_otra_sucursal': sum(
+                    1 for j in resultados if j['fichada_en_otra_sucursal']
+                ),
                 'por_estado': dict(conteo),
             },
         })
@@ -712,9 +752,16 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
             Licencia.objects.filter(desde__lte=hasta, hasta__gte=desde)
             .select_related('empleado')
         )
+        destinos = (
+            AsignacionSucursal.objects
+            .filter(desde__lte=hasta)
+            .filter(Q(hasta__isnull=True) | Q(hasta__gte=desde))
+            .select_related('sucursal')
+        )
         if empleado_id:
             asignaciones = asignaciones.filter(empleado_id=empleado_id)
             licencias = licencias.filter(empleado_id=empleado_id)
+            destinos = destinos.filter(empleado_id=empleado_id)
 
         por_empleado = {}
         seguidos = {}
@@ -733,6 +780,14 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
                 'sucursal_id': lic.empleado.sucursal_id,
             })
 
+        destinos_por_empleado = {}
+        for destino in destinos:
+            destinos_por_empleado.setdefault(destino.empleado_id, []).append(destino)
+
+        # La sucursal fija del empleado es el respaldo cuando no hay ninguna
+        # asignacion con fechas: son pocas filas, se traen todas de una.
+        nombres_sucursal = dict(Sucursal.objects.values_list('id', 'nombre'))
+
         feriados = list(Feriado.objects.filter(fecha__gte=desde, fecha__lte=hasta))
 
         def turno_en(emp_id, fecha):
@@ -748,6 +803,20 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
                     return lic
             return None
 
+        def sucursal_en(emp_id, fecha, base_id=None):
+            """Donde se espera al empleado ese dia: `{'id', 'nombre'}` o None.
+
+            Manda la asignacion mas especifica que cubra la fecha; si no hay
+            ninguna, la sucursal fija del empleado (y para las fichadas sin
+            mapear, la del reloj que las tomo).
+            """
+            elegida = elegir_asignacion_sucursal(destinos_por_empleado.get(emp_id, ()), fecha)
+            if elegida is not None:
+                return {'id': elegida.sucursal_id, 'nombre': elegida.sucursal.nombre}
+            if base_id:
+                return {'id': base_id, 'nombre': nombres_sucursal.get(base_id, '')}
+            return None
+
         def feriado_en(fecha, sucursal_id=None):
             """El feriado del dia; uno de la sucursal le gana al general."""
             general = None
@@ -760,7 +829,7 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
                     general = general or f
             return general
 
-        return turno_en, licencia_en, feriado_en, seguidos
+        return turno_en, licencia_en, feriado_en, sucursal_en, seguidos
 
 
 # --- Horarios y licencias (solo superadministrador) --------------------------
@@ -791,6 +860,26 @@ class AsignacionListCreateView(_BaseGestion, AuditoriaMixin, generics.ListCreate
 class AsignacionDetailView(_BaseGestion, AuditoriaMixin, generics.RetrieveUpdateDestroyAPIView):
     queryset = AsignacionTurno.objects.select_related('empleado', 'turno')
     serializer_class = AsignacionTurnoSerializer
+
+
+class AsignacionSucursalListCreateView(_BaseGestion, AuditoriaMixin, generics.ListCreateAPIView):
+    serializer_class = AsignacionSucursalSerializer
+
+    def get_queryset(self):
+        qs = AsignacionSucursal.objects.select_related('empleado', 'sucursal')
+        params = self.request.query_params
+        if _id(params, 'empleado'):
+            qs = qs.filter(empleado_id=_id(params, 'empleado'))
+        if _id(params, 'sucursal'):
+            qs = qs.filter(sucursal_id=_id(params, 'sucursal'))
+        if params.get('vigentes') == '1':
+            qs = qs.filter(hasta__isnull=True)
+        return qs
+
+
+class AsignacionSucursalDetailView(_BaseGestion, AuditoriaMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = AsignacionSucursal.objects.select_related('empleado', 'sucursal')
+    serializer_class = AsignacionSucursalSerializer
 
 
 class LicenciaListCreateView(_BaseGestion, AuditoriaMixin, generics.ListCreateAPIView):

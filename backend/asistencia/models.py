@@ -14,6 +14,9 @@ Arquitectura (ver `docs/asistencia-hikvision-spec.md`):
 - `MapeoEmpleado`: traduce el número de empleado cargado en el reloj al
   `empleados.Empleado` del sistema. Las fichadas sin mapeo NO se descartan:
   quedan `sin_mapear` para asociarlas después.
+- `AsignacionSucursal`: en qué local se espera a cada persona y qué día.
+  `Empleado.sucursal` alcanza para quien nunca se mueve; esto es para quien
+  rota, y es lo que permite avisar si alguien fichó donde no correspondía.
 """
 from __future__ import annotations
 
@@ -666,3 +669,124 @@ def feriado_de(fecha, sucursal_id=None):
         else:
             general = general or f
     return especifico or general
+
+
+# =============================================================================
+# DÓNDE TRABAJA CADA UNO
+# =============================================================================
+
+class AsignacionSucursal(ModeloBase):
+    """En qué sucursal se espera a un empleado, y desde cuándo.
+
+    `Empleado.sucursal` dice a qué local pertenece alguien, pero es un dato
+    fijo: no sirve para quien rota. Acá el destino tiene fechas y, si hace
+    falta, días de la semana, así se puede modelar:
+
+    - **Fijo**: desde el 01/03, sin «hasta», todos los días → Salta.
+    - **Semana partida**: dos filas abiertas, una lunes y martes → Salta,
+      otra el resto → Yerba Buena.
+    - **Reemplazo puntual**: del 20/08 al 22/08 → Salta (cubre a alguien).
+
+    Las filas se pueden superponer a propósito: **gana la más específica**,
+    entendiendo por específica la de período más corto (una excepción de un
+    día le gana a la regla permanente); a igual período gana la que limita
+    días de la semana; y si todavía empatan, la que empezó después.
+
+    Si un empleado no tiene ninguna fila, se usa su `Empleado.sucursal`.
+    """
+
+    empleado = models.ForeignKey(
+        'empleados.Empleado', on_delete=models.PROTECT,
+        related_name='sucursales_asistencia', verbose_name='empleado',
+    )
+    sucursal = models.ForeignKey(
+        'inventario.Sucursal', on_delete=models.PROTECT,
+        related_name='asignaciones_asistencia', verbose_name='sucursal',
+    )
+    desde = models.DateField('desde')
+    hasta = models.DateField('hasta', null=True, blank=True, help_text='Vacío: sin fecha de fin.')
+
+    # Guardado como '0,2,4' (0 = lunes). Vacío = todos los días del período.
+    dias_semana = models.CharField(
+        'días de la semana', max_length=13, blank=True, default='',
+        help_text='Vacío: todos los días. Si no, solo esos días va a esa sucursal.',
+    )
+    motivo = models.CharField('motivo', max_length=200, blank=True)
+
+    class Meta:
+        db_table = 'asistencia_asignaciones_sucursal'
+        verbose_name = 'asignación de sucursal'
+        verbose_name_plural = 'asignaciones de sucursal'
+        ordering = ('-desde', 'id')
+        indexes = [
+            models.Index(fields=('empleado', 'desde'), name='idx_asig_suc_empleado'),
+        ]
+
+    def __str__(self):
+        return f'{self.empleado} → {self.sucursal} (desde {self.desde})'
+
+    @property
+    def dias(self) -> set[int]:
+        """Días de la semana que cubre. Vacío en la base = los siete."""
+        crudos = {int(p) for p in self.dias_semana.split(',') if p.strip().isdigit()}
+        return crudos or {0, 1, 2, 3, 4, 5, 6}
+
+    @property
+    def todos_los_dias(self) -> bool:
+        return len(self.dias) == 7
+
+    @property
+    def vigente(self) -> bool:
+        return self.hasta is None
+
+    @property
+    def duracion_dias(self) -> int | None:
+        """Cuántos días abarca el período, o None si no tiene fin."""
+        if self.hasta is None:
+            return None
+        return (self.hasta - self.desde).days + 1
+
+    @property
+    def especificidad(self) -> tuple:
+        """Clave de desempate: **menor es más específica** (ver la clase)."""
+        largo = self.duracion_dias if self.hasta is not None else 10 ** 6
+        return (largo, 0 if not self.todos_los_dias else 1, -self.desde.toordinal())
+
+    def cubre(self, fecha) -> bool:
+        if fecha < self.desde or (self.hasta is not None and fecha > self.hasta):
+            return False
+        return fecha.weekday() in self.dias
+
+
+def elegir_asignacion_sucursal(asignaciones, fecha):
+    """De varias asignaciones, la que manda ese día (la más específica)."""
+    candidatas = [a for a in asignaciones if a.cubre(fecha)]
+    if not candidatas:
+        return None
+    return min(candidatas, key=lambda a: a.especificidad)
+
+
+def sucursal_de(empleado_id: int, fecha):
+    """Sucursal donde se espera a un empleado esa fecha (o None).
+
+    Primero las asignaciones con fecha; si no hay ninguna, la sucursal fija
+    del empleado.
+    """
+    if not empleado_id:
+        return None
+    asignaciones = (
+        AsignacionSucursal.objects
+        .filter(empleado_id=empleado_id, desde__lte=fecha)
+        .filter(models.Q(hasta__isnull=True) | models.Q(hasta__gte=fecha))
+        .select_related('sucursal')
+    )
+    elegida = elegir_asignacion_sucursal(asignaciones, fecha)
+    if elegida is not None:
+        return elegida.sucursal
+
+    from empleados.models import Empleado
+
+    return (
+        Empleado.objects.filter(pk=empleado_id).select_related('sucursal').first()
+        or Empleado()
+    ).sucursal

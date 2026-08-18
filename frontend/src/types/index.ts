@@ -1053,6 +1053,30 @@ export interface AsignacionTurno {
   creado: string
 }
 
+/**
+ * En qué sucursal se espera a un empleado, y desde cuándo.
+ *
+ * Las filas se pueden superponer a propósito: gana la más específica (período
+ * más corto; a igual período, la que limita días de la semana). Sin ninguna
+ * fila vale la sucursal fija del empleado.
+ */
+export interface AsignacionSucursal {
+  id: number
+  empleado: number
+  empleado_nombre: string
+  sucursal: number
+  sucursal_nombre: string
+  desde: string
+  /** null = sin fecha de fin. */
+  hasta: string | null
+  /** `[0, 1]` = lunes y martes. Vacío = todos los días del período. */
+  dias_semana: number[]
+  todos_los_dias: boolean
+  vigente: boolean
+  motivo: string
+  creado: string
+}
+
 export type TipoLicencia =
   | 'vacaciones'
   | 'enfermedad'
@@ -1156,6 +1180,12 @@ export interface JornadaAsistencia {
   feriado: { nombre: string; tipo: TipoFeriado; tipo_display: string } | null
   /** Feriado en el que igual se trabajó (dato para liquidar). */
   trabajo_en_feriado: boolean
+  /** Dónde le tocaba estar ese día. */
+  sucursal_esperada: { id: number; nombre: string } | null
+  /** En qué locales fichó de verdad (lo sabe el reloj que la tomó). */
+  sucursales_fichadas: { id: number; nombre: string }[]
+  /** Fichó, pero en ningún reloj de la sucursal donde se lo esperaba. */
+  fichada_en_otra_sucursal: boolean
 }
 
 export interface RespuestaResumenAsistencia {
@@ -1167,6 +1197,7 @@ export interface RespuestaResumenAsistencia {
     minutos_trabajados: number
     minutos_esperados: number
     con_salida_parcial: number
+    en_otra_sucursal: number
     por_estado: Partial<Record<EstadoJornada, number>>
   }
 }

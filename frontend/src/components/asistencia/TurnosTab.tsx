@@ -32,6 +32,7 @@ import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { SucursalesSeccion } from '@/components/asistencia/SucursalesSeccion'
 import { DIAS_SEMANA, duracion, fechaLocalISO, hhmm } from '@/components/asistencia/constantes'
 import { fecha as fechaCorta } from '@/lib/format'
 import { cn, ctStagger } from '@/lib/utils'
@@ -248,6 +249,10 @@ export function TurnosTab() {
           </Card>
         )}
       </section>
+
+      <div className="border-t border-line pt-6">
+        <SucursalesSeccion />
+      </div>
 
       <TurnoModal
         turno={editando === 'nuevo' ? null : editando}

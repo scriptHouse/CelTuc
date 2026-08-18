@@ -1,6 +1,7 @@
 import type {
   AgenteAsistencia,
   AgenteAsistenciaInput,
+  AsignacionSucursal,
   AsignacionTurno,
   FeriadoAsistencia,
   FichadaDetalle,
@@ -231,6 +232,55 @@ export function actualizarAsignacion(
 
 export function eliminarAsignacion(id: number): Promise<void> {
   return api.del<void>(`/asistencia/asignaciones/${id}/`, token())
+}
+
+// --- Sucursal donde se espera al empleado -------------------------------------
+
+export interface AsignacionSucursalInput {
+  empleado: number
+  sucursal: number
+  desde: string
+  hasta?: string | null
+  /** `[0, 1]` = lunes y martes. Vacío o los siete = todos los días. */
+  dias_semana?: number[]
+  motivo?: string
+}
+
+export interface FiltrosAsignacionSucursal {
+  empleado?: number | ''
+  sucursal?: number | ''
+  vigentes?: boolean
+}
+
+export function listarAsignacionesSucursal(
+  filtros: FiltrosAsignacionSucursal = {},
+): Promise<AsignacionSucursal[]> {
+  const { vigentes, ...resto } = filtros
+  return api.get<AsignacionSucursal[]>(
+    `/asistencia/sucursales-empleado/${query({ ...resto, vigentes: vigentes ? 1 : '' })}`,
+    token(),
+  )
+}
+
+export function crearAsignacionSucursal(
+  input: AsignacionSucursalInput,
+): Promise<AsignacionSucursal> {
+  return api.post<AsignacionSucursal>('/asistencia/sucursales-empleado/', input, token())
+}
+
+export function actualizarAsignacionSucursal(
+  id: number,
+  input: Partial<AsignacionSucursalInput>,
+): Promise<AsignacionSucursal> {
+  return api.patch<AsignacionSucursal>(
+    `/asistencia/sucursales-empleado/${id}/`,
+    input,
+    token(),
+  )
+}
+
+export function eliminarAsignacionSucursal(id: number): Promise<void> {
+  return api.del<void>(`/asistencia/sucursales-empleado/${id}/`, token())
 }
 
 // --- Licencias ---------------------------------------------------------------

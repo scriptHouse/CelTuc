@@ -69,6 +69,7 @@ AUDITADOS = {
     'asistencia.MapeoEmpleado': {},
     'asistencia.Turno': {},
     'asistencia.AsignacionTurno': {},
+    'asistencia.AsignacionSucursal': {},
     'asistencia.Licencia': {},
     'asistencia.Feriado': {},
 }
