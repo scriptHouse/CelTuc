@@ -23,9 +23,29 @@ $installDir = "C:\Program Files\CelTuc\HikvisionAgent"
 $dataDir    = "C:\ProgramData\CelTuc\HikvisionAgent"
 $exe        = Join-Path $installDir "hikvision-agent.exe"
 
+# 0. Si ya estaba instalado, frenarlo antes de reemplazar el .exe. Windows
+#    bloquea el archivo mientras corre, y reinstalar es el camino NORMAL de
+#    actualizacion: sin esto, el Copy-Item falla con "esta siendo utilizado
+#    en otro proceso".
+$yaInstalado = $null
+try { $yaInstalado = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop } catch {}
+if ($yaInstalado) {
+    Write-Host "==> Ya estaba instalado: deteniendolo para actualizar..."
+    try { Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop } catch {}
+    Get-Process hikvision-agent -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+    # El sistema tarda un instante en soltar el archivo.
+    Start-Sleep -Seconds 2
+}
+
 # 1. Binario
 New-Item -ItemType Directory -Force $installDir | Out-Null
-Copy-Item $ExeSource $exe -Force
+try {
+    Copy-Item $ExeSource $exe -Force -ErrorAction Stop
+} catch {
+    throw ("No se pudo reemplazar $exe (sigue en uso). Cerra el agente con " +
+           "`"Stop-ScheduledTask -TaskName '$TaskName'`" y volve a intentar. Detalle: $_")
+}
 Write-Host "[OK] Ejecutable en $exe"
 
 # 2. Carpeta de datos con permisos solo para SYSTEM y Administradores (por SID,
