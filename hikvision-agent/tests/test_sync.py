@@ -363,3 +363,25 @@ def test_un_404_del_proxy_es_transitorio(db, monkeypatch):
 
     with pytest.raises(BackendTransientError):
         BackendClient._interpretar(RespuestaFalsa())
+
+
+def test_sin_contrasena_el_panel_se_entera(db):
+    """Regresión: el error de construcción del cliente quedaba sin registrar.
+
+    Si falta la contraseña del reloj, `HikvisionClient` lanza al construirse.
+    Estando fuera del try, ese fallo no llamaba a `device_fail()`: el estado
+    quedaba en None y el panel mostraba «Reloj: sin datos» en gris para
+    siempre, sin decir nunca qué faltaba.
+    """
+    from hikvision_agent.hikvision.client import DeviceAuthError
+
+    status = StatusBoard()
+    sin_clave = Secrets(hikvision_password="", backend_token="asist_token")
+    sincronizador = DeviceSync(_holder(), sin_clave, status, db)
+
+    with pytest.raises(DeviceAuthError):
+        sincronizador.run_once()
+
+    foto = status.snapshot()
+    assert foto["device_reachable"] is False, "el panel no se enteró del fallo"
+    assert "contraseña" in foto["device_error"].lower()

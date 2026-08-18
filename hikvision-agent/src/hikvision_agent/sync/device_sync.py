@@ -52,9 +52,12 @@ class DeviceSync:
     def run_once(self) -> int:
         """Un ciclo de polling. Devuelve la cantidad de eventos nuevos."""
         config = self._holder.current
-        cliente = HikvisionClient(config.device, self._secrets.hikvision_password)
-
         try:
+            # La construcción del cliente va DENTRO del try: si falta la
+            # contraseña o la IP, lanza acá mismo. Quedando afuera, el fallo no
+            # se registraba y el panel mostraba el reloj como «sin datos» —
+            # gris, sin motivo— en vez de decir qué le falta.
+            cliente = HikvisionClient(config.device, self._secrets.hikvision_password)
             return self._sincronizar(cliente, config)
         except Exception as exc:
             self._status.device_fail(str(exc))
