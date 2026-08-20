@@ -117,7 +117,7 @@ function bajar(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1500)
 }
 
-export function HistorialDocumentos() {
+export function HistorialDocumentos({ tipoInicial = '' }: { tipoInicial?: string }) {
   const toast = useToast()
   const confirm = useConfirm()
   const qc = useQueryClient()
@@ -131,7 +131,9 @@ export function HistorialDocumentos() {
     return () => clearTimeout(timer)
   }, [busqueda])
 
-  const [tipo, setTipo] = useState('')
+  // `tipoInicial` permite llegar ya filtrado (p. ej. "ver anteriores" desde el
+  // editor de un documento con cupón correlativo). El filtro sigue editable.
+  const [tipo, setTipo] = useState(tipoInicial)
   const [formato, setFormato] = useState('')
   const [sucursal, setSucursal] = useState('')
   const [usuario, setUsuario] = useState('')

@@ -54,7 +54,7 @@ class HistorialDocumentosTests(TestCase):
         return c
 
     def _registrar(self, user, *, tipo='compraventa', formato='pdf', cliente='Juan Perez',
-                   nombre='compraventa-1234.pdf'):
+                   nombre='compraventa-1234.pdf', referencia='1234'):
         return self._client(user).post(
             reverse('documentos:documento-list'),
             {
@@ -63,7 +63,7 @@ class HistorialDocumentosTests(TestCase):
                 'formato': formato,
                 'nombre_archivo': nombre,
                 'sucursal': 'Salta',
-                'referencia': '1234',
+                'referencia': referencia,
                 'cliente': cliente,
                 'cliente_documento': '30111222',
                 'detalle': 'iPhone 13 Pro · IMEI 350000000000001',
@@ -226,6 +226,49 @@ class HistorialDocumentosTests(TestCase):
         self.assertTrue(doc.borrado)
         self.assertEqual(doc.borrado_por, self.admin)
         self.assertTrue(doc.archivo.storage.exists(doc.archivo.name))
+
+    # --- Cupon correlativo ------------------------------------------------
+
+    def test_proximo_cupon_arranca_en_cero(self):
+        r = self._client(self.empleado).get(
+            reverse('documentos:documento-proximo-cupon'), {'tipo': 'reparacion'},
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data, {'proximo': 0, 'ultimo': None})
+
+    def test_proximo_cupon_sigue_al_maximo_del_tipo(self):
+        self._registrar(self.empleado, tipo='reparacion', referencia='0')
+        self._registrar(self.empleado, tipo='reparacion', referencia='3')
+        # Otro tipo y cupones no numericos no cuentan.
+        self._registrar(self.empleado, tipo='compraventa', referencia='99')
+        self._registrar(self.empleado, tipo='reparacion', referencia='A-12')
+
+        r = self._client(self.empleado).get(
+            reverse('documentos:documento-proximo-cupon'), {'tipo': 'reparacion'},
+        )
+        self.assertEqual(r.data, {'proximo': 4, 'ultimo': 3})
+
+    def test_proximo_cupon_es_global_y_no_repite_borrados(self):
+        # Documento de OTRO empleado: el contador es de todo el equipo.
+        doc_id = self._registrar(self.otro, tipo='reparacion', referencia='5').data['id']
+        # Aunque el admin lo saque del historial, el numero no se reusa.
+        self._client(self.admin).delete(reverse('documentos:documento-detail', args=[doc_id]))
+
+        r = self._client(self.empleado).get(
+            reverse('documentos:documento-proximo-cupon'), {'tipo': 'reparacion'},
+        )
+        self.assertEqual(r.data, {'proximo': 6, 'ultimo': 5})
+
+    def test_proximo_cupon_pide_tipo_y_sesion(self):
+        self.assertEqual(
+            self._client(self.empleado).get(
+                reverse('documentos:documento-proximo-cupon'),
+            ).status_code, 400,
+        )
+        r = APIClient().get(
+            reverse('documentos:documento-proximo-cupon'), {'tipo': 'reparacion'},
+        )
+        self.assertIn(r.status_code, (401, 403))
 
     # --- Auditoria --------------------------------------------------------
 

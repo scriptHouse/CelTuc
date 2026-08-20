@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import { Archive, Building2, Clock, Eraser, FileSpreadsheet, FileText, Loader2, PackagePlus, PenLine, Printer, UserSearch } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Archive, Building2, Clock, Eraser, FileSpreadsheet, FileText, Hash, Loader2, PackagePlus, PenLine, Printer, UserSearch } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
@@ -18,11 +18,25 @@ import { DOC_MODULES, PROXIMOS_DOCS } from '@/documentos/registry'
 import { HistorialDocumentos, QK_HISTORIAL } from '@/documentos/HistorialDocumentos'
 import { BuscarClienteModal } from '@/documentos/BuscarClienteModal'
 import {
+  listarDocumentos,
+  proximoCupon,
   registrarDocumento,
   type ClienteSugerido,
   type DocumentoArchivado,
+  type DocumentoGenerado,
   type FormatoDocumento,
 } from '@/services/documentos'
+
+/** Clave de caché del próximo cupón correlativo (se invalida al archivar). */
+const QK_PROXIMO_CUPON = 'documentos-proximo-cupon'
+
+/** "19/08 14:30" para los cupones anteriores del editor. */
+function fechaCorta(iso: string): string {
+  const d = new Date(iso)
+  const dia = d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })
+  const hora = d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+  return `${dia} ${hora}`
+}
 
 /** Sucursal del encabezado de todos los documentos. Como en la venta rápida:
  *  cada visita arranca en la del empleado logueado y elegir otra a mano vale
@@ -67,6 +81,8 @@ export function DocumentosPage() {
   const qc = useQueryClient()
 
   const [vista, setVista] = useState<'generar' | 'historial'>('generar')
+  // Tipo con el que llega prefiltrado el Historial (desde "ver anteriores").
+  const [historialTipo, setHistorialTipo] = useState('')
   const [activeId, setActiveId] = useState(DOC_MODULES[0].id)
   // Estado por documento: se preserva al cambiar de pestaña dentro de la sesión.
   const [estados, setEstados] = useState<Record<string, unknown>>(() =>
@@ -82,6 +98,62 @@ export function DocumentosPage() {
   const datos = estados[active.id]
   const patch = (p: Record<string, unknown>) =>
     setEstados((s) => ({ ...s, [active.id]: { ...(s[active.id] as object), ...p } }))
+
+  /* --- Cupón correlativo -------------------------------------------------
+   * Para las plantillas que lo declaran (`cuponAuto`, hoy Garantía/Reparación)
+   * el N° de cupón lo asigna el sistema: el backend calcula el próximo mirando
+   * el historial (arranca en 0 y nunca repite) y acá se precarga cuando el
+   * campo está vacío. El campo sigue editable como válvula de escape. */
+  const cuponAuto = active.cuponAuto as string | undefined
+  const cuponActual = cuponAuto
+    ? String((datos as Record<string, unknown>)[cuponAuto] ?? '')
+    : ''
+
+  const proxCupon = useQuery({
+    queryKey: [QK_PROXIMO_CUPON, active.id],
+    queryFn: () => proximoCupon(active.id),
+    enabled: vista === 'generar' && Boolean(cuponAuto),
+  })
+  // Últimos generados de este tipo, para ver los cupones anteriores sin salir
+  // del editor. Comparte la clave raíz del historial: se invalidan juntos.
+  const anteriores = useQuery({
+    queryKey: [QK_HISTORIAL, 'ultimos', active.id],
+    queryFn: () => listarDocumentos({ tipo: active.id, limit: 8 }),
+    enabled: vista === 'generar' && Boolean(cuponAuto),
+  })
+  // Un mismo papel se exporta varias veces (PDF y Excel): un renglón por cupón.
+  const ultimos = useMemo(() => {
+    const unicos: DocumentoGenerado[] = []
+    const vistos = new Set<string>()
+    for (const doc of anteriores.data?.resultados ?? []) {
+      const clave = doc.referencia || `#${doc.id}`
+      if (vistos.has(clave)) continue
+      vistos.add(clave)
+      unicos.push(doc)
+    }
+    return unicos.slice(0, 4)
+  }, [anteriores.data])
+
+  /** Último valor que precargamos nosotros, por documento. Distingue "lo puso
+   *  el sistema y se puede refrescar" de "lo tocó el usuario o ya se exportó"
+   *  (después de exportar, el N° del papel en pantalla no se toca más). */
+  const cuponPrecargado = useRef<Record<string, string | null>>({})
+  useEffect(() => {
+    if (!cuponAuto || proxCupon.data === undefined) return
+    const objetivo = String(proxCupon.data.proximo)
+    const precargado = cuponPrecargado.current[active.id] ?? null
+    if (cuponActual === objetivo) {
+      cuponPrecargado.current[active.id] = objetivo
+      return
+    }
+    // Solo se pisa un campo vacío o uno que seguía con nuestra precarga vieja.
+    if (cuponActual.trim() === '' || cuponActual === precargado) {
+      cuponPrecargado.current[active.id] = objetivo
+      patch({ [cuponAuto]: objetivo })
+    }
+    // `patch` cambia de identidad en cada render; el guard hace el resto.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cuponAuto, proxCupon.data, cuponActual, active.id])
 
   // Compraventa: el equipo del contrato se puede sumar al inventario (con
   // confirmación). El modal también se ofrece solo al exportar el PDF.
@@ -148,6 +220,13 @@ export function DocumentosPage() {
         },
         blob,
       )
+      if (cuponAuto) {
+        // El N° de este papel ya quedó registrado: no se toca más en pantalla
+        // (así reexportar el mismo documento en otro formato repite el número)
+        // y el contador se refresca para el próximo.
+        cuponPrecargado.current[active.id] = null
+        await qc.invalidateQueries({ queryKey: [QK_PROXIMO_CUPON, active.id] })
+      }
       await qc.invalidateQueries({ queryKey: [QK_HISTORIAL] })
       return archivado
     } catch (e) {
@@ -304,12 +383,17 @@ export function DocumentosPage() {
           activo={vista === 'historial'}
           icon={Archive}
           label="Historial"
-          onClick={() => setVista('historial')}
+          onClick={() => {
+            // Desde la pestaña se entra sin prefiltro (el atajo "ver historial
+            // completo" del editor es el que llega filtrado por tipo).
+            setHistorialTipo('')
+            setVista('historial')
+          }}
         />
       </div>
 
       {vista === 'historial' ? (
-        <HistorialDocumentos />
+        <HistorialDocumentos key={historialTipo || 'todo'} tipoInicial={historialTipo} />
       ) : (
         <>
         {/* Selector de tipo de documento. Flex centrado: mismo ancho por tarjeta
@@ -398,6 +482,55 @@ export function DocumentosPage() {
               </Button>
             </div>
           </div>
+
+          {/* Cupón correlativo: el N° asignado y el registro de los anteriores */}
+          {cuponAuto && (
+            <div className="border-b border-line bg-surface px-3 py-2.5 sm:px-4">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs">
+                <span className="inline-flex items-center gap-1.5">
+                  <Hash className="h-3.5 w-3.5 shrink-0 text-ink-400" />
+                  <span className="font-semibold text-ink-950">
+                    Cupón N° <span className="tnum">{cuponActual.trim() || '…'}</span>
+                  </span>
+                </span>
+                <span className="text-ink-400">
+                  {proxCupon.isError
+                    ? 'No se pudo traer el N° automático: completalo a mano en el papel.'
+                    : proxCupon.data?.ultimo == null
+                      ? 'Se asigna solo y es correlativo. Este es el primero.'
+                      : `Se asigna solo y es correlativo · último usado: N° ${proxCupon.data.ultimo}`}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHistorialTipo(active.id)
+                    setVista('historial')
+                  }}
+                  className="ml-auto inline-flex items-center gap-1 rounded-lg px-2 py-1 font-medium text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
+                >
+                  <Archive className="h-3.5 w-3.5" /> Ver historial completo
+                </button>
+              </div>
+              {ultimos.length > 0 && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs text-ink-400">Anteriores:</span>
+                  {ultimos.map((doc) => (
+                    <span
+                      key={doc.id}
+                      className="inline-flex max-w-full items-center gap-1 truncate rounded-full border border-line bg-canvas px-2.5 py-1 text-xs text-ink-600"
+                      title={`${doc.tipo_nombre} · ${doc.cliente || 'sin cliente'} · ${fechaCorta(doc.creado)}`}
+                    >
+                      <span className="tnum font-semibold text-ink-900">
+                        N° {doc.referencia || '—'}
+                      </span>
+                      {doc.cliente && <span className="truncate">· {doc.cliente}</span>}
+                      <span className="tnum text-ink-400">· {fechaCorta(doc.creado)}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* "Escritorio": el papel blanco sobre un fondo neutro */}
           <div className="bg-canvas p-4 sm:p-6 lg:p-8">

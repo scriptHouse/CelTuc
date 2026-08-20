@@ -72,6 +72,7 @@ export const reparacionModule: DocModule<ReparacionData> = {
   nombreArchivo: (d) => (d.cupon.trim() ? `reparacion-${d.cupon.trim()}` : 'reparacion'),
   resumen: resumenReparacion,
   camposCliente: { nombre: 'recibiDe', telefono: 'cel', email: 'mail' },
+  cuponAuto: 'cupon',
   Paper: ReparacionPaper,
   loadPdf: async () => (await import('./ReparacionPdf')).ReparacionPdf,
   loadXlsx: async () => (await import('./reparacionXlsx')).construirReparacionXlsx,

@@ -100,6 +100,12 @@ export interface DocModule<T = unknown> {
    * de la base (la garantía de accesorios, por ejemplo, no tiene cliente).
    */
   camposCliente?: CamposCliente<T>
+  /**
+   * Campo cuyo N° es correlativo y lo asigna el sistema: arranca en 0 y sube
+   * con cada documento generado de este tipo (el próximo lo calcula el backend
+   * mirando el historial). El campo queda editable por si hay que corregirlo.
+   */
+  cuponAuto?: keyof T & string
   Paper: ComponentType<PaperProps<T>>
   loadPdf: () => Promise<ComponentType<{ datos: T; direccion?: string }>>
   loadXlsx: () => Promise<(datos: T, direccion?: string) => Promise<Blob>>

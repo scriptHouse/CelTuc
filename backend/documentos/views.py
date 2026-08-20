@@ -236,6 +236,36 @@ class DocumentoListCreateView(APIView):
         return Response(cuerpo, status=status.HTTP_201_CREATED)
 
 
+class ProximoCuponView(APIView):
+    """GET: el proximo N° de cupon correlativo para un tipo de documento.
+
+    El contador se deriva del propio historial (no hay una tabla aparte): es el
+    maximo cupon NUMERICO ya registrado para ese tipo, mas uno; sin registros
+    arranca en 0. Se calcula sobre TODO el historial —de todo el equipo e
+    incluyendo los borrados logicos— para que la numeracion sea global y un
+    numero nunca se repita, aunque un administrador saque un documento del
+    archivo. Solo devuelve numeros: no expone datos de documentos ajenos.
+    """
+
+    permission_classes = [HistorialDocumentos]
+
+    def get(self, request):
+        tipo = (request.query_params.get('tipo') or '').strip()
+        if not tipo:
+            return Response({'detail': 'Falta el tipo de documento.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        referencias = DocumentoGenerado.todos.filter(tipo=tipo).values_list(
+            'referencia', flat=True,
+        )
+        # Cupones tipeados a mano pueden no ser numericos ("A-12"): se ignoran.
+        numeros = [int(ref) for ref in (r.strip() for r in referencias) if ref.isdecimal()]
+        ultimo = max(numeros) if numeros else None
+        return Response({
+            'proximo': 0 if ultimo is None else ultimo + 1,
+            'ultimo': ultimo,
+        })
+
+
 class ClientesParaDocumentoView(APIView):
     """Autocompletado del cliente en los formularios de Documentos.
 

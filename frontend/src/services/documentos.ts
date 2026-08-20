@@ -140,6 +140,26 @@ export function registrarDocumento(
   return api.post<DocumentoArchivado>('/documentos/', form, token())
 }
 
+/** Próximo N° correlativo de cupón para un tipo de documento. */
+export interface ProximoCupon {
+  /** El número que corresponde al documento que se está por generar. */
+  proximo: number
+  /** El mayor cupón numérico ya registrado, o null si todavía no hay ninguno. */
+  ultimo: number | null
+}
+
+/**
+ * Próximo cupón correlativo de un tipo de documento. Lo calcula el backend
+ * sobre TODO el historial del equipo (incluidos los borrados), así el número
+ * es global y nunca se repite. Arranca en 0.
+ */
+export function proximoCupon(tipo: string): Promise<ProximoCupon> {
+  return api.get<ProximoCupon>(
+    `/documentos/proximo-cupon/?tipo=${encodeURIComponent(tipo)}`,
+    token(),
+  )
+}
+
 /** Un cliente ya guardado, con lo justo para completar un formulario. */
 export interface ClienteSugerido {
   id: number
