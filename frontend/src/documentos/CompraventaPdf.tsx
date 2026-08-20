@@ -1,4 +1,5 @@
-import { Document, Page, Text, View } from '@react-pdf/renderer'
+import { Document, Image, Page, Text, View } from '@react-pdf/renderer'
+import { FIRMA_PADROS } from './assets'
 import { BOLD, PAGINA_ISO_STYLE, PdfBody, PdfCtHeader, PdfPaper, PdfTitle, REG, paginaISO } from './kitPdf'
 import { INK, STD_CONTENT_W, STD_PAD, STD_W, pt } from './kit'
 import {
@@ -72,7 +73,7 @@ export function CompraventaPdf({ datos, direccion }: { datos: CompraventaData; d
             <ClausulaPdf c={CV_SEXTA} datos={datos} />
 
             <View style={{ flex: 1, minHeight: 28 }} />
-            <FirmaFilaPdf izq={CV_FIRMAS.firmaIzq} der={CV_FIRMAS.firmaDer} />
+            <FirmaFilaPdf izq={CV_FIRMAS.firmaIzq} der={CV_FIRMAS.firmaDer} imgDer={FIRMA_PADROS} />
             <View style={{ height: 18 }} />
             <FirmaFilaPdf izq={CV_FIRMAS.aclaracionIzq} der={CV_FIRMAS.aclaracionDer} valorDer={CV_FIRMAS.aclaracionDerValor} />
             <View style={{ height: 6 }} />
@@ -102,7 +103,7 @@ function ClausulaPdf({ c, datos }: { c: Clausula; datos: CompraventaData }) {
   )
 }
 
-function FirmaFilaPdf({ izq, der, valorDer }: { izq: string; der: string; valorDer?: string }) {
+function FirmaFilaPdf({ izq, der, valorDer, imgDer }: { izq: string; der: string; valorDer?: string; imgDer?: string }) {
   const linea = '________________________________________________'
   return (
     <View style={{ flexDirection: 'row' }}>
@@ -112,6 +113,10 @@ function FirmaFilaPdf({ izq, der, valorDer }: { izq: string; der: string; valorD
       </View>
       <View style={{ width: SIGN_GAP }} />
       <View style={{ width: SIGN_COL }}>
+        {/* Firma manuscrita preimpresa: flota sobre la línea, como la entrada de lápiz del Excel. */}
+        {imgDer && (
+          <Image src={imgDer} style={{ position: 'absolute', left: (SIGN_COL - 165) / 2, bottom: 12, width: 165, height: 51 }} />
+        )}
         <Text style={{ fontSize: pt(10), fontFamily: valorDer ? BOLD : REG, textAlign: 'center' }}>{valorDer ?? linea}</Text>
         <Text style={{ fontSize: pt(10), fontFamily: BOLD, textAlign: 'center', marginTop: 2 }}>{der}</Text>
       </View>

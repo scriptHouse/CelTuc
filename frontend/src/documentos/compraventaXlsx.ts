@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs'
+import { FIRMA_PADROS } from './assets'
 import { ALIGN, Bordes, blobDe, cajaCompletaEn, calibri, ctHeaderXlsx, nuevaHoja, put, setCols, setRows, STD_COLS } from './kitXlsx'
 import {
   CV_CARACTERISTICAS,
@@ -107,6 +108,10 @@ export async function construirCompraventaXlsx(d: CompraventaData, direccion?: s
   put(ws, 'F48', CV_FIRMAS.aclaracionDerValor, bold10, centro)
   put(ws, 'B49', CV_FIRMAS.aclaracionIzq, bold10, centro)
   put(ws, 'F49', CV_FIRMAS.aclaracionDer, bold10, centro)
+
+  // Firma manuscrita preimpresa sobre la línea F46 (entrada de lápiz del Excel nuevo).
+  const firmaId = wb.addImage({ base64: FIRMA_PADROS.split(',')[1], extension: 'png' })
+  ws.addImage(firmaId, { tl: { col: 5.86, row: 43.2 }, ext: { width: 165, height: 51 }, editAs: 'oneCell' })
 
   return blobDe(wb)
 }

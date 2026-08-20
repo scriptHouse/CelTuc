@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react'
+import { FIRMA_PADROS } from './assets'
 import { Body, CtHeader, Field, INK, Inline, Paper, STD_CONTENT_W, STD_PAD, STD_W, TitleBar, pt } from './kit'
 import {
   CV_CARACTERISTICAS,
@@ -88,7 +89,7 @@ export function CompraventaPaper({ datos, onChange, readOnly, direccion }: Paper
 
         {/* Firmas al pie (empujadas hacia abajo con aire) */}
         <div style={{ flex: 1, minHeight: 28 }} />
-        <FirmaFila izq={CV_FIRMAS.firmaIzq} der={CV_FIRMAS.firmaDer} />
+        <FirmaFila izq={CV_FIRMAS.firmaIzq} der={CV_FIRMAS.firmaDer} imgDer={FIRMA_PADROS} />
         <div style={{ height: 18 }} />
         <FirmaFila izq={CV_FIRMAS.aclaracionIzq} der={CV_FIRMAS.aclaracionDer} valorDer={CV_FIRMAS.aclaracionDerValor} />
         <div style={{ height: 6 }} />
@@ -138,22 +139,38 @@ function ClausulaView({
 }
 
 /** Fila de firmas: dos columnas balanceadas con línea y leyenda. */
-function FirmaFila({ izq, der, valorDer }: { izq: string; der: string; valorDer?: string }) {
+function FirmaFila({ izq, der, valorDer, imgDer }: { izq: string; der: string; valorDer?: string; imgDer?: string }) {
   const linea = '________________________________________________'
   return (
     <div style={{ display: 'flex', fontSize: pt(10) }}>
       <Columna caption={izq}>{linea}</Columna>
       <div style={{ width: SIGN_GAP }} />
-      <Columna caption={der} bold={!!valorDer}>
+      <Columna caption={der} bold={!!valorDer} img={imgDer}>
         {valorDer ?? linea}
       </Columna>
     </div>
   )
 }
 
-function Columna({ caption, bold, children }: { caption: string; bold?: boolean; children: string }) {
+function Columna({ caption, bold, img, children }: { caption: string; bold?: boolean; img?: string; children: string }) {
   return (
-    <div style={{ width: SIGN_COL, textAlign: 'center' }}>
+    <div style={{ width: SIGN_COL, textAlign: 'center', position: 'relative' }}>
+      {/* Firma manuscrita preimpresa: flota sobre la línea, como la entrada de lápiz del Excel. */}
+      {img && (
+        <img
+          src={img}
+          alt=""
+          style={{
+            position: 'absolute',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            bottom: 12,
+            width: 165,
+            height: 51,
+            pointerEvents: 'none',
+          }}
+        />
+      )}
       <div style={{ fontWeight: bold ? 700 : 400 }}>{children}</div>
       <div style={{ fontWeight: 700, marginTop: 2, letterSpacing: '0.02em' }}>{caption}</div>
     </div>
