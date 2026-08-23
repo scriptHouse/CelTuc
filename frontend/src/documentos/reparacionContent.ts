@@ -13,6 +13,8 @@ export interface ReparacionData {
   cel: string
   mail: string
   imei: string
+  /** Codigo de desbloqueo del equipo: sin el, el service no puede probarlo. */
+  pin: string
   presupuesto: string
   sena: string
   pendiente: string
@@ -31,6 +33,7 @@ export function reparacionVacia(): ReparacionData {
     cel: '',
     mail: '',
     imei: '',
+    pin: '',
     presupuesto: '',
     sena: '',
     pendiente: '',
@@ -49,6 +52,7 @@ export const REP_LABELS = {
   cel: 'CEL:',
   mail: 'MAIL:',
   imei: 'IMEI:',
+  pin: 'PIN:',
   presupuesto: 'PRESUPUESTO:',
   sena: 'SEÑA:',
   pendiente: 'PENDIENTE:',

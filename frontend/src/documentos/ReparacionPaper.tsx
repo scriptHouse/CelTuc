@@ -35,7 +35,8 @@ export function ReparacionPaper({ datos, onChange, readOnly, direccion }: PaperP
         <div style={{ width: LEFT_W, border: `${BOX}px solid ${INK}`, boxSizing: 'border-box' }}>
           <MiniRow label={REP_LABELS.cel} value={datos.cel} onChange={set('cel')} readOnly={readOnly} divider />
           <MiniRow label={REP_LABELS.mail} value={datos.mail} onChange={set('mail')} readOnly={readOnly} divider />
-          <MiniRow label={REP_LABELS.imei} value={datos.imei} onChange={set('imei')} readOnly={readOnly} />
+          <MiniRow label={REP_LABELS.imei} value={datos.imei} onChange={set('imei')} readOnly={readOnly} divider />
+          <MiniRow label={REP_LABELS.pin} value={datos.pin} onChange={set('pin')} readOnly={readOnly} />
         </div>
         <div style={{ width: GAP_W }} />
         <div style={{ width: RIGHT_W, border: `${BOX}px solid ${INK}`, boxSizing: 'border-box' }}>

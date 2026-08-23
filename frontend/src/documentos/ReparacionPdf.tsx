@@ -29,7 +29,8 @@ export function ReparacionPdf({ datos, direccion }: { datos: ReparacionData; dir
         <View style={{ width: LEFT_W, borderWidth: BOX, borderColor: INK }}>
           <PdfMiniRow label={REP_LABELS.cel} value={datos.cel} divider />
           <PdfMiniRow label={REP_LABELS.mail} value={datos.mail} divider />
-          <PdfMiniRow label={REP_LABELS.imei} value={datos.imei} />
+          <PdfMiniRow label={REP_LABELS.imei} value={datos.imei} divider />
+          <PdfMiniRow label={REP_LABELS.pin} value={datos.pin} />
         </View>
         <View style={{ width: GAP_W }} />
         <View style={{ width: RIGHT_W, borderWidth: BOX, borderColor: INK }}>
