@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { LOGO_CELTUC, ICON_FACEBOOK, ICON_INSTAGRAM } from './assets'
-import { EMPRESA } from './content'
+import { EMPRESA, lineaDireccion } from './content'
 
 /* ============================================================================
  * Kit de primitivas para los documentos de CelTuc (preview HTML rellenable).
@@ -230,7 +230,7 @@ export function CtHeader({
         <img src={LOGO_CELTUC} alt="CelTuc" width={56} height={56} style={{ display: 'block', flexShrink: 0 }} />
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: pt(16), fontWeight: 800, letterSpacing: '0.04em', lineHeight: 1 }}>{EMPRESA.nombre}</div>
-          <div style={{ fontSize: pt(8), marginTop: 2 }}>{direccion}</div>
+          <div style={{ fontSize: pt(8), marginTop: 2 }}>{lineaDireccion(direccion)}</div>
           <div style={{ fontSize: pt(9), marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
             <img src={ICON_INSTAGRAM} alt="" width={13} height={13} style={{ display: 'block' }} />
             <span>{socials === 'simple' ? 'CelTuc' : EMPRESA.instagram}</span>

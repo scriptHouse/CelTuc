@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { BOLD, PAGINA_ISO_STYLE, PdfLine, PdfPaper, paginaISO } from './kitPdf'
 import { BOX, INK, pt } from './kit'
 import { LOGO_CELTUC } from './assets'
+import { lineaDireccion } from './content'
 import { SENA, SENA_H, SENA_W, type SenaData } from './senaContent'
 
 const M = 28
@@ -17,7 +18,7 @@ export function SenaPdf({ datos, direccion = SENA.direccion }: { datos: SenaData
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <View style={{ flex: 1 }}>
                 <Image src={LOGO_CELTUC} style={{ width: 54, height: 54 }} />
-                <Text style={{ fontSize: pt(8), marginTop: 3 }}>{direccion}</Text>
+                <Text style={{ fontSize: pt(8), marginTop: 3 }}>{lineaDireccion(direccion)}</Text>
               </View>
               <View style={{ width: 226, gap: 5 }}>
                 {/* N° RECIBO y FECHA: dos cajas lado a lado (formato nuevo) */}

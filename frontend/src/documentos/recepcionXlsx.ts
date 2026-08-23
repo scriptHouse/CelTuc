@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs'
 import { LOGO_CELTUC, ICON_FACEBOOK, ICON_INSTAGRAM } from './assets'
-import { EMPRESA, GARANTIA_RUNS, LABELS } from './content'
+import { EMPRESA, GARANTIA_RUNS, LABELS, lineaDireccion } from './content'
 import type { RecepcionData } from './types'
 
 /* ============================================================================
@@ -153,7 +153,7 @@ export async function construirRecepcionXlsx(
 
   // ----- Encabezado (textos; el logo va como imagen) -----
   put('C3', '   ' + EMPRESA.nombre, calibri(16, true), { horizontal: 'left', vertical: 'middle' })
-  put('C4', direccion, calibri(8), { horizontal: 'left', vertical: 'middle' })
+  put('C4', lineaDireccion(direccion), calibri(8), { horizontal: 'left', vertical: 'middle' })
   put('C5', `   ${EMPRESA.instagram}      ${EMPRESA.facebook}`, calibri(9), { horizontal: 'left', vertical: 'middle' })
   put('F3', LABELS.cupon, calibri(11), { horizontal: 'center', vertical: 'middle' })
   put('F5', LABELS.fecha, calibri(11), { horizontal: 'center', vertical: 'middle' })

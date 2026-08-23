@@ -1,6 +1,6 @@
 import { Document, Image, Page, StyleSheet, Text, View } from '@react-pdf/renderer'
 import { LOGO_CELTUC, ICON_FACEBOOK, ICON_INSTAGRAM } from './assets'
-import { EMPRESA, GARANTIA_RUNS, LABELS, RECEPCION_TITULO } from './content'
+import { EMPRESA, GARANTIA_RUNS, LABELS, RECEPCION_TITULO, lineaDireccion } from './content'
 import type { RecepcionData } from './types'
 import {
   BOX,
@@ -137,7 +137,7 @@ function Header({ datos, direccion }: { datos: RecepcionData; direccion: string 
         <Image src={LOGO_CELTUC} style={{ width: LOGO, height: LOGO }} />
         <View>
           <Text style={{ fontSize: FONT.celtuc, fontFamily: BOLD, letterSpacing: 0.8 }}>{EMPRESA.nombre}</Text>
-          <Text style={{ fontSize: FONT.address, marginTop: 3 }}>{direccion}</Text>
+          <Text style={{ fontSize: FONT.address, marginTop: 3 }}>{lineaDireccion(direccion)}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
             <Image src={ICON_INSTAGRAM} style={{ width: SOCIAL_ICON, height: SOCIAL_ICON }} />
             <Text style={{ fontSize: FONT.social }}>{EMPRESA.instagram}</Text>

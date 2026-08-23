@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { BOLD, PAGINA_ISO_STYLE, PdfPaper, PdfTitle, REG, paginaISO } from './kitPdf'
 import { BOX, INK, pt } from './kit'
 import { LOGO_CELTUC, ICON_FACEBOOK, ICON_INSTAGRAM } from './assets'
-import { EMPRESA } from './content'
+import { EMPRESA, lineaDireccion } from './content'
 import {
   CUOTAS_LABELS,
   EQUIPO_H,
@@ -62,7 +62,7 @@ function PdfCabecera({
         <Image src={LOGO_CELTUC} style={{ width: 56, height: 56 }} />
         <View>
           <Text style={{ fontSize: pt(16), fontFamily: BOLD, letterSpacing: 0.8 }}>{EMPRESA.nombre}</Text>
-          <Text style={{ fontSize: pt(8), marginTop: 2 }}>{direccion}</Text>
+          <Text style={{ fontSize: pt(8), marginTop: 2 }}>{lineaDireccion(direccion)}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
             <Image src={ICON_INSTAGRAM} style={{ width: 13, height: 13 }} />
             <Text style={{ fontSize: pt(9) }}>{EMPRESA.instagram}</Text>

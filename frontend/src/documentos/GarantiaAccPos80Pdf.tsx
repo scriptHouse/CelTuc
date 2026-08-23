@@ -1,6 +1,6 @@
 import { Document, Image, Page, Text, View } from '@react-pdf/renderer'
 import { LOGO_CELTUC, ICON_FACEBOOK, ICON_INSTAGRAM } from './assets'
-import { EMPRESA } from './content'
+import { EMPRESA, lineaDireccion } from './content'
 import { GACC_RUNS, GACC_TITULO } from './garantiaAccContent'
 
 /* ============================================================================
@@ -35,7 +35,7 @@ export function GarantiaAccPos80Pdf({ direccion = EMPRESA.direccion }: { direcci
         <View style={{ alignItems: 'center' }}>
           <Image src={LOGO_CELTUC} style={{ width: 42, height: 42 }} />
           <Text style={{ fontSize: 13, fontFamily: BOLD, letterSpacing: 1.5, marginTop: 4 }}>{EMPRESA.nombre}</Text>
-          <Text style={{ fontSize: 7.5, marginTop: 2 }}>{direccion}</Text>
+          <Text style={{ fontSize: 7.5, marginTop: 2 }}>{lineaDireccion(direccion)}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
             <Image src={ICON_INSTAGRAM} style={{ width: 8, height: 8 }} />
             <Text style={{ fontSize: 7.5, marginLeft: 2, marginRight: 6 }}>{EMPRESA.instagram}</Text>

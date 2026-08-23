@@ -1,5 +1,6 @@
 import { ALIGN, Bordes, blobDe, calibri, nuevaHoja, put, setCols, setRows } from './kitXlsx'
 import { LOGO_CELTUC } from './assets'
+import { lineaDireccion } from './content'
 import { SENA, type SenaData } from './senaContent'
 
 const LINEAS = {
@@ -35,7 +36,7 @@ export async function construirSenaXlsx(d: SenaData, direccion: string = SENA.di
   put(ws, 'E2', d.numeroRecibo, s10, ALIGN.center)
   put(ws, 'F1', SENA.fecha, calibri(10, true), ALIGN.center)
   put(ws, 'F2', d.fecha, s10, ALIGN.center)
-  put(ws, 'C3', direccion, calibri(8), ALIGN.left)
+  put(ws, 'C3', lineaDireccion(direccion), calibri(8), ALIGN.left)
   put(ws, 'E4', SENA.noFactura, calibri(8), ALIGN.center)
 
   put(ws, 'B5', d.recibiDe.trim() || d.tel.trim() ? `RECIBI DE:${d.recibiDe}          TEL:${d.tel}` : LINEAS.recibiDe, s10, ALIGN.left)

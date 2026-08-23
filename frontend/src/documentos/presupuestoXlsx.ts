@@ -1,7 +1,7 @@
 import type { Workbook, Worksheet } from 'exceljs'
 import { ALIGN, Bordes, blobDe, calibri, nuevaHoja, put, setCols, setRows } from './kitXlsx'
 import { LOGO_CELTUC } from './assets'
-import { EMPRESA } from './content'
+import { EMPRESA, lineaDireccion } from './content'
 import {
   CUOTAS_LABELS,
   EQUIPO_LABELS,
@@ -50,7 +50,7 @@ function encabezado(
 ) {
   // Identidad (el logo flota sobre las filas 1-3).
   put(ws, 'B1', `      ${EMPRESA.nombre} ®`, calibri(16, true), ALIGN.left)
-  put(ws, 'B2', `      ${opciones.direccion}`, calibri(8), ALIGN.left)
+  put(ws, 'B2', `      ${lineaDireccion(opciones.direccion)}`, calibri(8), ALIGN.left)
   put(ws, 'B3', `      ${EMPRESA.instagram}   ${EMPRESA.facebook}`, calibri(8), ALIGN.left)
   b.caja(2, 1, 3, 3)
 

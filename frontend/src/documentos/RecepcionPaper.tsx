@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { LOGO_CELTUC, ICON_FACEBOOK, ICON_INSTAGRAM } from './assets'
-import { EMPRESA, GARANTIA_RUNS, LABELS, RECEPCION_TITULO } from './content'
+import { EMPRESA, GARANTIA_RUNS, LABELS, RECEPCION_TITULO, lineaDireccion } from './content'
 import type { RecepcionData } from './types'
 import {
   BOX,
@@ -162,7 +162,7 @@ function Header({
           <div style={{ fontSize: FONT.celtuc, fontWeight: 800, letterSpacing: '0.04em', lineHeight: 1 }}>
             {EMPRESA.nombre}
           </div>
-          <div style={{ fontSize: FONT.address, marginTop: 3 }}>{direccion}</div>
+          <div style={{ fontSize: FONT.address, marginTop: 3 }}>{lineaDireccion(direccion)}</div>
           <div style={{ fontSize: FONT.social, marginTop: 3, display: 'flex', alignItems: 'center', gap: 4 }}>
             <img src={ICON_INSTAGRAM} alt="" width={SOCIAL_ICON} height={SOCIAL_ICON} style={{ display: 'block' }} />
             <span>{EMPRESA.instagram}</span>

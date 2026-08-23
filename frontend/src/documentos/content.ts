@@ -7,9 +7,24 @@
 export const EMPRESA = {
   nombre: 'CELTUC',
   direccion: 'Salta 186 - Yerba Buena',
+  telefono: '381 347-0778',
   instagram: '@CelTuc',
   facebook: '/CelTuc',
 } as const
+
+/**
+ * Renglón de contacto del encabezado: la dirección de la sucursal elegida más
+ * el teléfono del negocio.
+ *
+ * Vive acá —y no repetido en cada plantilla— porque lo usan los TRES formatos
+ * (preview, PDF y Excel) de todos los documentos: cambiar el número una vez
+ * alcanza para que salga igual en todos. Va en la misma línea que la dirección
+ * a propósito: sumar un renglón al encabezado correría todo el papel hacia
+ * abajo, y los documentos tienen alto fijo.
+ */
+export function lineaDireccion(direccion: string): string {
+  return `${direccion} · Tel. ${EMPRESA.telefono}`
+}
 
 /**
  * Direcciones disponibles para el encabezado. Se elige una desde la página y

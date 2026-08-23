@@ -7,7 +7,7 @@ import { listarTarjetas } from '@/services/simulador'
 import { obtenerConfiguracion } from '@/services/preciosService'
 import { Area, BOX, DATA, Field, INK, Paper, Spacer, TitleBar, pt } from './kit'
 import { LOGO_CELTUC, ICON_FACEBOOK, ICON_INSTAGRAM } from './assets'
-import { EMPRESA } from './content'
+import { EMPRESA, lineaDireccion } from './content'
 import {
   CONDICIONES,
   CUOTAS_LABELS,
@@ -71,7 +71,7 @@ function Cabecera({
           <div style={{ fontSize: pt(16), fontWeight: 800, letterSpacing: '0.04em', lineHeight: 1 }}>
             {EMPRESA.nombre}
           </div>
-          <div style={{ fontSize: pt(8), marginTop: 2 }}>{direccion}</div>
+          <div style={{ fontSize: pt(8), marginTop: 2 }}>{lineaDireccion(direccion)}</div>
           <div style={{ fontSize: pt(9), marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
             <img src={ICON_INSTAGRAM} alt="" width={13} height={13} style={{ display: 'block' }} />
             <span>{EMPRESA.instagram}</span>

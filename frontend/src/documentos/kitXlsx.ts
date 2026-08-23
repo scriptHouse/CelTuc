@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs'
 import { LOGO_CELTUC, ICON_FACEBOOK, ICON_INSTAGRAM } from './assets'
-import { EMPRESA } from './content'
+import { EMPRESA, lineaDireccion } from './content'
 import type { Run } from './kit'
 
 /* ============================================================================
@@ -112,7 +112,7 @@ export function ctHeaderXlsx(
   const ig = opts.socials === 'simple' ? 'CelTuc' : EMPRESA.instagram
   const fb = opts.socials === 'simple' ? 'CelTuc' : EMPRESA.facebook
   put(ws, 'C2', '   ' + EMPRESA.nombre, calibri(16, true), ALIGN.left)
-  put(ws, 'C3', opts.direccion ?? EMPRESA.direccion, calibri(8), ALIGN.left)
+  put(ws, 'C3', lineaDireccion(opts.direccion ?? EMPRESA.direccion), calibri(8), ALIGN.left)
   put(ws, 'C4', `   ${ig}      ${fb}`, calibri(9), ALIGN.left)
   put(ws, 'F2', 'CUPON N°', calibri(11), ALIGN.center)
   put(ws, 'F3', 'FECHA', calibri(11), ALIGN.center)

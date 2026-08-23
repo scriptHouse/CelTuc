@@ -1,6 +1,6 @@
 import { ALIGN, Bordes, blobDe, cajaCompletaEn, calibri, nuevaHoja, put, richGarantia, setCols, setRows } from './kitXlsx'
 import { LOGO_CELTUC, ICON_FACEBOOK, ICON_INSTAGRAM } from './assets'
-import { EMPRESA } from './content'
+import { EMPRESA, lineaDireccion } from './content'
 import { GACC_RUNS, GACC_TITULO, type GAccData } from './garantiaAccContent'
 
 export async function construirGarantiaAccXlsx(_d: GAccData, direccion: string = EMPRESA.direccion): Promise<Blob> {
@@ -21,7 +21,7 @@ export async function construirGarantiaAccXlsx(_d: GAccData, direccion: string =
 
   put(ws, 'A1', GACC_TITULO, calibri(14, true), ALIGN.center)
   put(ws, 'C3', '   ' + EMPRESA.nombre, calibri(16, true), ALIGN.left)
-  put(ws, 'C4', direccion, calibri(8), ALIGN.left)
+  put(ws, 'C4', lineaDireccion(direccion), calibri(8), ALIGN.left)
   put(ws, 'C5', `   ${EMPRESA.instagram}      ${EMPRESA.facebook}`, calibri(9), ALIGN.left)
   ws.getCell('B6').value = richGarantia(GACC_RUNS, 8)
   ws.getCell('B6').alignment = ALIGN.justify
