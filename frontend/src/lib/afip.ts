@@ -1,4 +1,5 @@
 import type {
+  ClaseComprobante,
   CondicionEmisor,
   CondicionFiscal,
   EstadoEfectivo,
@@ -68,6 +69,21 @@ export function calcularTotales(items: ItemFactura[], tipo: TipoComprobante): To
   )
   const iva = tipo === 'C' ? 0 : neto * IVA_RATE
   return { neto, iva, total: neto + iva }
+}
+
+/**
+ * Cómo se llama el documento: «Factura B», «Nota de crédito B».
+ *
+ * Una nota de crédito hereda la LETRA de la factura que acredita, así que el
+ * nombre completo necesita las dos cosas: la clase y la letra.
+ */
+export function nombreComprobante(clase: ClaseComprobante, tipo: TipoComprobante): string {
+  return `${clase === 'nota_credito' ? 'Nota de crédito' : 'Factura'} ${tipo}`
+}
+
+/** Cuánto mueve de facturación: la nota de crédito RESTA. */
+export function signoComprobante(clase: ClaseComprobante): 1 | -1 {
+  return clase === 'nota_credito' ? -1 : 1
 }
 
 /** Número de comprobante con formato AFIP: 0001-00000007 */

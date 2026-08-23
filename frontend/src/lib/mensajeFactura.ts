@@ -20,7 +20,7 @@ export const PLANTILLA_FACTURA_DEFAULT =
   'Hola {cliente},\n' +
   'Te compartimos el comprobante de tu compra:\n' +
   '\n' +
-  '*Factura {tipo} N° {numero}* — {emisor}\n' +
+  '*{documento} {tipo} N° {numero}* — {emisor}\n' +
   'Fecha: {fecha}\n' +
   'Total: {total}\n' +
   'CAE: {cae} (vence {vto_cae})\n' +
@@ -30,6 +30,7 @@ export const PLANTILLA_FACTURA_DEFAULT =
 /** Variables disponibles para insertar en la plantilla. */
 export const VARIABLES_FACTURA: VariableMensaje[] = [
   { token: '{cliente}', etiqueta: 'Cliente', descripcion: 'Nombre del cliente (queda vacío si es Consumidor Final)', ejemplo: 'María González' },
+  { token: '{documento}', etiqueta: 'Documento', descripcion: 'Qué se envía: «Factura» o «Nota de crédito»', ejemplo: 'Factura' },
   { token: '{tipo}', etiqueta: 'Tipo', descripcion: 'Letra del comprobante (A, B o C)', ejemplo: 'B' },
   { token: '{numero}', etiqueta: 'Número', descripcion: 'Número completo, con punto de venta', ejemplo: '00003-00001234' },
   { token: '{emisor}', etiqueta: 'Emisor', descripcion: 'Nombre de la cuenta que emitió', ejemplo: 'CelTuc' },
@@ -42,6 +43,8 @@ export const VARIABLES_FACTURA: VariableMensaje[] = [
 /** Valores ya formateados con los que se rellena la plantilla. */
 export interface ValoresMensajeFactura {
   cliente: string
+  /** «Factura» o «Nota de crédito». */
+  documento: string
   tipo: string
   numero: string
   emisor: string
@@ -54,6 +57,7 @@ export interface ValoresMensajeFactura {
 /** Comprobante de muestra para la vista previa del editor. */
 export const EJEMPLO_FACTURA: ValoresMensajeFactura = {
   cliente: 'María González',
+  documento: 'Factura',
   tipo: 'B',
   numero: '00003-00001234',
   emisor: 'CelTuc',
@@ -69,6 +73,7 @@ export function valoresDeComprobante(c: Comprobante): ValoresMensajeFactura {
   return {
     // "Consumidor Final" no es un nombre: se deja vacío y `limpiar` acomoda el saludo.
     cliente: nombre.toLowerCase() === 'consumidor final' ? '' : nombre,
+    documento: c.clase === 'nota_credito' ? 'Nota de crédito' : 'Factura',
     tipo: c.tipo,
     numero: c.numero_formateado,
     emisor: c.emisor_nombre ?? '',
@@ -91,6 +96,7 @@ export function plantillaEfectiva(valorGuardado?: string): string {
 export function construirMensajeFactura(plantilla: string, v: ValoresMensajeFactura): string {
   const texto = plantilla
     .replace(/\{cliente\}/g, v.cliente)
+    .replace(/\{documento\}/g, v.documento)
     .replace(/\{tipo\}/g, v.tipo)
     .replace(/\{numero\}/g, v.numero)
     .replace(/\{emisor\}/g, v.emisor)

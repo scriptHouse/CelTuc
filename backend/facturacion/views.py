@@ -3,6 +3,8 @@
 - Emisores: leer requiere `ver_facturacion`; crear/editar/eliminar (credenciales)
   es solo de administradores (`LecturaConPermisoEscrituraAdmin`).
 - Comprobantes: leer y *emitir* requieren `ver_facturacion` (`PuedeFacturar`).
+- Notas de credito: mismo permiso que emitir (acreditar es operacion de
+  mostrador) y mismo manejo de errores.
 - La emision real la hace `arca.servicio.emitir`; si ARCA falla, devolvemos 502
   con un mensaje claro en `detail`.
 """
@@ -23,6 +25,7 @@ from usuarios.permissions import (
     LecturaConPermisoEscrituraSuperadmin,
 )
 
+from . import logica
 from .arca import servicio
 from .arca.errores import ErrorARCA
 from .clientes import registrar_cliente_desde_comprobante
@@ -41,6 +44,7 @@ from .serializers import (
     ComprobanteListSerializer,
     ConceptoFacturaSerializer,
     CrearComprobanteSerializer,
+    CrearNotaCreditoSerializer,
     EmisorSerializer,
     EnviarEmailSerializer,
     GuardarLimitesSerializer,
@@ -207,6 +211,10 @@ class ComprobanteListCreateView(generics.ListCreateAPIView):
         estado = self.request.query_params.get('estado')
         if estado:
             qs = qs.filter(estado_cobro=estado)
+        # `?clase=factura` / `?clase=nota_credito` para ver solo unas u otras.
+        clase = self.request.query_params.get('clase')
+        if clase in Comprobante.Clase.values:
+            qs = qs.filter(clase=clase)
         return qs
 
     def get_serializer_class(self):
@@ -289,6 +297,81 @@ class ComprobanteListCreateView(generics.ListCreateAPIView):
         if avisos_stock:
             cuerpo['avisos_stock'] = avisos_stock
         return Response(cuerpo, status=status.HTTP_201_CREATED)
+
+
+class NotaCreditoCreateView(APIView):
+    """POST: emite la nota de credito que acredita esta factura.
+
+    Mismo permiso que emitir (`PuedeFacturar`): acreditar es una operacion de
+    mostrador. El limite mensual NO se chequea porque una nota de credito RESTA
+    de lo facturado del mes: nunca lo hace superar el tope.
+
+    Los motivos por los que no se puede acreditar (ya esta acreditada del todo,
+    el importe se pasa del saldo, la fecha es anterior a la factura) se
+    responden con 400 y un mensaje claro ANTES de hablar con ARCA; los fallos de
+    ARCA siguen siendo 502, igual que al facturar.
+    """
+
+    permission_classes = [PuedeFacturar]
+
+    def post(self, request, pk):
+        origen = get_object_or_404(
+            Comprobante.objects.select_related('emisor').prefetch_related('items'), pk=pk,
+        )
+        entrada = CrearNotaCreditoSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        datos = dict(entrada.validated_data)
+
+        problema = _revisar_nota_credito(origen, datos)
+        if problema:
+            return Response({'detail': problema}, status=status.HTTP_400_BAD_REQUEST)
+
+        usuario = request.user if request.user.is_authenticated else None
+        try:
+            nota = servicio.emitir_nota_credito(origen, datos, usuario=usuario)
+        except ErrorARCA as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        except Exception as exc:  # nunca un 500 opaco al acreditar
+            logger.exception('Error inesperado al emitir la nota de credito de %s', origen.pk)
+            return Response(
+                {'detail': f'Error inesperado al emitir la nota de credito: {exc}'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        salida = ComprobanteDetailSerializer(nota, context=self.get_serializer_context())
+        return Response(salida.data, status=status.HTTP_201_CREATED)
+
+    def get_serializer_context(self):
+        return {'request': self.request, 'view': self}
+
+
+def _revisar_nota_credito(origen, datos) -> str:
+    """Devuelve el motivo por el que NO se puede acreditar, o '' si se puede."""
+    from decimal import Decimal
+
+    if origen.es_nota_credito:
+        return 'Una nota de credito no se puede acreditar.'
+    if not origen.cae:
+        return 'La factura no tiene CAE: no hay nada que acreditar en ARCA.'
+    saldo = origen.saldo_acreditable
+    if saldo <= 0:
+        return (
+            f'La factura {origen.numero_formateado} ya esta acreditada por completo '
+            f'({origen.acreditado}).'
+        )
+    totales = logica.calcular_totales(
+        datos['items'], origen.tipo, origen.alicuota_iva or Decimal('21'),
+    )
+    if totales['total'] <= 0:
+        return 'El total de la nota de credito debe ser mayor a cero.'
+    if totales['total'] > saldo + Decimal('0.01'):
+        return (
+            f'La nota de credito ({totales["total"]}) supera lo que queda por acreditar '
+            f'de la factura ({saldo}).'
+        )
+    fecha = datos.get('fecha')
+    if fecha and fecha < origen.fecha:
+        return 'La nota de credito no puede tener fecha anterior a la factura.'
+    return ''
 
 
 class ResumenMensualView(APIView):

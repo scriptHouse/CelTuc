@@ -9,6 +9,7 @@ import {
   Clock,
   Download,
   Eye,
+  FileMinus2,
   FileSpreadsheet,
   FileText,
   Gauge,
@@ -31,6 +32,7 @@ import {
 import type { ReactNode } from 'react'
 import type {
   CajaRegistradora,
+  ClaseComprobante,
   Cliente,
   Comprobante,
   ConceptoFactura,
@@ -84,6 +86,7 @@ import {
 } from '@/lib/conceptoGenerico'
 import { AperturaModal, type AperturaValues } from '@/components/caja/AperturaModal'
 import { CuentaCard } from '@/components/facturacion/CuentaCard'
+import { NotaCreditoModal } from '@/components/facturacion/NotaCreditoModal'
 import { ExportarFacturacionModal } from '@/components/facturacion/exportar/ExportarFacturacionModal'
 import { LimiteUsoBar } from '@/components/facturacion/LimiteUsoBar'
 import {
@@ -92,6 +95,8 @@ import {
   CONDICION_CORTA,
   CONDICION_LABEL,
   IVA_RATE,
+  nombreComprobante,
+  signoComprobante,
   tipoComprobante,
 } from '@/lib/afip'
 import { fecha, formatCuit, money, money0, num, pad } from '@/lib/format'
@@ -181,7 +186,12 @@ function formatMiles(value: string): string {
   return d ? Number(d).toLocaleString('es-AR') : ''
 }
 
-/** Estado visible de un comprobante: pagada, vencida o pendiente. */
+/**
+ * Estado visible de un comprobante: pagada, vencida o pendiente.
+ *
+ * Solo tiene sentido en las FACTURAS: una nota de crédito no se cobra, acredita
+ * (la lista le muestra su propia etiqueta).
+ */
 function estadoComprobante(c: Comprobante): EstadoEfectivo {
   if (c.estado_cobro === 'pagada') return 'pagada'
   if (c.vencimiento) {
@@ -208,7 +218,7 @@ async function descargarFacturaPdf(c: Comprobante) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `factura-${c.tipo}-${c.numero_formateado}.pdf`
+  a.download = `${c.clase === 'nota_credito' ? 'nota-credito' : 'factura'}-${c.tipo}-${c.numero_formateado}.pdf`
   document.body.appendChild(a)
   a.click()
   a.remove()
@@ -285,6 +295,10 @@ export function FacturacionPage() {
   const [limitesModal, setLimitesModal] = useState(false)
   const [conceptoModal, setConceptoModal] = useState(false)
   const [detalleId, setDetalleId] = useState<number | null>(null)
+  // Factura que se está por acreditar (abre el modal de nota de crédito).
+  const [notaCreditoId, setNotaCreditoId] = useState<number | null>(null)
+  // Filtro de la lista: todo, solo facturas o solo notas de crédito.
+  const [claseFiltro, setClaseFiltro] = useState<'todos' | ClaseComprobante>('todos')
   // Studio de exportación: arma la planilla del mes (formato de siempre) con lo
   // facturado con CAE. Son números del negocio: solo administradores.
   const [exportarModal, setExportarModal] = useState(false)
@@ -504,21 +518,44 @@ export function FacturacionPage() {
     onError: (e: Error) => toast.error('No se pudo probar la conexión', e.message),
   })
 
+  /**
+   * Los números de la cuenta, NETOS de notas de crédito: una nota devuelve
+   * plata, así que resta de lo facturado, de lo cobrado y de lo pendiente (en el
+   * balde que corresponda). `acreditado` es cuánto se devolvió, para poder
+   * decirlo debajo del total.
+   */
   const stats = useMemo(() => {
-    const total = comprobantes.reduce((a, c) => a + c.total, 0)
+    const firmado = (c: Comprobante) => c.total * signoComprobante(c.clase)
+    const total = comprobantes.reduce((a, c) => a + firmado(c), 0)
     const cobrado = comprobantes
       .filter((c) => c.estado_cobro === 'pagada')
-      .reduce((a, c) => a + c.total, 0)
+      .reduce((a, c) => a + firmado(c), 0)
     const pendiente = comprobantes
       .filter((c) => c.estado_cobro !== 'pagada')
+      .reduce((a, c) => a + firmado(c), 0)
+    const acreditado = comprobantes
+      .filter((c) => c.clase === 'nota_credito')
       .reduce((a, c) => a + c.total, 0)
-    return { total, cobrado, pendiente, cantidad: comprobantes.length }
+    return { total, cobrado, pendiente, acreditado, cantidad: comprobantes.length }
   }, [comprobantes])
 
+  /** Hay notas de crédito en la cuenta: recién ahí aparece el filtro. */
+  const hayNotas = useMemo(
+    () => comprobantes.some((c) => c.clase === 'nota_credito'),
+    [comprobantes],
+  )
+  const visibles = useMemo(
+    () => (claseFiltro === 'todos' ? comprobantes : comprobantes.filter((c) => c.clase === claseFiltro)),
+    [comprobantes, claseFiltro],
+  )
+
   async function handleEliminar(c: Comprobante) {
+    const esNota = c.clase === 'nota_credito'
     const ok = await confirm({
-      title: `¿Quitar la factura ${c.tipo}?`,
-      description: `N° ${c.numero_formateado} · ${money(c.total)}. No anula el comprobante en ARCA (para eso se emite una Nota de Crédito); solo lo oculta de la lista.`,
+      title: `¿Quitar la ${esNota ? 'nota de crédito' : 'factura'} ${c.tipo}?`,
+      description: esNota
+        ? `N° ${c.numero_formateado} · ${money(c.total)}. Solo la oculta de la lista: el CAE existe igual en ARCA y su importe sigue acreditado sobre la factura.`
+        : `N° ${c.numero_formateado} · ${money(c.total)}. No anula el comprobante en ARCA (para eso se emite una nota de crédito); solo lo oculta de la lista.`,
       confirmLabel: 'Quitar',
       tone: 'danger',
     })
@@ -702,10 +739,47 @@ export function FacturacionPage() {
       {/* Stats del emisor */}
       {emisor && (
         <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatCard className="ct-stagger-item" style={ctStagger(0)} label="Facturado" value={money(stats.total)} icon={ReceiptText} />
+          <StatCard
+            className="ct-stagger-item"
+            style={ctStagger(0)}
+            label="Facturado"
+            value={money(stats.total)}
+            hint={stats.acreditado > 0 ? `Neto de ${money(stats.acreditado)} acreditados` : undefined}
+            icon={ReceiptText}
+          />
           <StatCard className="ct-stagger-item" style={ctStagger(1)} label="Cobrado" value={money(stats.cobrado)} icon={CheckCircle2} />
           <StatCard className="ct-stagger-item" style={ctStagger(2)} label="Pendiente" value={money(stats.pendiente)} icon={Wallet} />
           <StatCard className="ct-stagger-item" style={ctStagger(3)} label="Comprobantes" value={num(stats.cantidad)} icon={FileText} />
+        </div>
+      )}
+
+      {/* Filtro por clase: aparece recién cuando la cuenta tiene alguna nota de
+          crédito, para no sumar ruido a quien solo factura. */}
+      {emisor && hayNotas && !loadingComprobantes && (
+        <div className="ct-rise mb-3 flex flex-wrap items-center gap-1.5">
+          {([
+            { valor: 'todos' as const, label: 'Todos' },
+            { valor: 'factura' as const, label: 'Facturas' },
+            { valor: 'nota_credito' as const, label: 'Notas de crédito' },
+          ]).map((op) => (
+            <button
+              key={op.valor}
+              type="button"
+              onClick={() => setClaseFiltro(op.valor)}
+              aria-pressed={claseFiltro === op.valor}
+              className={cn(
+                'rounded-full border px-3.5 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900',
+                claseFiltro === op.valor
+                  ? 'border-ink-950 bg-ink-950 text-on-ink'
+                  : 'border-line text-ink-500 hover:border-line-strong hover:text-ink-900',
+              )}
+            >
+              {op.label}
+            </button>
+          ))}
+          <span className="tnum ml-auto text-xs text-ink-400">
+            {num(visibles.length)} de {num(comprobantes.length)}
+          </span>
         </div>
       )}
 
@@ -725,57 +799,119 @@ export function FacturacionPage() {
               </Button>
             }
           />
+        ) : visibles.length === 0 ? (
+          <EmptyState
+            icon={ReceiptText}
+            title={claseFiltro === 'nota_credito' ? 'Sin notas de crédito' : 'Sin facturas'}
+            description="No hay comprobantes de este tipo en la cuenta."
+            action={
+              <Button variant="outline" onClick={() => setClaseFiltro('todos')}>
+                Ver todos
+              </Button>
+            }
+          />
         ) : (
           <Card className="ct-rise overflow-hidden">
             <ul className="divide-y divide-line">
-              {comprobantes.map((c, i) => (
-                <li
-                  key={c.id}
-                  className="ct-stagger-fade flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-ink-50 sm:px-5"
-                  style={ctStagger(i)}
-                >
-                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-ink-950 text-sm font-bold text-on-ink">
-                    {c.tipo}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-ink-900">{c.cliente_nombre}</p>
-                    <p className="tnum truncate text-xs text-ink-400">
-                      {c.numero_formateado} · {fecha(c.fecha)}
-                    </p>
-                  </div>
-                  <div className="hidden shrink-0 text-right sm:block">
-                    <p className="tnum text-sm font-semibold text-ink-900">{money(c.total)}</p>
-                    {c.cae ? (
-                      <p className="tnum text-xs text-ink-400">CAE {c.cae}</p>
-                    ) : (
-                      <p className="text-xs text-ink-400">sin CAE</p>
-                    )}
-                  </div>
-                  <div className="w-[104px] shrink-0 text-center">
-                    <FacturaEstadoBadge estado={estadoComprobante(c)} />
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <IconBtn label="Ver detalle" onClick={() => setDetalleId(c.id)}>
-                      <Eye className="h-4 w-4" />
-                    </IconBtn>
-                    <IconBtn label="Descargar PDF" onClick={() => handleDescargar(c)}>
-                      <Download className="h-4 w-4" />
-                    </IconBtn>
-                    {c.estado_cobro === 'pendiente' ? (
-                      <IconBtn label="Marcar pagada" onClick={() => estadoMut.mutate({ id: c.id, estado: 'pagada' })}>
-                        <CheckCircle2 className="h-4 w-4" />
-                      </IconBtn>
-                    ) : (
-                      <IconBtn label="Marcar pendiente" onClick={() => estadoMut.mutate({ id: c.id, estado: 'pendiente' })}>
-                        <Clock className="h-4 w-4" />
-                      </IconBtn>
-                    )}
-                    <IconBtn label="Quitar" onClick={() => handleEliminar(c)}>
-                      <Trash2 className="h-4 w-4" />
-                    </IconBtn>
-                  </div>
-                </li>
-              ))}
+              {visibles.map((c, i) => {
+                // Una nota de crédito se lee distinto en toda la fila: cuadro
+                // «NC» en vez de la letra, importe en negativo y su propia
+                // etiqueta (no se cobra, acredita).
+                const esNota = c.clase === 'nota_credito'
+                return (
+                  <li
+                    key={c.id}
+                    className="ct-stagger-fade flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3.5 transition-colors hover:bg-ink-50 sm:flex-nowrap sm:px-5"
+                    style={ctStagger(i)}
+                  >
+                    <span
+                      className={cn(
+                        'grid h-10 w-10 shrink-0 place-items-center rounded-xl text-sm font-bold',
+                        esNota
+                          ? 'border border-line-strong bg-surface text-ink-700'
+                          : 'bg-ink-950 text-on-ink',
+                      )}
+                      title={nombreComprobante(c.clase, c.tipo)}
+                    >
+                      {esNota ? 'NC' : c.tipo}
+                    </span>
+                    <div className="min-w-0 flex-1 basis-40">
+                      <p className="truncate text-sm font-medium text-ink-900">{c.cliente_nombre}</p>
+                      <p className="tnum truncate text-xs text-ink-400">
+                        {esNota && <span className="font-medium text-ink-500">NC {c.tipo} · </span>}
+                        {c.numero_formateado} · {fecha(c.fecha)}
+                      </p>
+                      {/* En el celular el importe va acá: la columna de la
+                          derecha no entra sin estrangular el nombre. */}
+                      <p
+                        className={cn(
+                          'tnum mt-0.5 text-sm font-semibold sm:hidden',
+                          esNota ? 'text-ink-500' : 'text-ink-900',
+                        )}
+                      >
+                        {esNota ? `− ${money(c.total)}` : money(c.total)}
+                      </p>
+                    </div>
+                    <div className="hidden shrink-0 text-right sm:block">
+                      <p
+                        className={cn(
+                          'tnum text-sm font-semibold',
+                          esNota ? 'text-ink-500' : 'text-ink-900',
+                        )}
+                      >
+                        {esNota ? `− ${money(c.total)}` : money(c.total)}
+                      </p>
+                      {c.cae ? (
+                        <p className="tnum text-xs text-ink-400">CAE {c.cae}</p>
+                      ) : (
+                        <p className="text-xs text-ink-400">sin CAE</p>
+                      )}
+                    </div>
+                    <div className="ml-auto flex shrink-0 items-center gap-2">
+                      <div className="w-[104px] text-center">
+                        {esNota ? (
+                          <Badge tone="outline">Crédito</Badge>
+                        ) : (
+                          <FacturaEstadoBadge estado={estadoComprobante(c)} />
+                        )}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <IconBtn label="Ver detalle" onClick={() => setDetalleId(c.id)}>
+                          <Eye className="h-4 w-4" />
+                        </IconBtn>
+                        <IconBtn label="Descargar PDF" onClick={() => handleDescargar(c)}>
+                          <Download className="h-4 w-4" />
+                        </IconBtn>
+                        {/* Acreditar es cosa de facturas: una nota no se acredita. */}
+                        {!esNota && (
+                          <IconBtn label="Nota de crédito" onClick={() => setNotaCreditoId(c.id)}>
+                            <FileMinus2 className="h-4 w-4" />
+                          </IconBtn>
+                        )}
+                        {!esNota &&
+                          (c.estado_cobro === 'pendiente' ? (
+                            <IconBtn
+                              label="Marcar pagada"
+                              onClick={() => estadoMut.mutate({ id: c.id, estado: 'pagada' })}
+                            >
+                              <CheckCircle2 className="h-4 w-4" />
+                            </IconBtn>
+                          ) : (
+                            <IconBtn
+                              label="Marcar pendiente"
+                              onClick={() => estadoMut.mutate({ id: c.id, estado: 'pendiente' })}
+                            >
+                              <Clock className="h-4 w-4" />
+                            </IconBtn>
+                          ))}
+                        <IconBtn label="Quitar" onClick={() => handleEliminar(c)}>
+                          <Trash2 className="h-4 w-4" />
+                        </IconBtn>
+                      </div>
+                    </div>
+                  </li>
+                )
+              })}
             </ul>
           </Card>
         ))}
@@ -819,7 +955,28 @@ export function FacturacionPage() {
         onSubmit={(input) => emisorMut.mutate({ id: emisorEdit?.id ?? null, input })}
       />
 
-      <DetalleModal id={detalleId} onClose={() => setDetalleId(null)} />
+      <DetalleModal
+        id={detalleId}
+        onClose={() => setDetalleId(null)}
+        onNotaCredito={(facturaId) => {
+          setDetalleId(null)
+          setNotaCreditoId(facturaId)
+        }}
+        onVerComprobante={(otro) => setDetalleId(otro)}
+      />
+
+      {/* Nota de crédito: se abre desde la fila de la factura o desde su detalle. */}
+      <NotaCreditoModal
+        facturaId={notaCreditoId}
+        onClose={() => setNotaCreditoId(null)}
+        onEmitida={(nota) => {
+          invalidarComprobantes()
+          // El detalle de la factura acreditada cambió (saldo y lista de notas).
+          queryClient.invalidateQueries({ queryKey: ['comprobante'] })
+          setNotaCreditoId(null)
+          setDetalleId(nota.id)
+        }}
+      />
 
       {/* Studio de exportación: la planilla mensual de facturación. Arranca en
           el mes en curso y con la cuenta que se está mirando. */}
@@ -1119,7 +1276,19 @@ interface PrefillFactura {
 
 // ===== Detalle (con CAE y QR) =====
 
-function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void }) {
+function DetalleModal({
+  id,
+  onClose,
+  onNotaCredito,
+  onVerComprobante,
+}: {
+  id: number | null
+  onClose: () => void
+  /** Acreditar ESTA factura (abre el modal de nota de crédito). */
+  onNotaCredito: (facturaId: number) => void
+  /** Saltar a otro comprobante: de una nota a la factura que acredita, y al revés. */
+  onVerComprobante: (id: number) => void
+}) {
   const toast = useToast()
   const [descargando, setDescargando] = useState(false)
   const [email, setEmail] = useState('')
@@ -1263,7 +1432,7 @@ function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void 
               <div>
                 <h2 className="tnum text-base font-semibold text-ink-950">{c.numero_formateado}</h2>
                 <p className="text-xs text-ink-400">
-                  {c.emisor_nombre} · Factura {c.tipo}
+                  {c.emisor_nombre} · {nombreComprobante(c.clase, c.tipo)}
                 </p>
               </div>
             </div>
@@ -1278,6 +1447,30 @@ function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void 
           </div>
 
           <div className="space-y-5 overflow-y-auto px-5 py-5">
+            {/* De qué factura viene esta nota de crédito, con acceso directo. */}
+            {c.clase === 'nota_credito' && c.asociado && (
+              <div className="flex flex-col gap-2.5 rounded-xl border border-line bg-surface-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="flex items-start gap-2 text-sm leading-relaxed text-ink-700">
+                  <FileMinus2 className="mt-0.5 h-4 w-4 shrink-0 text-ink-500" aria-hidden />
+                  <span>
+                    Esta nota de crédito acredita la{' '}
+                    <strong className="text-ink-950">
+                      Factura {c.asociado.tipo} {c.asociado.numero_formateado}
+                    </strong>{' '}
+                    del {fecha(c.asociado.fecha)}, por {money(c.asociado.total)}.
+                  </span>
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => onVerComprobante(c.asociado!.id)}
+                >
+                  Ver la factura
+                </Button>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-4 text-sm">
               <Dato label="Cliente" value={c.cliente_nombre} />
               <Dato label="Condición" value={CONDICION_LABEL[c.cliente_condicion]} />
@@ -1290,7 +1483,16 @@ function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void 
                 label="Email"
                 value={<span className="block truncate">{c.cliente_email || '—'}</span>}
               />
-              <Dato label="Estado" value={<FacturaEstadoBadge estado={estadoComprobante(c)} />} />
+              <Dato
+                label="Estado"
+                value={
+                  c.clase === 'nota_credito' ? (
+                    <Badge tone="outline">Crédito emitido</Badge>
+                  ) : (
+                    <FacturaEstadoBadge estado={estadoComprobante(c)} />
+                  )
+                }
+              />
               <Dato label="Emisión" value={fecha(c.fecha)} />
               <Dato label="Vencimiento" value={c.vencimiento ? fecha(c.vencimiento) : '—'} />
             </div>
@@ -1323,7 +1525,9 @@ function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void 
                 por Efectivo / Transferencias / Tarjetas al exportar. */}
             <div className="flex flex-col gap-2.5 rounded-xl border border-line bg-surface-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-ink-800">Cobrado con</p>
+                <p className="text-sm font-medium text-ink-800">
+                  {c.clase === 'nota_credito' ? 'Devuelto con' : 'Cobrado con'}
+                </p>
                 <p className="text-xs leading-relaxed text-ink-400">
                   Dato interno para el resumen mensual. No viaja a ARCA ni cambia el comprobante.
                 </p>
@@ -1381,6 +1585,46 @@ function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void 
             {c.observaciones && (
               <p className="rounded-xl bg-ink-50 px-4 py-3 text-sm text-ink-600">{c.observaciones}</p>
             )}
+
+            {/* Lo que ya se acreditó de esta factura y lo que queda. */}
+            {c.clase !== 'nota_credito' && (c.notas_credito?.length ?? 0) > 0 && (
+              <section className="rounded-xl border border-line">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-2.5">
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-400">
+                    Notas de crédito
+                  </p>
+                  <p className="tnum text-xs text-ink-500">
+                    Acreditado <strong className="text-ink-900">{money(c.acreditado ?? 0)}</strong>
+                    {' · '}queda{' '}
+                    <strong className="text-ink-900">{money(c.saldo_acreditable ?? 0)}</strong>
+                  </p>
+                </div>
+                <ul className="divide-y divide-line">
+                  {(c.notas_credito ?? []).map((n) => (
+                    <li
+                      key={n.id}
+                      className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-sm"
+                    >
+                      <span className="tnum font-medium text-ink-900">
+                        NC {n.tipo} {n.numero_formateado}
+                      </span>
+                      <span className="tnum text-xs text-ink-400">{fecha(n.fecha)}</span>
+                      {n.oculto && <Badge tone="outline">Oculta</Badge>}
+                      <span className="tnum ml-auto font-semibold text-ink-500">
+                        − {money(n.total)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onVerComprobante(n.id)}
+                        className="rounded-lg px-2 py-1 text-xs font-medium text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
+                      >
+                        Ver
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
           </div>
 
           <div className="space-y-3 border-t border-line px-5 py-4">
@@ -1426,10 +1670,17 @@ function DetalleModal({ id, onClose }: { id: number | null; onClose: () => void 
                 editás el texto del mensaje.
               </p>
             </div>
-            <div className="flex justify-end gap-2.5">
+            <div className="flex flex-col-reverse gap-2.5 sm:flex-row sm:justify-end">
               <Button variant="outline" onClick={onClose}>
                 Cerrar
               </Button>
+              {/* Acreditar: solo en facturas, y solo si queda saldo. */}
+              {c.clase !== 'nota_credito' && (c.saldo_acreditable ?? 0) > 0 && (
+                <Button variant="outline" onClick={() => onNotaCredito(c.id)}>
+                  <FileMinus2 className="h-4 w-4" />
+                  Nota de crédito
+                </Button>
+              )}
               <Button onClick={descargar} disabled={descargando}>
                 <Download className="h-4 w-4" />
                 {descargando ? 'Generando…' : 'Descargar PDF'}

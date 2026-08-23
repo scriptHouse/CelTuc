@@ -25,14 +25,25 @@ TIMEOUT = 30
 
 # --- Tablas de codigos -------------------------------------------------------
 
-# Tipo de comprobante (CbteTipo) segun la letra. Las facturas son las unicas que
-# emitimos por ahora; las notas de credito quedan para una etapa siguiente.
+# Tipo de comprobante (CbteTipo) segun la letra, para cada clase. ARCA numera
+# por separado cada (punto de venta, CbteTipo): la Factura B y la Nota de credito
+# B llevan contadores distintos.
 TIPO_CBTE = {
     'A': 1,    # Factura A
     'B': 6,    # Factura B
     'C': 11,   # Factura C
 }
-# Notas de credito (referencia para mas adelante): A=3, B=8, C=13.
+TIPO_CBTE_NC = {
+    'A': 3,    # Nota de credito A
+    'B': 8,    # Nota de credito B
+    'C': 13,   # Nota de credito C
+}
+
+
+def codigo_comprobante(clase: str, letra: str) -> int:
+    """CbteTipo de ARCA para una clase ('factura' / 'nota_credito') y su letra."""
+    tabla = TIPO_CBTE_NC if clase == 'nota_credito' else TIPO_CBTE
+    return tabla[letra]
 
 # Tipo de documento del receptor (DocTipo).
 DOC_TIPO = {

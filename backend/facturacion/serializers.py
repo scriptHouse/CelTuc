@@ -211,9 +211,10 @@ class ComprobanteListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Comprobante
         fields = (
-            'id', 'emisor', 'emisor_nombre', 'tipo', 'punto_venta', 'numero',
+            'id', 'emisor', 'emisor_nombre', 'clase', 'tipo', 'punto_venta', 'numero',
             'numero_formateado', 'cliente_nombre', 'cliente_condicion', 'fecha',
             'vencimiento', 'total', 'estado_cobro', 'medio_pago', 'cae',
+            'comprobante_asociado',
         )
 
 
@@ -228,22 +229,69 @@ class ComprobanteDetailSerializer(serializers.ModelSerializer):
     total = serializers.DecimalField(max_digits=14, decimal_places=2, coerce_to_string=False)
     alicuota_iva = serializers.DecimalField(max_digits=5, decimal_places=2, coerce_to_string=False)
     qr = serializers.SerializerMethodField()
+    acreditado = serializers.DecimalField(
+        max_digits=14, decimal_places=2, read_only=True, coerce_to_string=False,
+    )
+    saldo_acreditable = serializers.DecimalField(
+        max_digits=14, decimal_places=2, read_only=True, coerce_to_string=False,
+    )
+    asociado = serializers.SerializerMethodField()
+    notas_credito = serializers.SerializerMethodField()
 
     class Meta:
         model = Comprobante
         fields = (
             'id', 'emisor', 'emisor_nombre', 'emisor_cuit', 'emisor_condicion',
-            'tipo', 'concepto', 'punto_venta',
+            'clase', 'tipo', 'concepto', 'punto_venta',
             'numero', 'numero_formateado', 'cliente_nombre', 'cliente_doc_tipo',
             'cliente_doc_numero', 'cliente_condicion', 'cliente_telefono', 'cliente_email',
             'fecha', 'vencimiento',
             'alicuota_iva', 'neto', 'iva', 'total', 'cae', 'cae_vencimiento',
             'qr_url', 'qr', 'estado_cobro', 'medio_pago', 'observaciones', 'items', 'creado',
+            'comprobante_asociado', 'asociado', 'notas_credito',
+            'acreditado', 'saldo_acreditable',
         )
 
     def get_qr(self, obj):
         """Imagen del QR como data URI (o None si falta la libreria)."""
         return qr.imagen_data_uri(obj.qr_url)
+
+    def get_asociado(self, obj):
+        """La factura que esta nota de credito acredita (None en las facturas)."""
+        origen = obj.comprobante_asociado
+        if origen is None:
+            return None
+        return {
+            'id': origen.pk,
+            'clase': origen.clase,
+            'tipo': origen.tipo,
+            'numero_formateado': origen.numero_formateado,
+            'fecha': origen.fecha.isoformat(),
+            'total': float(origen.total or 0),
+        }
+
+    def get_notas_credito(self, obj):
+        """Las notas de credito de esta factura, de la mas nueva a la mas vieja.
+
+        Incluye las OCULTAS de la lista (marcadas con ``oculto``): su CAE existe
+        igual y su importe sigue descontando del saldo acreditable, asi que
+        esconderlas aca dejaria un saldo que no cierra con lo que se ve.
+        """
+        if obj.es_nota_credito:
+            return []
+        notas = Comprobante.todos.filter(comprobante_asociado_id=obj.pk).order_by('-fecha', '-id')
+        return [
+            {
+                'id': n.pk,
+                'tipo': n.tipo,
+                'numero_formateado': n.numero_formateado,
+                'fecha': n.fecha.isoformat(),
+                'total': float(n.total or 0),
+                'cae': n.cae,
+                'oculto': bool(n.borrado),
+            }
+            for n in notas
+        ]
 
 
 class ActualizarComprobanteSerializer(serializers.ModelSerializer):
@@ -253,6 +301,48 @@ class ActualizarComprobanteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Comprobante
         fields = ('estado_cobro', 'medio_pago', 'observaciones')
+
+
+class ItemNotaCreditoSerializer(serializers.Serializer):
+    """Un renglon de la nota de credito. El precio es NETO, como en la factura."""
+
+    descripcion = serializers.CharField(max_length=200)
+    cantidad = serializers.DecimalField(
+        max_digits=12, decimal_places=2, min_value=Decimal('0'), coerce_to_string=False,
+    )
+    precio_unitario = serializers.DecimalField(
+        max_digits=14, decimal_places=2, min_value=Decimal('0'), coerce_to_string=False,
+    )
+
+    def validate_descripcion(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError('La descripcion es obligatoria.')
+        return value
+
+
+class CrearNotaCreditoSerializer(serializers.Serializer):
+    """Entrada para acreditar una factura ya emitida.
+
+    Lo unico que se elige son los renglones a acreditar, la fecha, el motivo y
+    con que se devuelve la plata. El receptor, la letra, la alicuota y el
+    concepto NO: salen de la factura acreditada (ARCA cruza esos datos con el
+    comprobante asociado).
+    """
+
+    items = ItemNotaCreditoSerializer(many=True)
+    fecha = serializers.DateField(required=False)
+    observaciones = serializers.CharField(required=False, allow_blank=True)
+    # Con que se devuelve la plata (interno, no viaja a ARCA). Vacio = el mismo
+    # medio de la factura acreditada.
+    medio_pago = serializers.ChoiceField(
+        choices=Comprobante.MedioPago.choices, required=False, allow_blank=True, default='',
+    )
+
+    def validate_items(self, value):
+        if not value:
+            raise serializers.ValidationError('Agrega al menos un item para acreditar.')
+        return value
 
 
 class EnviarEmailSerializer(serializers.Serializer):

@@ -245,13 +245,29 @@ class TicketAcceso(models.Model):
 
 
 class Comprobante(ModeloBase):
-    """Un comprobante emitido (Factura A, B o C) con su CAE.
+    """Un comprobante emitido con su CAE: una factura o una nota de credito.
+
+    Las dos clases viven en esta tabla porque son el mismo documento fiscal
+    (mismo CAE, mismo QR, mismos items, mismo PDF); lo que cambia es el codigo
+    que se le pide a ARCA y el SIGNO: una nota de credito RESTA de lo facturado.
+    Por eso hay dos campos y no uno:
+
+    - ``clase``: factura o nota de credito.
+    - ``tipo``: la letra (A, B o C), que se hereda de la factura acreditada.
+
+    Cada combinacion lleva su propia numeracion en ARCA (una Factura B 0001-15 y
+    una Nota de credito B 0001-15 son documentos distintos), por eso la clase
+    entra en la unicidad del numero.
 
     Una vez emitido es inmutable a nivel fiscal: el CAE es la autorizacion de
-    ARCA. Lo unico editable es el estado de cobro (interno, no fiscal). El borrado
-    es logico (oculta de la lista) y NO anula el comprobante en ARCA: para eso se
-    emite una Nota de Credito.
+    ARCA. Lo unico editable es el estado de cobro (interno, no fiscal). El
+    borrado es logico (oculta de la lista) y NO anula nada en ARCA: para anular
+    una factura se emite una nota de credito.
     """
+
+    class Clase(models.TextChoices):
+        FACTURA = 'factura', 'Factura'
+        NOTA_CREDITO = 'nota_credito', 'Nota de crédito'
 
     class Tipo(models.TextChoices):
         A = 'A', 'Factura A'
@@ -302,7 +318,19 @@ class Comprobante(ModeloBase):
         related_name='comprobantes',
         verbose_name='emisor',
     )
+    clase = models.CharField(
+        'clase', max_length=20, choices=Clase.choices, default=Clase.FACTURA, db_index=True,
+        help_text='Factura o nota de credito. La letra (A/B/C) va aparte, en "tipo".',
+    )
     tipo = models.CharField('tipo', max_length=1, choices=Tipo.choices)
+    # Que factura acredita esta nota de credito (vacio en las facturas). Es
+    # PROTECT porque en la app el borrado es logico: si alguna vez se borrara de
+    # verdad una factura acreditada, la base tiene que frenarlo, no dejar la nota
+    # de credito colgada.
+    comprobante_asociado = models.ForeignKey(
+        'self', on_delete=models.PROTECT, null=True, blank=True,
+        related_name='notas_credito', verbose_name='factura acreditada',
+    )
     concepto = models.PositiveSmallIntegerField(
         'concepto', choices=Concepto.choices, default=Concepto.PRODUCTOS,
     )
@@ -365,19 +393,78 @@ class Comprobante(ModeloBase):
         verbose_name_plural = 'comprobantes'
         ordering = ('-fecha', '-numero', '-id')
         constraints = [
+            # ARCA numera por separado cada (punto de venta, tipo de comprobante):
+            # la Factura B 0001-00000015 y la Nota de credito B 0001-00000015 son
+            # documentos distintos, asi que la clase entra en la unicidad.
             models.UniqueConstraint(
-                fields=('emisor', 'tipo', 'punto_venta', 'numero'),
+                fields=('emisor', 'clase', 'tipo', 'punto_venta', 'numero'),
                 name='uniq_comprobante_numero',
             ),
         ]
 
     def __str__(self):
-        return f'Factura {self.tipo} {self.numero_formateado}'
+        return f'{self.nombre_comprobante} {self.numero_formateado}'
 
     @property
     def numero_formateado(self) -> str:
         """Numero con formato AFIP: 0001-00000007."""
         return f'{self.punto_venta:04d}-{self.numero:08d}'
+
+    @property
+    def es_nota_credito(self) -> bool:
+        return self.clase == self.Clase.NOTA_CREDITO
+
+    @property
+    def signo(self) -> int:
+        """+1 la factura suma a lo facturado; -1 la nota de credito lo resta."""
+        return -1 if self.es_nota_credito else 1
+
+    @property
+    def total_firmado(self) -> Decimal:
+        """El total con su signo: lo que este comprobante mueve de facturacion."""
+        return (self.total or Decimal('0')) * self.signo
+
+    @property
+    def nombre_comprobante(self) -> str:
+        """Como se llama el documento: 'Factura B', 'Nota de crédito B'."""
+        etiqueta = 'Nota de crédito' if self.es_nota_credito else 'Factura'
+        return f'{etiqueta} {self.tipo}'
+
+    @property
+    def acreditado(self) -> Decimal:
+        """Cuanto de esta factura ya se acredito con notas de credito.
+
+        Cuenta las notas OCULTAS de la lista tambien (``todos``): el borrado en
+        la app es logico y no anula el CAE, asi que esa plata sigue acreditada en
+        ARCA y no puede volver a acreditarse.
+        """
+        if self.es_nota_credito or not self.pk:
+            return Decimal('0')
+        agregado = Comprobante.todos.filter(comprobante_asociado_id=self.pk).aggregate(
+            total=models.Sum('total'),
+        )
+        return agregado['total'] or Decimal('0')
+
+    @property
+    def saldo_acreditable(self) -> Decimal:
+        """Cuanto queda de esta factura sin acreditar (nunca negativo)."""
+        if self.es_nota_credito:
+            return Decimal('0')
+        return max((self.total or Decimal('0')) - self.acreditado, Decimal('0'))
+
+
+def total_firmado():
+    """Expresion SQL del total CON SIGNO, para sumar facturas y notas juntas.
+
+    La usan el resumen mensual, el limite del mes y el historial del cliente: en
+    todos, una nota de credito tiene que restar. Es una funcion (y no una
+    constante) porque una expresion de Django no se puede reusar entre queries.
+    """
+    return models.Case(
+        models.When(clase=Comprobante.Clase.NOTA_CREDITO, then=-models.F('total')),
+        default=models.F('total'),
+        output_field=models.DecimalField(max_digits=14, decimal_places=2),
+    )
 
 
 class Cliente(ModeloBase):

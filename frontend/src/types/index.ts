@@ -107,6 +107,13 @@ export interface Cuenta {
 
 export type TipoComprobante = 'A' | 'B' | 'C'
 
+/**
+ * Qué documento es: una factura o una nota de crédito. Va aparte de la LETRA
+ * (`TipoComprobante`) porque una nota de crédito hereda la letra de la factura
+ * que acredita: existen "Nota de crédito A/B/C" igual que "Factura A/B/C".
+ */
+export type ClaseComprobante = 'factura' | 'nota_credito'
+
 /** Estado persistido de la factura. "vencida" se deriva (ver estadoEfectivo). */
 export type EstadoFactura = 'pendiente' | 'pagada'
 export type EstadoEfectivo = 'pendiente' | 'pagada' | 'vencida'
@@ -204,6 +211,29 @@ export interface ItemComprobante {
 }
 
 /** Un comprobante emitido (Factura A, B o C) con su CAE. */
+/** Una nota de crédito colgada de una factura (en el detalle de la factura). */
+export interface NotaCreditoDeFactura {
+  id: number
+  tipo: TipoComprobante
+  numero_formateado: string
+  fecha: string
+  /** Importe en positivo (el signo lo da la clase). */
+  total: number
+  cae: string
+  /** True si está oculta de la lista; su CAE (y su crédito) existen igual. */
+  oculto: boolean
+}
+
+/** La factura que acredita una nota de crédito (en el detalle de la nota). */
+export interface FacturaAcreditada {
+  id: number
+  clase: ClaseComprobante
+  tipo: TipoComprobante
+  numero_formateado: string
+  fecha: string
+  total: number
+}
+
 export interface Comprobante {
   id: number
   emisor: number
@@ -212,6 +242,8 @@ export interface Comprobante {
   emisor_condicion?: CondicionEmisor
   /** Solo en la respuesta de emisión: qué stock NO se pudo descontar. */
   avisos_stock?: string[]
+  /** Factura o nota de crédito. Las viejas (sin el campo) son facturas. */
+  clase: ClaseComprobante
   tipo: TipoComprobante
   concepto?: number
   punto_venta: number
@@ -246,6 +278,16 @@ export interface Comprobante {
   observaciones?: string
   items?: ItemComprobante[]
   creado?: string
+  /** Id de la factura que acredita esta nota de crédito (null en las facturas). */
+  comprobante_asociado?: number | null
+  /** Esa misma factura, resumida (solo en el detalle de una nota de crédito). */
+  asociado?: FacturaAcreditada | null
+  /** Notas de crédito de esta factura (solo en el detalle de una factura). */
+  notas_credito?: NotaCreditoDeFactura[]
+  /** Cuánto de la factura ya se acreditó (solo en el detalle). */
+  acreditado?: number
+  /** Cuánto queda por acreditar de la factura (solo en el detalle). */
+  saldo_acreditable?: number
 }
 
 /** Cliente de la base (se arma solo con lo que se carga al facturar y al vender). */
@@ -277,6 +319,11 @@ export type OrigenCompra = 'factura' | 'venta'
 export interface CompraCliente {
   id: number
   origen: OrigenCompra
+  /**
+   * Sólo en las compras con `origen: 'factura'`: si es una nota de crédito, su
+   * `total` viene en NEGATIVO (le devolvió plata al cliente).
+   */
+  clase?: ClaseComprobante
   titulo: string
   detalle: string
   fecha: string // ISO

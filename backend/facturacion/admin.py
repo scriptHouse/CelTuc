@@ -62,10 +62,10 @@ class ItemComprobanteInline(TabularInline):
 @admin.register(Comprobante)
 class ComprobanteAdmin(ModeloBaseAdminMixin, ModelAdmin):
     list_display = (
-        'numero_formateado', 'tipo', 'emisor', 'cliente_nombre', 'total', 'cae',
+        'numero_formateado', 'clase', 'tipo', 'emisor', 'cliente_nombre', 'total', 'cae',
         'fecha', 'estado_cobro', 'borrado',
     )
-    list_filter = ('tipo', 'estado_cobro', 'emisor', 'borrado')
+    list_filter = ('clase', 'tipo', 'estado_cobro', 'emisor', 'borrado')
     search_fields = (
         'cliente_nombre', 'cliente_doc_numero', 'cliente_telefono', 'cliente_email',
         'cae', 'numero',
@@ -73,7 +73,8 @@ class ComprobanteAdmin(ModeloBaseAdminMixin, ModelAdmin):
     inlines = (ItemComprobanteInline,)
     # Lo fiscal no se edita; solo el estado de cobro y las observaciones.
     readonly_fields = (
-        'emisor', 'tipo', 'concepto', 'punto_venta', 'numero', 'cliente_nombre',
+        'emisor', 'clase', 'comprobante_asociado', 'tipo', 'concepto', 'punto_venta',
+        'numero', 'cliente_nombre',
         'cliente_doc_tipo', 'cliente_doc_numero', 'cliente_condicion', 'cliente_telefono',
         'cliente_email', 'fecha',
         'vencimiento', 'alicuota_iva', 'neto', 'iva', 'importe_exento',

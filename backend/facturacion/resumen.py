@@ -20,6 +20,11 @@ Como se decide el medio de cobro de cada comprobante, en este orden:
 3. Si no hay nada: ``sin_medio``. Aparece como columna aparte, asi la plata
    nunca se pierde del total: se ve que falta informar el medio.
 
+Las NOTAS DE CREDITO entran con signo negativo: acreditan (devuelven) plata, asi
+que restan del dia, del medio de cobro, de la cuenta y del total del mes. Se
+cuentan como un comprobante mas en ``cantidad`` (son documentos emitidos), pero
+su importe baja el neto facturado, que es lo que se rinde.
+
 Nada de esto toca ARCA ni los comprobantes: es solo lectura.
 """
 from collections import defaultdict
@@ -173,12 +178,16 @@ def resumen_mensual(anio: int, mes: int, *, emisores=None, incluir_ocultos=False
     sin_medio = {'cantidad': 0, 'total': Decimal('0')}
 
     for c in comprobantes:
-        total = c.total or Decimal('0')
+        # `total` es el importe CON SIGNO: una nota de credito devuelve plata,
+        # asi que resta de todos los acumuladores (dia, medio, cuenta y mes).
+        total = c.total_firmado
         if c.medio_pago:
             por_medio = {c.medio_pago: total}
             origen = 'comprobante'
         elif c.pk in desde_ventas:
-            por_medio = desde_ventas[c.pk]
+            # El reparto se calculo sobre el importe positivo del comprobante:
+            # si es una nota de credito, se le da vuelta el signo a cada parte.
+            por_medio = {m: v * c.signo for m, v in desde_ventas[c.pk].items()}
             origen = 'venta'
         else:
             por_medio = {SIN_MEDIO: total}
@@ -226,6 +235,7 @@ def resumen_mensual(anio: int, mes: int, *, emisores=None, incluir_ocultos=False
         detalle.append({
             'id': c.pk,
             'fecha': clave,
+            'clase': c.clase,
             'tipo': c.tipo,
             'numero_formateado': c.numero_formateado,
             'emisor': c.emisor_id,

@@ -566,7 +566,9 @@ function hojaComprobantes(wb: ExcelJS.Workbook, dataset: DatasetFacturacion) {
     const [anio, mes, dia] = c.fecha.split('-').map(Number)
     const valores: ExcelJS.CellValue[] = [
       new Date(Date.UTC(anio, mes - 1, dia)),
-      c.tipo,
+      // Las notas de crédito se marcan («NC B»): su importe va en negativo y
+      // sin la marca la columna diría lo mismo que una factura de esa letra.
+      c.clase === 'nota_credito' ? `NC ${c.tipo}` : c.tipo,
       c.numero_formateado,
       c.emisor_nombre,
       c.emisor_cuit,

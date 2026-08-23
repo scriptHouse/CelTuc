@@ -184,17 +184,19 @@ export async function obtenerResumen(): Promise<ResumenDashboard> {
   // El tipo de comprobante delata quién lo emite: A/B = Responsable Inscripto,
   // C = Monotributista. La fecha es 'yyyy-mm-dd', se compara por prefijo para
   // no correrse un día por zona horaria. Sin permiso de facturación queda en 0.
+  // Las notas de crédito RESTAN: devuelven plata, así que el mes va neto.
   const prefijoMes = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}`
   const facturacionReal = { riMes: 0, riCount: 0, monoMes: 0, monoCount: 0 }
   try {
     const comprobantes = await listarComprobantes()
     for (const c of comprobantes) {
       if (!c.fecha.startsWith(prefijoMes)) continue
+      const firmado = Number(c.total) * (c.clase === 'nota_credito' ? -1 : 1)
       if (c.tipo === 'C') {
-        facturacionReal.monoMes += Number(c.total)
+        facturacionReal.monoMes += firmado
         facturacionReal.monoCount += 1
       } else {
-        facturacionReal.riMes += Number(c.total)
+        facturacionReal.riMes += firmado
         facturacionReal.riCount += 1
       }
     }

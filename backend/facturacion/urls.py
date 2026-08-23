@@ -12,6 +12,7 @@ from .views import (
     EmisorListCreateView,
     EmisorProbarConexionView,
     EnviarComprobanteEmailView,
+    NotaCreditoCreateView,
     ResumenMensualView,
 )
 
@@ -28,6 +29,7 @@ urlpatterns = [
     path('comprobantes/resumen-mensual/', ResumenMensualView.as_view(), name='comprobante-resumen-mensual'),
     path('comprobantes/<int:pk>/', ComprobanteDetailView.as_view(), name='comprobante-detail'),
     path('comprobantes/<int:pk>/enviar-email/', EnviarComprobanteEmailView.as_view(), name='comprobante-email'),
+    path('comprobantes/<int:pk>/nota-credito/', NotaCreditoCreateView.as_view(), name='comprobante-nota-credito'),
     path('clientes/', ClienteListView.as_view(), name='cliente-list'),
     path('clientes/<int:pk>/', ClienteDetailView.as_view(), name='cliente-detail'),
 ]

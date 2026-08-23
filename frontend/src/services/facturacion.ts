@@ -1,4 +1,5 @@
 import type {
+  ClaseComprobante,
   Cliente,
   ClienteDetalle,
   Comprobante,
@@ -120,6 +121,43 @@ export function listarComprobantes(emisorId?: number): Promise<Comprobante[]> {
   return api.get<Comprobante[]>(`/facturacion/comprobantes/${query}`, token())
 }
 
+// ===== Notas de crédito =====
+
+/**
+ * Lo que se manda para acreditar una factura. Sólo se eligen los renglones a
+ * acreditar, la fecha, el motivo y con qué se devuelve la plata: el cliente, la
+ * letra, la alícuota y el concepto los hereda de la factura (ARCA cruza esos
+ * datos con el comprobante asociado, así que no son negociables).
+ */
+export interface NuevaNotaCredito {
+  items: Array<{ descripcion: string; cantidad: number; precio_unitario: number }>
+  /** `aaaa-mm-dd`. Por defecto, hoy. Nunca anterior a la factura. */
+  fecha?: string
+  /** El motivo, tal cual sale impreso en el comprobante. */
+  observaciones?: string
+  /** Con qué se devuelve la plata. Vacío = el mismo medio de la factura. */
+  medio_pago?: MedioPagoComprobante
+}
+
+/**
+ * Emite la nota de crédito que acredita esa factura: el backend le pide el CAE
+ * a ARCA por el MISMO web service que las facturas y la devuelve ya emitida.
+ *
+ * Errores esperables: 400 si no se puede acreditar (ya está acreditada, el
+ * importe se pasa del saldo, la fecha es anterior a la factura) y 502 si ARCA
+ * rechaza o no responde.
+ */
+export function emitirNotaCredito(
+  facturaId: number,
+  input: NuevaNotaCredito,
+): Promise<Comprobante> {
+  return api.post<Comprobante>(
+    `/facturacion/comprobantes/${facturaId}/nota-credito/`,
+    input,
+    token(),
+  )
+}
+
 export function obtenerComprobante(id: number): Promise<Comprobante> {
   return api.get<Comprobante>(`/facturacion/comprobantes/${id}/`, token())
 }
@@ -230,6 +268,8 @@ export interface CuentaFacturacion extends CorteFacturacion {
 export interface ComprobanteResumen {
   id: number
   fecha: string
+  /** Factura o nota de crédito: la nota va con `total` NEGATIVO. */
+  clase: ClaseComprobante
   tipo: TipoComprobante
   numero_formateado: string
   emisor: number

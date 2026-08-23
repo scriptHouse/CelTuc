@@ -1339,3 +1339,461 @@ class MedioPagoComprobanteTests(TestCase):
         # La lista tambien lo trae.
         r = self.cliente.get(reverse('facturacion:comprobante-list'))
         self.assertEqual(r.data[0]['medio_pago'], 'transf_financiera')
+
+
+# ===== Notas de credito =====
+
+def _respuesta_cae(numero):
+    """Lo que devuelve el WSFEv1 cuando aprueba (mismo shape que `solicitar_cae`)."""
+    return {
+        'cae': '75200000000001',
+        'cae_vencimiento': '20261231',
+        'numero': numero,
+        'resultado': 'A',
+        'observaciones': '',
+    }
+
+
+class NotaCreditoARCATests(TestCase):
+    """El pedido que sale a ARCA: codigo de comprobante y comprobante asociado.
+
+    Se mockea la capa `wsfev1` (la que habla por SOAP) pero NO la orquestacion:
+    asi se prueba de verdad que la nota pide el codigo 3/8/13, que la numeracion
+    la busca con ESE codigo (contador propio) y que viaja `CbtesAsoc` con la
+    factura que acredita.
+    """
+
+    def setUp(self):
+        self.emisor = Emisor.objects.create(
+            nombre='RI Test', condicion='responsable_inscripto', cuit='30111111116',
+            punto_venta=3, certificado='PEM', clave_privada='PEM',
+        )
+        self.factura = Comprobante.objects.create(
+            emisor=self.emisor, tipo='B', punto_venta=3, numero=41,
+            cliente_nombre='Cliente', cliente_condicion='consumidor_final',
+            fecha=datetime.date(2026, 8, 10),
+            neto=Decimal('100.00'), iva=Decimal('21.00'), total=Decimal('121.00'),
+            cae='75100000000001', medio_pago='efectivo', estado_cobro='pagada',
+        )
+
+    def _emitir(self, items=None, **extra):
+        from .arca import servicio
+        datos = {
+            'items': items or [{'descripcion': 'Devolucion', 'cantidad': 1,
+                                'precio_unitario': Decimal('100')}],
+            'fecha': datetime.date(2026, 8, 20),
+            **extra,
+        }
+        with patch('facturacion.arca.servicio.wsaa.obtener_ta', return_value=('tk', 'sg')), \
+                patch('facturacion.arca.servicio.wsfev1.ultimo_autorizado', return_value=6) as ultimo, \
+                patch('facturacion.arca.servicio.wsfev1.solicitar_cae',
+                      return_value=_respuesta_cae(7)) as cae:
+            nota = servicio.emitir_nota_credito(self.factura, datos)
+        return nota, ultimo, cae
+
+    def test_usa_el_codigo_de_nota_de_credito_y_su_propia_numeracion(self):
+        nota, ultimo, cae = self._emitir()
+        # Factura B = 6; Nota de credito B = 8, con contador propio.
+        self.assertEqual(ultimo.call_args.args[5], 8)
+        self.assertEqual(cae.call_args.args[5], 8)
+        self.assertEqual(nota.numero, 7)
+        self.assertEqual(nota.punto_venta, 3)
+
+    def test_viaja_el_comprobante_asociado(self):
+        _nota, _ultimo, cae = self._emitir()
+        detalle = cae.call_args.args[6]
+        self.assertEqual(
+            detalle['CbtesAsoc'],
+            {'CbteAsoc': [{'Tipo': 6, 'PtoVta': 3, 'Nro': 41}]},
+        )
+
+    def test_los_importes_van_en_positivo(self):
+        _nota, _ultimo, cae = self._emitir()
+        detalle = cae.call_args.args[6]
+        self.assertEqual(detalle['ImpTotal'], 121.0)
+        self.assertEqual(detalle['ImpNeto'], 100.0)
+        self.assertEqual(detalle['ImpIVA'], 21.0)
+
+    def test_la_nota_hereda_la_letra_el_receptor_y_el_estado(self):
+        nota, _u, _c = self._emitir()
+        self.assertEqual(nota.clase, Comprobante.Clase.NOTA_CREDITO)
+        self.assertEqual(nota.tipo, 'B')
+        self.assertEqual(nota.comprobante_asociado_id, self.factura.pk)
+        self.assertEqual(nota.cliente_nombre, 'Cliente')
+        self.assertEqual(nota.cliente_condicion, 'consumidor_final')
+        self.assertEqual(nota.estado_cobro, 'pagada')
+        self.assertEqual(nota.medio_pago, 'efectivo')   # el mismo balde que la factura
+        self.assertEqual(nota.total, Decimal('121.00'))
+        self.assertEqual(nota.items.count(), 1)
+
+    def test_el_medio_se_puede_cambiar(self):
+        nota, _u, _c = self._emitir(medio_pago='transferencia')
+        self.assertEqual(nota.medio_pago, 'transferencia')
+
+    def test_el_qr_lleva_el_codigo_de_la_nota(self):
+        nota, _u, _c = self._emitir()
+        payload = json.loads(base64.b64decode(nota.qr_url.split('p=')[1]))
+        self.assertEqual(payload['tipoCmp'], 8)
+        self.assertEqual(payload['nroCmp'], 7)
+        self.assertEqual(payload['importe'], 121.0)
+
+    def test_monotributo_usa_el_13_y_no_discrimina_iva(self):
+        from .arca import servicio
+        emisor = Emisor.objects.create(
+            nombre='Mono Test', condicion='monotributista', cuit='20111111112',
+            punto_venta=1, certificado='PEM', clave_privada='PEM',
+        )
+        factura = Comprobante.objects.create(
+            emisor=emisor, tipo='C', punto_venta=1, numero=2,
+            cliente_nombre='Cliente', cliente_condicion='consumidor_final',
+            fecha=datetime.date(2026, 8, 1),
+            neto=Decimal('50.00'), iva=Decimal('0.00'), total=Decimal('50.00'), cae='751',
+        )
+        datos = {'items': [{'descripcion': 'Dev', 'cantidad': 1, 'precio_unitario': Decimal('50')}]}
+        with patch('facturacion.arca.servicio.wsaa.obtener_ta', return_value=('tk', 'sg')), \
+                patch('facturacion.arca.servicio.wsfev1.ultimo_autorizado', return_value=0), \
+                patch('facturacion.arca.servicio.wsfev1.solicitar_cae',
+                      return_value=_respuesta_cae(1)) as cae:
+            nota = servicio.emitir_nota_credito(factura, datos)
+        self.assertEqual(cae.call_args.args[5], 13)
+        self.assertNotIn('Iva', cae.call_args.args[6])
+        self.assertEqual(nota.iva, Decimal('0.00'))
+
+    def test_una_factura_y_su_nota_pueden_tener_el_mismo_numero(self):
+        """Cada CbteTipo numera aparte: no puede chocar la unicidad."""
+        nota, _u, _c = self._emitir()
+        Comprobante.objects.filter(pk=nota.pk).update(numero=41)   # mismo numero que la factura
+        nota.refresh_from_db()
+        self.assertEqual(nota.numero, self.factura.numero)
+
+
+class NotaCreditoEndpointTests(TestCase):
+    """El endpoint: quien puede, que valida y que devuelve."""
+
+    def setUp(self):
+        rol = Rol.objects.create(nombre='CajeroNC')
+        rol.permisos.set(Permiso.objects.filter(codigo='ver_facturacion'))
+        self.fact = Usuario.objects.create_user(
+            email='nc@celtuc.ar', username='facnc', password='x', rol=rol,
+        )
+        self.otro = Usuario.objects.create_user(
+            email='sinacceso@celtuc.ar', username='sinaccesonc', password='x',
+            rol=Rol.objects.create(nombre='SinAccesoNC'),
+        )
+        self.emisor = Emisor.objects.create(
+            nombre='RI Test', condicion='responsable_inscripto', cuit='30111111116',
+            punto_venta=1, certificado='PEM', clave_privada='PEM',
+        )
+        self.factura = Comprobante.objects.create(
+            emisor=self.emisor, tipo='B', punto_venta=1, numero=10,
+            cliente_nombre='Cliente', cliente_condicion='consumidor_final',
+            fecha=datetime.date(2026, 8, 10),
+            neto=Decimal('100.00'), iva=Decimal('21.00'), total=Decimal('121.00'), cae='751',
+        )
+        self.cliente = APIClient()
+        self.cliente.force_authenticate(self.fact)
+
+    def _url(self, comprobante=None):
+        return reverse('facturacion:comprobante-nota-credito',
+                       args=[(comprobante or self.factura).pk])
+
+    def _nota(self, factura, total_neto, numero=1):
+        """Crea a mano una nota de credito ya emitida (sin pasar por ARCA)."""
+        return Comprobante.objects.create(
+            emisor=factura.emisor, clase=Comprobante.Clase.NOTA_CREDITO,
+            comprobante_asociado=factura, tipo=factura.tipo,
+            punto_venta=factura.punto_venta, numero=numero,
+            cliente_nombre=factura.cliente_nombre,
+            cliente_condicion=factura.cliente_condicion,
+            fecha=factura.fecha,
+            neto=Decimal(total_neto), iva=Decimal(total_neto) * Decimal('0.21'),
+            total=Decimal(total_neto) * Decimal('1.21'), cae='752',
+        )
+
+    def _post(self, **datos):
+        cuerpo = {'items': [{'descripcion': 'Devolucion', 'cantidad': 1,
+                             'precio_unitario': '100'}], **datos}
+        return self.cliente.post(self._url(), cuerpo, format='json')
+
+    @patch('facturacion.views.servicio.emitir_nota_credito')
+    def test_emite_y_devuelve_el_detalle(self, mock_nc):
+        mock_nc.side_effect = lambda origen, datos, usuario=None: self._nota(origen, '100')
+        r = self._post()
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.data['clase'], 'nota_credito')
+        self.assertEqual(r.data['tipo'], 'B')
+        self.assertEqual(r.data['comprobante_asociado'], self.factura.pk)
+        self.assertEqual(r.data['asociado']['numero_formateado'], '0001-00000010')
+
+    def test_sin_sesion_no_se_acredita(self):
+        r = APIClient().post(self._url(), {'items': []}, format='json')
+        self.assertIn(r.status_code, (401, 403))
+
+    def test_sin_permiso_de_facturacion_no_se_acredita(self):
+        c = APIClient()
+        c.force_authenticate(self.otro)
+        self.assertEqual(c.post(self._url(), {'items': []}, format='json').status_code, 403)
+
+    def test_sin_items_es_400(self):
+        self.assertEqual(self.cliente.post(self._url(), {'items': []}, format='json').status_code, 400)
+
+    @patch('facturacion.views.servicio.emitir_nota_credito')
+    def test_no_se_puede_acreditar_de_mas(self, mock_nc):
+        r = self.cliente.post(
+            self._url(),
+            {'items': [{'descripcion': 'x', 'cantidad': 1, 'precio_unitario': '200'}]},
+            format='json',
+        )
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('supera', r.data['detail'])
+        mock_nc.assert_not_called()   # ni se hablo con ARCA
+
+    @patch('facturacion.views.servicio.emitir_nota_credito')
+    def test_una_factura_acreditada_del_todo_no_admite_otra(self, mock_nc):
+        self._nota(self.factura, '100')
+        r = self._post()
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('acreditada por completo', r.data['detail'])
+        mock_nc.assert_not_called()
+
+    @patch('facturacion.views.servicio.emitir_nota_credito')
+    def test_no_se_acredita_una_nota_de_credito(self, mock_nc):
+        nota = self._nota(self.factura, '100')
+        r = self.cliente.post(
+            self._url(nota),
+            {'items': [{'descripcion': 'x', 'cantidad': 1, 'precio_unitario': '10'}]},
+            format='json',
+        )
+        self.assertEqual(r.status_code, 400)
+        mock_nc.assert_not_called()
+
+    @patch('facturacion.views.servicio.emitir_nota_credito')
+    def test_fecha_anterior_a_la_factura_es_400(self, mock_nc):
+        r = self._post(fecha='2026-08-01')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('anterior', r.data['detail'])
+        mock_nc.assert_not_called()
+
+    @patch('facturacion.views.servicio.emitir_nota_credito')
+    def test_una_falla_de_arca_es_502(self, mock_nc):
+        from .arca.errores import ErrorARCA
+        mock_nc.side_effect = ErrorARCA('ARCA rechazo el comprobante.')
+        r = self._post()
+        self.assertEqual(r.status_code, 502)
+        self.assertIn('ARCA', r.data['detail'])
+
+    @patch('facturacion.views.servicio.emitir_nota_credito')
+    def test_parcial_deja_saldo_y_una_segunda_lo_completa(self, mock_nc):
+        mock_nc.side_effect = lambda origen, datos, usuario=None: self._nota(
+            origen, '60', numero=Comprobante.objects.count() + 1,
+        )
+        r = self.cliente.post(
+            self._url(),
+            {'items': [{'descripcion': 'x', 'cantidad': 1, 'precio_unitario': '60'}]},
+            format='json',
+        )
+        self.assertEqual(r.status_code, 201)
+        self.factura.refresh_from_db()
+        self.assertEqual(self.factura.acreditado, Decimal('72.60'))
+        self.assertEqual(self.factura.saldo_acreditable, Decimal('48.40'))
+        # La segunda por el resto entra; una tercera ya no.
+        mock_nc.side_effect = lambda origen, datos, usuario=None: self._nota(
+            origen, '40', numero=Comprobante.objects.count() + 1,
+        )
+        r = self.cliente.post(
+            self._url(),
+            {'items': [{'descripcion': 'x', 'cantidad': 1, 'precio_unitario': '40'}]},
+            format='json',
+        )
+        self.assertEqual(r.status_code, 201)
+        r = self.cliente.post(
+            self._url(),
+            {'items': [{'descripcion': 'x', 'cantidad': 1, 'precio_unitario': '10'}]},
+            format='json',
+        )
+        self.assertEqual(r.status_code, 400)
+
+    def test_una_nota_oculta_sigue_descontando_el_saldo(self):
+        """El borrado en la app es logico: el CAE (y la acreditacion) existen igual."""
+        nota = self._nota(self.factura, '100')
+        nota.delete(usuario=self.fact)
+        self.factura.refresh_from_db()
+        self.assertEqual(self.factura.saldo_acreditable, Decimal('0'))
+
+    def test_el_detalle_de_la_factura_lista_sus_notas(self):
+        self._nota(self.factura, '50')
+        r = self.cliente.get(reverse('facturacion:comprobante-detail', args=[self.factura.pk]))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(r.data['notas_credito']), 1)
+        self.assertEqual(r.data['notas_credito'][0]['total'], 60.5)
+        self.assertEqual(r.data['acreditado'], Decimal('60.50'))
+        self.assertEqual(r.data['saldo_acreditable'], Decimal('60.50'))
+
+    def test_la_lista_se_filtra_por_clase(self):
+        self._nota(self.factura, '50')
+        url = reverse('facturacion:comprobante-list')
+        self.assertEqual(len(self.cliente.get(url).data), 2)
+        self.assertEqual(len(self.cliente.get(url, {'clase': 'factura'}).data), 1)
+        notas = self.cliente.get(url, {'clase': 'nota_credito'}).data
+        self.assertEqual(len(notas), 1)
+        self.assertEqual(notas[0]['clase'], 'nota_credito')
+
+
+class NotaCreditoRestaTests(TestCase):
+    """Una nota de credito RESTA en todos lados: mes, tope y cliente."""
+
+    def setUp(self):
+        self.emisor = Emisor.objects.create(
+            nombre='RI Test', condicion='responsable_inscripto', cuit='30111111116',
+            punto_venta=1,
+        )
+        self.factura = Comprobante.objects.create(
+            emisor=self.emisor, tipo='B', punto_venta=1, numero=1,
+            cliente_nombre='Ana', cliente_doc_tipo='DNI', cliente_doc_numero='30111222',
+            cliente_condicion='consumidor_final', fecha=datetime.date(2026, 8, 10),
+            neto=Decimal('1000.00'), iva=Decimal('210.00'), total=Decimal('1210.00'),
+            cae='751', medio_pago='efectivo', estado_cobro='pagada',
+        )
+        self.nota = Comprobante.objects.create(
+            emisor=self.emisor, clase=Comprobante.Clase.NOTA_CREDITO,
+            comprobante_asociado=self.factura, tipo='B', punto_venta=1, numero=1,
+            cliente_nombre='Ana', cliente_doc_tipo='DNI', cliente_doc_numero='30111222',
+            cliente_condicion='consumidor_final', fecha=datetime.date(2026, 8, 12),
+            neto=Decimal('200.00'), iva=Decimal('42.00'), total=Decimal('242.00'),
+            cae='752', medio_pago='efectivo', estado_cobro='pagada',
+        )
+
+    def test_el_total_firmado(self):
+        self.assertEqual(self.factura.total_firmado, Decimal('1210.00'))
+        self.assertEqual(self.nota.total_firmado, Decimal('-242.00'))
+        self.assertEqual(self.factura.nombre_comprobante, 'Factura B')
+        self.assertEqual(self.nota.nombre_comprobante, 'Nota de crédito B')
+
+    def test_resta_del_facturado_del_mes(self):
+        self.assertEqual(facturado_del_mes(self.emisor, 2026, 8), Decimal('968.00'))
+
+    def test_resta_del_resumen_mensual(self):
+        from .resumen import resumen_mensual
+        r = resumen_mensual(2026, 8)
+        self.assertEqual(r['totales']['cantidad'], 2)          # los dos son comprobantes
+        self.assertEqual(r['totales']['total'], 968.0)          # pero la plata es neta
+        self.assertEqual(r['totales']['por_medio']['efectivo'], 968.0)
+        self.assertEqual(r['totales']['cobrado'], 968.0)
+        self.assertEqual(r['totales']['ri'], 968.0)
+        # El dia de la nota queda en negativo: se devolvio plata ese dia.
+        dia_nota = next(d for d in r['dias'] if d['fecha'] == '2026-08-12')
+        self.assertEqual(dia_nota['total'], -242.0)
+        # El detalle la marca como nota de credito y con el importe firmado.
+        fila = next(c for c in r['comprobantes'] if c['id'] == self.nota.pk)
+        self.assertEqual(fila['clase'], 'nota_credito')
+        self.assertEqual(fila['total'], -242.0)
+
+    def test_resta_del_historial_del_cliente(self):
+        from .clientes import registrar_cliente_desde_comprobante, resumen_de_cliente
+        cliente = registrar_cliente_desde_comprobante(self.factura)
+        resumen = resumen_de_cliente(cliente)
+        self.assertEqual(resumen['cantidad'], 2)
+        self.assertEqual(resumen['total'], 968.0)
+
+    def test_el_limite_del_anio_tambien_va_neto(self):
+        from .limites import estado_limites_del_anio
+        agosto = estado_limites_del_anio(self.emisor, 2026)[7]
+        self.assertEqual(agosto['mes'], 8)
+        self.assertEqual(agosto['facturado'], 968.0)
+
+
+class ConstruirDetalleAsociadosTests(TestCase):
+    """`_construir_detalle` sin asociados no cambia en nada (compatibilidad)."""
+
+    def test_sin_asociados_no_agrega_la_clave(self):
+        totales = {'neto': Decimal('100.00'), 'iva': Decimal('21.00'), 'total': Decimal('121.00')}
+        d = _construir_detalle(
+            tipo='B', concepto=1, doc_tipo='CF', doc_numero='', numero=1,
+            fecha=datetime.date(2026, 6, 26), vencimiento=None, totales=totales,
+            alicuota=Decimal('21'), cliente_condicion='consumidor_final',
+        )
+        self.assertNotIn('CbtesAsoc', d)
+
+    def test_con_asociados_va_la_lista(self):
+        totales = {'neto': Decimal('100.00'), 'iva': Decimal('21.00'), 'total': Decimal('121.00')}
+        d = _construir_detalle(
+            tipo='B', concepto=1, doc_tipo='CF', doc_numero='', numero=1,
+            fecha=datetime.date(2026, 6, 26), vencimiento=None, totales=totales,
+            alicuota=Decimal('21'), cliente_condicion='consumidor_final',
+            asociados=[{'Tipo': 6, 'PtoVta': 1, 'Nro': 41}],
+        )
+        self.assertEqual(d['CbtesAsoc']['CbteAsoc'][0]['Nro'], 41)
+
+
+class NotaCreditoGuardasDelServicioTests(TestCase):
+    """El servicio vuelve a chequear todo, aunque la vista ya lo haya hecho.
+
+    No es duplicacion al pedo: el chequeo del saldo del servicio corre DENTRO
+    del lock del emisor, asi dos cajas que acrediten la misma factura al mismo
+    tiempo no la pueden acreditar de mas (ARCA aceptaria las dos notas).
+    """
+
+    def setUp(self):
+        self.emisor = Emisor.objects.create(
+            nombre='RI Test', condicion='responsable_inscripto', cuit='30111111116',
+            punto_venta=1, certificado='PEM', clave_privada='PEM',
+        )
+        self.factura = Comprobante.objects.create(
+            emisor=self.emisor, tipo='B', punto_venta=1, numero=1,
+            cliente_nombre='Cliente', cliente_condicion='consumidor_final',
+            fecha=datetime.date(2026, 8, 10),
+            neto=Decimal('100.00'), iva=Decimal('21.00'), total=Decimal('121.00'), cae='751',
+        )
+
+    def _intentar(self, factura, **datos):
+        from .arca import servicio
+        from .arca.errores import ErrorARCA
+        entrada = {'items': [{'descripcion': 'x', 'cantidad': 1,
+                              'precio_unitario': Decimal('100')}], **datos}
+        with patch('facturacion.arca.servicio.wsaa.obtener_ta', return_value=('tk', 'sg')),                 patch('facturacion.arca.servicio.wsfev1.ultimo_autorizado', return_value=0),                 patch('facturacion.arca.servicio.wsfev1.solicitar_cae') as cae:
+            with self.assertRaises(ErrorARCA) as ctx:
+                servicio.emitir_nota_credito(factura, entrada)
+        cae.assert_not_called()      # nunca se le pidio un CAE a ARCA
+        return str(ctx.exception)
+
+    def test_se_pasa_del_saldo(self):
+        mensaje = self._intentar(
+            self.factura,
+            items=[{'descripcion': 'x', 'cantidad': 1, 'precio_unitario': Decimal('500')}],
+        )
+        self.assertIn('supera', mensaje)
+
+    def test_ya_acreditada(self):
+        Comprobante.objects.create(
+            emisor=self.emisor, clase=Comprobante.Clase.NOTA_CREDITO,
+            comprobante_asociado=self.factura, tipo='B', punto_venta=1, numero=1,
+            cliente_nombre='Cliente', cliente_condicion='consumidor_final',
+            fecha=datetime.date(2026, 8, 11),
+            neto=Decimal('100.00'), iva=Decimal('21.00'), total=Decimal('121.00'), cae='752',
+        )
+        self.assertIn('supera', self._intentar(self.factura))
+
+    def test_fecha_anterior_a_la_factura(self):
+        mensaje = self._intentar(self.factura, fecha=datetime.date(2026, 8, 1))
+        self.assertIn('anterior', mensaje)
+
+    def test_una_factura_sin_cae_no_se_acredita(self):
+        self.factura.cae = ''
+        self.factura.save(update_fields=['cae'])
+        self.assertIn('CAE', self._intentar(self.factura))
+
+    def test_no_se_acredita_una_nota_de_credito(self):
+        nota = Comprobante.objects.create(
+            emisor=self.emisor, clase=Comprobante.Clase.NOTA_CREDITO,
+            comprobante_asociado=self.factura, tipo='B', punto_venta=1, numero=1,
+            cliente_nombre='Cliente', cliente_condicion='consumidor_final',
+            fecha=datetime.date(2026, 8, 11),
+            neto=Decimal('10.00'), iva=Decimal('2.10'), total=Decimal('12.10'), cae='752',
+        )
+        self.assertIn('nota de credito', self._intentar(nota).lower())
+
+    def test_un_emisor_inactivo_no_acredita(self):
+        self.emisor.activo = False
+        self.emisor.save(update_fields=['activo'])
+        self.factura.refresh_from_db()
+        self.assertIn('inactivo', self._intentar(self.factura))

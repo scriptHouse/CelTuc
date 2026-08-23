@@ -29,7 +29,12 @@ def _fecha(d) -> str:
 
 
 def enviar_comprobante(comprobante, email_destino, pdf_bytes, mensaje=None):
-    """Envía el PDF de un comprobante como adjunto a `email_destino` (HTML + texto)."""
+    """Envía el PDF de un comprobante como adjunto a `email_destino` (HTML + texto).
+
+    Sirve igual para una factura y para una nota de credito: el nombre del
+    documento sale de `nombre_comprobante`, asi el asunto, el cuerpo y el nombre
+    del archivo adjunto dicen lo que corresponde.
+    """
     if not settings.EMAIL_HOST:
         raise EmailNoConfigurado(
             'El envío de emails no está configurado en el servidor (falta EMAIL_HOST).'
@@ -38,20 +43,22 @@ def enviar_comprobante(comprobante, email_destino, pdf_bytes, mensaje=None):
     numero = comprobante.numero_formateado
     emisor = comprobante.emisor.nombre
     total = _money(comprobante.total)
-    asunto = f'Factura {comprobante.tipo} N° {numero} - {emisor}'
+    nombre = comprobante.nombre_comprobante      # 'Factura B' / 'Nota de crédito B'
+    asunto = f'{nombre} N° {numero} - {emisor}'
 
     # Fallback en texto plano (clientes sin HTML).
     texto = mensaje or (
         f'Hola,\n\n'
-        f'Adjuntamos tu Factura {comprobante.tipo} N° {numero} por un total de $ {total}.\n'
+        f'Adjuntamos tu {nombre} N° {numero} por un total de $ {total}.\n'
         f'CAE: {comprobante.cae} (vence {_fecha(comprobante.cae_vencimiento)})\n'
         f'El comprobante está adjunto en PDF.\n\n'
         f'{emisor}'
     )
 
+    archivo = 'nota-credito' if comprobante.es_nota_credito else 'factura'
     correo = EmailMultiAlternatives(subject=asunto, body=texto, to=[email_destino])
     correo.attach_alternative(_html(comprobante, emisor, numero, total), 'text/html')
-    correo.attach(f'factura-{comprobante.tipo}-{numero}.pdf', pdf_bytes, 'application/pdf')
+    correo.attach(f'{archivo}-{comprobante.tipo}-{numero}.pdf', pdf_bytes, 'application/pdf')
     correo.send(fail_silently=False)
 
 
@@ -65,6 +72,12 @@ def _html(comprobante, emisor, numero, total) -> str:
         if nombre_cli and nombre_cli.lower() != 'consumidor final'
         else 'Hola,'
     )
+
+    nombre = comprobante.nombre_comprobante
+    acredita = ''
+    asociado = comprobante.comprobante_asociado if comprobante.es_nota_credito else None
+    if asociado is not None:
+        acredita = f'Acredita la Factura {e(asociado.tipo)} N° {e(asociado.numero_formateado)}. '
 
     def fila(etiqueta, valor, top=True, fuerte=False):
         borde = 'border-top:1px solid #f2f2f3;' if top else ''
@@ -87,7 +100,7 @@ def _html(comprobante, emisor, numero, total) -> str:
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
       <td style="vertical-align:middle;">
         <div style="font-size:16px;font-weight:bold;color:#0a0a0b;">{e(emisor)}</div>
-        <div style="font-size:11px;color:#6b7280;margin-top:4px;letter-spacing:.08em;">COMPROBANTE ELECTRÓNICO</div>
+        <div style="font-size:11px;color:#6b7280;margin-top:4px;letter-spacing:.08em;">{e(nombre).upper()}</div>
       </td>
       <td align="right" style="vertical-align:middle;">
         <table role="presentation" cellpadding="0" cellspacing="0"><tr>
@@ -98,9 +111,9 @@ def _html(comprobante, emisor, numero, total) -> str:
   </td></tr>
   <tr><td style="padding:24px 26px;">
     <p style="margin:0 0 16px;font-size:14px;line-height:1.55;color:#3a3a3a;">{saludo}</p>
-    <p style="margin:0 0 22px;font-size:14px;line-height:1.55;color:#3a3a3a;">Adjuntamos tu <strong style="color:#0a0a0b;">Factura {tipo} N° {e(numero)}</strong> en formato PDF. Abajo, un resumen del comprobante.</p>
+    <p style="margin:0 0 22px;font-size:14px;line-height:1.55;color:#3a3a3a;">Adjuntamos tu <strong style="color:#0a0a0b;">{e(nombre)} N° {e(numero)}</strong> en formato PDF. {acredita}Abajo, un resumen del comprobante.</p>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #eeeeef;border-radius:12px;">
-      {fila('Comprobante', f'Factura {tipo} · {e(numero)}', top=False, fuerte=True)}
+      {fila('Comprobante', f'{e(nombre)} · {e(numero)}', top=False, fuerte=True)}
       {fila('Fecha de emisión', _fecha(comprobante.fecha))}
       {fila('CAE', e(comprobante.cae or '—'))}
       {fila('Vto. del CAE', _fecha(comprobante.cae_vencimiento))}

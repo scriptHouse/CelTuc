@@ -68,10 +68,13 @@ def _compra_de_comprobante(comprobante):
     return {
         'id': comprobante.pk,
         'origen': 'factura',
-        'titulo': f'Factura {comprobante.tipo} · {comprobante.numero_formateado}',
+        'clase': comprobante.clase,
+        'titulo': f'{comprobante.nombre_comprobante} · {comprobante.numero_formateado}',
         'detalle': comprobante.emisor.nombre if comprobante.emisor_id else '',
         'fecha': comprobante.fecha.isoformat(),
-        'total': float(comprobante.total or 0),
+        # Con signo: una nota de credito le devuelve plata al cliente, asi que
+        # resta de lo que gasto.
+        'total': float(comprobante.total_firmado),
         'estado_cobro': comprobante.estado_cobro,
         'items': [
             {
@@ -131,9 +134,15 @@ def compras_de_cliente(cliente):
 
 
 def resumen_de_cliente(cliente):
-    """Cantidad de compras, total gastado y fecha de la última (los dos tipos)."""
+    """Cantidad de compras, total gastado y fecha de la última (los dos tipos).
+
+    El total va NETO de notas de crédito: lo que se le acreditó al cliente no es
+    plata que gastó.
+    """
+    from .models import total_firmado
+
     factura = comprobantes_de_cliente(cliente).aggregate(
-        cantidad=Count('id'), total=Sum('total'), ultima=Max('fecha'),
+        cantidad=Count('id'), total=Sum(total_firmado()), ultima=Max('fecha'),
     )
     venta = ventas_de_cliente(cliente).aggregate(
         cantidad=Count('id'), total=Sum('total'), ultima=Max('creado'),
@@ -156,21 +165,21 @@ def stats_por_cliente():
     """
     from inventario.models import Venta
 
-    from .models import Comprobante
+    from .models import Comprobante, total_firmado
 
     base = Comprobante.objects.all()  # ManagerVivos: excluye los borrados
     por_doc, por_tel = {}, {}
     for row in (
         base.exclude(cliente_doc_numero='')
         .values('cliente_doc_numero')
-        .annotate(cantidad=Count('id'), total=Sum('total'), ultima=Max('fecha'))
+        .annotate(cantidad=Count('id'), total=Sum(total_firmado()), ultima=Max('fecha'))
     ):
         por_doc[row['cliente_doc_numero']] = row
     for row in (
         base.filter(cliente_doc_numero='')
         .exclude(cliente_telefono='')
         .values('cliente_telefono')
-        .annotate(cantidad=Count('id'), total=Sum('total'), ultima=Max('fecha'))
+        .annotate(cantidad=Count('id'), total=Sum(total_firmado()), ultima=Max('fecha'))
     ):
         por_tel[row['cliente_telefono']] = row
     por_venta = {}

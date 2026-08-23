@@ -361,6 +361,9 @@ function ClienteDetalleModal({ id, onClose }: { id: number | null; onClose: () =
 function CompraCard({ compra }: { compra: CompraCliente }) {
   const origen = ORIGEN[compra.origen] ?? ORIGEN.factura
   const IconoOrigen = origen.icono
+  // Una nota de crédito no es una compra: es plata que se le devolvió. Va con
+  // su propia etiqueta y en negativo (el backend ya le manda el signo).
+  const esNota = compra.clase === 'nota_credito'
   return (
     <div className="rounded-2xl border border-line bg-surface p-3.5">
       <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
@@ -368,9 +371,11 @@ function CompraCard({ compra }: { compra: CompraCliente }) {
           <span
             className={cn(
               'mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl',
-              compra.origen === 'factura'
-                ? 'bg-ink-950 text-on-ink'
-                : 'bg-emerald-600/10 text-emerald-700 ring-1 ring-emerald-600/20 dark:text-emerald-400',
+              esNota
+                ? 'border border-line-strong bg-surface text-ink-600'
+                : compra.origen === 'factura'
+                  ? 'bg-ink-950 text-on-ink'
+                  : 'bg-emerald-600/10 text-emerald-700 ring-1 ring-emerald-600/20 dark:text-emerald-400',
             )}
           >
             <IconoOrigen className="h-4 w-4" strokeWidth={1.75} aria-hidden />
@@ -385,12 +390,21 @@ function CompraCard({ compra }: { compra: CompraCliente }) {
           </div>
         </div>
         <div className="ml-auto shrink-0 text-right">
-          <p className="text-sm font-semibold tabular-nums text-ink-900">{money(compra.total)}</p>
-          <div className="mt-0.5 flex items-center justify-end gap-1.5">
-            <Badge tone="outline">{origen.label}</Badge>
-            <Badge tone={compra.estado_cobro === 'pagada' ? 'solid' : 'outline'}>
-              {ESTADO_LABEL[compra.estado_cobro] ?? compra.estado_cobro}
-            </Badge>
+          <p
+            className={cn(
+              'text-sm font-semibold tabular-nums',
+              esNota ? 'text-ink-500' : 'text-ink-900',
+            )}
+          >
+            {money(compra.total)}
+          </p>
+          <div className="mt-0.5 flex flex-wrap items-center justify-end gap-1.5">
+            <Badge tone="outline">{esNota ? 'Nota de crédito' : origen.label}</Badge>
+            {!esNota && (
+              <Badge tone={compra.estado_cobro === 'pagada' ? 'solid' : 'outline'}>
+                {ESTADO_LABEL[compra.estado_cobro] ?? compra.estado_cobro}
+              </Badge>
+            )}
           </div>
         </div>
       </div>

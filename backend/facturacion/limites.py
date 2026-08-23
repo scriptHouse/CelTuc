@@ -12,7 +12,7 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from . import logica
-from .models import Comprobante, Emisor, LimiteMensual
+from .models import Comprobante, Emisor, LimiteMensual, total_firmado
 
 MESES = (
     'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio',
@@ -25,15 +25,16 @@ def nombre_mes(mes: int) -> str:
 
 
 def facturado_del_mes(emisor: Emisor, anio: int, mes: int) -> Decimal:
-    """Total emitido por el emisor en ese mes calendario.
+    """Total NETO emitido por el emisor en ese mes calendario.
 
     Usa ``Comprobante.todos`` (incluye los ocultados de la lista): el borrado en
     la app es logico y NO anula el comprobante en ARCA, asi que fiscalmente ese
-    monto se facturo igual y cuenta para el tope.
+    monto se facturo igual y cuenta para el tope. Las notas de credito RESTAN:
+    acreditar una factura devuelve ese lugar en el tope del mes.
     """
     agg = Comprobante.todos.filter(
         emisor=emisor, fecha__year=anio, fecha__month=mes,
-    ).aggregate(total=Sum('total'))
+    ).aggregate(total=Sum(total_firmado()))
     return agg['total'] or Decimal('0')
 
 
@@ -47,7 +48,7 @@ def estado_limites_del_anio(emisor: Emisor, anio: int) -> list[dict]:
     filas = (
         Comprobante.todos.filter(emisor=emisor, fecha__year=anio)
         .values('fecha__month')
-        .annotate(total=Sum('total'))
+        .annotate(total=Sum(total_firmado()))
     )
     for fila in filas:
         facturado_por_mes[fila['fecha__month']] = fila['total'] or Decimal('0')

@@ -5,9 +5,12 @@ import { money } from '@/lib/format'
 import { LOGO_CELTUC } from './assets'
 
 /* ============================================================================
- * Factura electrónica (PDF) — estilo ARCA/AFIP, monocromático.
- * Incluye letra (A/B/C), datos de emisor y cliente, ítems, totales, CAE con su
- * vencimiento y el código QR oficial. Tipografía Helvetica (sin red).
+ * Comprobante electrónico (PDF) — estilo ARCA/AFIP, monocromático.
+ * Sirve para los dos documentos que emite el sistema, FACTURA y NOTA DE CRÉDITO:
+ * cambian el título, el código bajo la letra y, en la nota, el renglón que dice
+ * qué factura acredita. Todo lo demás (letra, emisor, cliente, ítems, totales,
+ * CAE y QR) es idéntico, porque fiscalmente lo es.
+ * Tipografía Helvetica (sin red).
  *
  * Marca: los emisores Responsables Inscriptos (CelTuc) llevan el logo de CelTuc;
  * los Monotributistas NO llevan marca alguna (facturan como terceros, no tienen
@@ -20,7 +23,10 @@ const REG = 'Helvetica'
 const BOLD = 'Helvetica-Bold'
 
 // Código de comprobante según la letra (lo que ARCA imprime bajo la letra).
+// Son los mismos códigos que se le piden al web service: factura 01/06/11 y
+// nota de crédito 03/08/13.
 const COD: Record<string, string> = { A: '01', B: '06', C: '11' }
+const COD_NC: Record<string, string> = { A: '03', B: '08', C: '13' }
 const DOC: Record<string, string> = { CUIT: 'CUIT', CUIL: 'CUIL', DNI: 'DNI', CF: 'Consumidor Final' }
 
 /** Formatea 'yyyy-mm-dd' como dd/mm/aaaa sin desfase de zona horaria. */
@@ -78,6 +84,7 @@ const s = StyleSheet.create({
 })
 
 export function FacturaPdf({ c }: { c: Comprobante }) {
+  const esNota = c.clase === 'nota_credito'
   const conIva = c.tipo !== 'C'
   const alic = Number(c.alicuota_iva ?? 21)
   // La marca se decide por el TIPO del comprobante (dato inmutable guardado al
@@ -89,7 +96,10 @@ export function FacturaPdf({ c }: { c: Comprobante }) {
   const condicionEmisor = c.tipo === 'C' ? 'Monotributista' : 'Responsable Inscripto'
 
   return (
-    <Document title={`Factura ${c.tipo} ${c.numero_formateado}`} author={c.emisor_nombre || 'Emisor'}>
+    <Document
+      title={`${esNota ? 'Nota de crédito' : 'Factura'} ${c.tipo} ${c.numero_formateado}`}
+      author={c.emisor_nombre || 'Emisor'}
+    >
       <Page size="A4" style={s.page}>
         <View style={s.frame}>
           {/* Encabezado: emisor | letra | comprobante */}
@@ -103,11 +113,11 @@ export function FacturaPdf({ c }: { c: Comprobante }) {
 
             <View style={s.letterBox}>
               <Text style={s.letter}>{c.tipo}</Text>
-              <Text style={s.cod}>COD. {COD[c.tipo] ?? ''}</Text>
+              <Text style={s.cod}>COD. {(esNota ? COD_NC : COD)[c.tipo] ?? ''}</Text>
             </View>
 
             <View style={[s.headCol, { width: '46%' }]}>
-              <Text style={s.docTitle}>FACTURA</Text>
+              <Text style={s.docTitle}>{esNota ? 'NOTA DE CRÉDITO' : 'FACTURA'}</Text>
               <Text style={s.line}>
                 <Text style={s.label}>Comprobante N°: </Text>
                 {c.numero_formateado}
@@ -116,6 +126,13 @@ export function FacturaPdf({ c }: { c: Comprobante }) {
                 <Text style={s.label}>Fecha de Emisión: </Text>
                 {fmtFecha(c.fecha)}
               </Text>
+              {/* En la nota, qué factura acredita: es el dato que ARCA cruza. */}
+              {esNota && c.asociado && (
+                <Text style={s.line}>
+                  <Text style={s.label}>Comprobante asociado: </Text>
+                  Factura {c.asociado.tipo} {c.asociado.numero_formateado}
+                </Text>
+              )}
               <Text style={[s.line, s.muted]}>ORIGINAL</Text>
             </View>
           </View>
