@@ -5,6 +5,7 @@ from .views import (
     DocumentoArchivoView,
     DocumentoDetailView,
     DocumentoListCreateView,
+    EnviarDocumentoEmailView,
     ProximoCuponView,
 )
 
@@ -17,4 +18,5 @@ urlpatterns = [
     path('proximo-cupon/', ProximoCuponView.as_view(), name='documento-proximo-cupon'),
     path('<int:pk>/', DocumentoDetailView.as_view(), name='documento-detail'),
     path('<int:pk>/archivo/', DocumentoArchivoView.as_view(), name='documento-archivo'),
+    path('<int:pk>/enviar-email/', EnviarDocumentoEmailView.as_view(), name='documento-email'),
 ]

@@ -192,3 +192,26 @@ export function eliminarDocumento(id: number): Promise<void> {
 export function obtenerArchivoBlob(id: number): Promise<Blob> {
   return api.getBlob(`/documentos/${id}/archivo/`, token())
 }
+
+/**
+ * Manda el documento por email con su archivo adjunto.
+ *
+ * El archivo NO viaja desde el navegador: ya está guardado en el servidor, así
+ * que se envía exactamente el mismo que se descargó y se entregó. `mensaje` es
+ * el texto que se ve en el modal (la misma plantilla que usa el WhatsApp); si
+ * va vacío, el correo usa su cuerpo por defecto.
+ *
+ * Errores que puede devolver el backend: 503 si el servidor no tiene SMTP
+ * configurado, 404 si el archivo ya no está, 502 si el correo falló.
+ */
+export function enviarDocumentoEmail(
+  id: number,
+  email: string,
+  mensaje?: string,
+): Promise<{ detail: string }> {
+  return api.post<{ detail: string }>(
+    `/documentos/${id}/enviar-email/`,
+    { email, mensaje: mensaje ?? '' },
+    token(),
+  )
+}

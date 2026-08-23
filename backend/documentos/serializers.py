@@ -4,11 +4,15 @@ import json
 from django.core.exceptions import ObjectDoesNotExist
 from rest_framework import serializers
 
-from .models import TIPOS, DocumentoGenerado
+from .models import DocumentoGenerado
 
 # Tope del formulario guardado en `datos` (llega como texto JSON en el
 # multipart). Un documento real ronda el kB; esto solo frena un envio absurdo.
 MAX_DATOS = 200_000
+
+# Tope del mensaje del correo. Por encima del de la plantilla que lo genera
+# (10.000 en `comun.views`), asi ninguna plantilla valida se rechaza al enviar.
+MAX_MENSAJE = 12_000
 
 
 class DocumentoGeneradoSerializer(serializers.ModelSerializer):
@@ -27,7 +31,7 @@ class DocumentoGeneradoSerializer(serializers.ModelSerializer):
         )
 
     def get_tipo_nombre(self, obj):
-        return obj.tipo_nombre or TIPOS.get(obj.tipo, obj.tipo.replace('-', ' ').capitalize())
+        return obj.nombre_tipo
 
     def get_generado_por(self, obj):
         if obj.creado_por is None:
@@ -94,3 +98,17 @@ class NuevoDocumentoSerializer(serializers.ModelSerializer):
         if not isinstance(valor, dict):
             raise serializers.ValidationError({'datos': 'Los datos del formulario deben ser un objeto.'})
         return valor
+
+
+class EnviarDocumentoEmailSerializer(serializers.Serializer):
+    """Entrada del envio por email: a quien y con que texto.
+
+    El archivo NO viaja: ya esta guardado en el servidor. `mensaje` es el texto
+    que se ve en el modal (misma plantilla que el boton de WhatsApp); si viene
+    vacio, el correo usa su cuerpo por defecto.
+    """
+
+    email = serializers.EmailField()
+    mensaje = serializers.CharField(
+        required=False, allow_blank=True, max_length=MAX_MENSAJE, trim_whitespace=False,
+    )

@@ -121,3 +121,29 @@ class DocumentoGenerado(ModeloBase):
     @property
     def extension(self) -> str:
         return FORMATOS.get(self.formato, ('.bin', ''))[0]
+
+    @property
+    def nombre_tipo(self) -> str:
+        """Nombre visible del tipo, con el catalogo local como respaldo."""
+        return self.tipo_nombre or TIPOS.get(self.tipo, self.tipo.replace('-', ' ').capitalize())
+
+    @property
+    def nombre_descarga(self) -> str:
+        """Nombre con el que se entrega el archivo (descarga o adjunto de email).
+
+        Siempre termina en la extension real del formato: el nombre guardado es
+        una etiqueta que puso el navegador y podria venir sin ella.
+        """
+        nombre = self.nombre_archivo or f'documento-{self.pk}{self.extension}'
+        if not nombre.lower().endswith(self.extension):
+            nombre = f'{nombre}{self.extension}'
+        return nombre
+
+    @property
+    def content_type_efectivo(self) -> str:
+        """Content-type con el que se sirve, decidido por el formato guardado."""
+        return (
+            self.content_type
+            or FORMATOS.get(self.formato, ('', ''))[1]
+            or 'application/octet-stream'
+        )

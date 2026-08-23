@@ -85,6 +85,20 @@ class PreferenciasTests(TestCase):
             cliente.put(self._url(), {'valor': 123}, format='json').status_code, 400,
         )
 
+    def test_la_clave_de_documentos_no_pide_permiso_de_modulo(self):
+        # `documentos.mensaje_envio` va sin permiso: el modulo Documentos lo usa
+        # cualquier cuenta autenticada, igual que su historial.
+        empleado = Usuario.objects.create_user(
+            email='empdoc@celtuc.ar', username='empprefdoc', password='x',
+            rol=Rol.objects.get(nombre='Empleado'),
+        )
+        cliente = self._client(empleado)
+        url = self._url('documentos.mensaje_envio')
+        self.assertEqual(cliente.get(url).data, {'clave': 'documentos.mensaje_envio', 'valor': ''})
+        r = cliente.put(url, {'valor': 'Hola {cliente}, tu {documento}.'}, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(cliente.get(url).data['valor'], 'Hola {cliente}, tu {documento}.')
+
     def test_empleado_sin_permiso_no_accede(self):
         empleado = Usuario.objects.create_user(
             email='emp@celtuc.ar', username='emppref', password='x',

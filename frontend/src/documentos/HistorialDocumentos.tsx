@@ -11,10 +11,12 @@ import {
   Loader2,
   Printer,
   Search,
+  Send,
   Trash2,
   User,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { descargarBlob } from '@/lib/descargar'
 import { money, num, pad } from '@/lib/format'
 import { cn, ctStagger } from '@/lib/utils'
 import { useAuth } from '@/store/auth'
@@ -37,6 +39,7 @@ import {
 } from '@/services/documentos'
 import { SUCURSALES_DOC } from './content'
 import { DOC_MODULES } from './registry'
+import { EnviarDocumentoModal } from './EnviarDocumentoModal'
 
 /**
  * Historial de documentos generados: la pestaña "Archivo" del módulo.
@@ -105,18 +108,6 @@ function peso(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-/** Descarga un blob al disco con el nombre dado. */
-function bajar(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 1500)
-}
-
 export function HistorialDocumentos({ tipoInicial = '' }: { tipoInicial?: string }) {
   const toast = useToast()
   const confirm = useConfirm()
@@ -138,6 +129,9 @@ export function HistorialDocumentos({ tipoInicial = '' }: { tipoInicial?: string
   const [sucursal, setSucursal] = useState('')
   const [usuario, setUsuario] = useState('')
   const [rango, setRango] = useState<Rango>('30d')
+  // Documento que se está por enviar (WhatsApp / email). El modal se monta una
+  // sola vez para todo el listado, no uno por renglón.
+  const [aEnviar, setAEnviar] = useState<DocumentoGenerado | null>(null)
 
   const { data, isLoading, isFetching, isFetchingNextPage, fetchNextPage, hasNextPage } =
     useInfiniteQuery({
@@ -327,6 +321,7 @@ export function HistorialDocumentos({ tipoInicial = '' }: { tipoInicial?: string
                     doc={doc}
                     mostrarAutor={Boolean(primera?.puede_ver_todo)}
                     puedeEliminar={esAdmin}
+                    onEnviar={() => setAEnviar(doc)}
                     onEliminar={() => eliminar(doc)}
                   />
                 ))}
@@ -350,6 +345,8 @@ export function HistorialDocumentos({ tipoInicial = '' }: { tipoInicial?: string
           )}
         </div>
       )}
+
+      <EnviarDocumentoModal doc={aEnviar} onCerrar={() => setAEnviar(null)} />
     </div>
   )
 }
@@ -360,11 +357,13 @@ function FilaDocumento({
   doc,
   mostrarAutor,
   puedeEliminar,
+  onEnviar,
   onEliminar,
 }: {
   doc: DocumentoGenerado
   mostrarAutor: boolean
   puedeEliminar: boolean
+  onEnviar: () => void
   onEliminar: () => void
 }) {
   const toast = useToast()
@@ -388,7 +387,7 @@ function FilaDocumento({
       } else {
         // Pestaña emergente bloqueada: caemos a descarga.
         URL.revokeObjectURL(url)
-        bajar(blob, nombre)
+        descargarBlob(blob, nombre)
       }
     } catch (e) {
       console.error(e)
@@ -402,7 +401,7 @@ function FilaDocumento({
     if (bajando) return
     setBajando('descargar')
     try {
-      bajar(await obtenerArchivoBlob(doc.id), nombre)
+      descargarBlob(await obtenerArchivoBlob(doc.id), nombre)
     } catch (e) {
       console.error(e)
       toast.error('No se pudo descargar', 'Puede que el archivo ya no esté en el servidor.')
@@ -467,6 +466,15 @@ function FilaDocumento({
 
         {/* Acciones: al envolver quedan pegadas a la derecha (`ml-auto`). */}
         <div className="ml-auto flex shrink-0 items-center gap-0.5">
+          <button
+            type="button"
+            onClick={onEnviar}
+            title="Enviar por WhatsApp o email"
+            aria-label={`Enviar ${nombre}`}
+            className="grid h-9 w-9 place-items-center rounded-lg text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
+          >
+            <Send className="h-4 w-4" />
+          </button>
           {sePuedeVer && (
             <button
               type="button"

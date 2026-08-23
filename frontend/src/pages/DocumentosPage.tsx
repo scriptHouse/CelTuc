@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Archive, Building2, Clock, Eraser, FileSpreadsheet, FileText, Hash, Loader2, PackagePlus, PenLine, Printer, UserSearch } from 'lucide-react'
+import { Archive, Building2, Clock, Eraser, FileSpreadsheet, FileText, Hash, Loader2, PackagePlus, PenLine, Printer, Send, UserSearch } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
@@ -10,6 +10,7 @@ import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
 import { SumarCompraventaInventario } from '@/components/SumarCompraventaInventario'
 import { useAuth } from '@/store/auth'
+import { descargarBlob } from '@/lib/descargar'
 import { cn, ctStagger } from '@/lib/utils'
 import { PaperScaler } from '@/documentos/PaperScaler'
 import { SUCURSALES_DOC, SUCURSAL_DOC_POR_DEFECTO, direccionDeSucursal } from '@/documentos/content'
@@ -17,6 +18,7 @@ import { cvTieneEquipo, type CompraventaData } from '@/documentos/compraventaCon
 import { DOC_MODULES, PROXIMOS_DOCS } from '@/documentos/registry'
 import { HistorialDocumentos, QK_HISTORIAL } from '@/documentos/HistorialDocumentos'
 import { BuscarClienteModal } from '@/documentos/BuscarClienteModal'
+import { EnviarDocumentoModal } from '@/documentos/EnviarDocumentoModal'
 import {
   listarDocumentos,
   proximoCupon,
@@ -62,17 +64,6 @@ function listaDeCampos(campos: { documento?: string; telefono?: string; email?: 
   if (campos.email) partes.push('mail')
   if (partes.length === 1) return partes[0]
   return `${partes.slice(0, -1).join(', ')} y ${partes[partes.length - 1]}`
-}
-
-function descargar(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 1500)
 }
 
 export function DocumentosPage() {
@@ -159,6 +150,12 @@ export function DocumentosPage() {
   // confirmación). El modal también se ofrece solo al exportar el PDF.
   const [sumarInv, setSumarInv] = useState(false)
   const [buscarCliente, setBuscarCliente] = useState(false)
+  /* Último documento archivado de cada tipo: es lo que habilita «Enviar» apenas
+   * se exporta (el envío necesita el archivo ya guardado en el servidor). Va por
+   * tipo para que cambiar de plantilla no ofrezca mandar el papel de otra. */
+  const [ultimoArchivado, setUltimoArchivado] = useState<Record<string, DocumentoArchivado>>({})
+  const [aEnviar, setAEnviar] = useState<DocumentoGenerado | null>(null)
+  const enviable = ultimoArchivado[active.id] ?? null
   const cv = active.id === 'compraventa' ? (datos as CompraventaData) : null
   const equipoCargado = !!cv && cvTieneEquipo(cv)
 
@@ -220,6 +217,7 @@ export function DocumentosPage() {
         },
         blob,
       )
+      setUltimoArchivado((prev) => ({ ...prev, [active.id]: archivado }))
       if (cuponAuto) {
         // El N° de este papel ya quedó registrado: no se toca más en pantalla
         // (así reexportar el mismo documento en otro formato repite el número)
@@ -267,7 +265,7 @@ export function DocumentosPage() {
       const [{ pdf }, Pdf] = await Promise.all([import('@react-pdf/renderer'), active.loadPdf()])
       const blob = await pdf(<Pdf datos={datos} direccion={direccion} />).toBlob()
       const nombre = `${active.nombreArchivo(datos)}.pdf`
-      descargar(blob, nombre)
+      descargarBlob(blob, nombre)
       const archivado = await archivar(blob, 'pdf', nombre)
       if (archivado) {
         toast.success(
@@ -292,7 +290,7 @@ export function DocumentosPage() {
       const construir = await active.loadXlsx()
       const blob = await construir(datos, direccion)
       const nombre = `${active.nombreArchivo(datos)}.xlsx`
-      descargar(blob, nombre)
+      descargarBlob(blob, nombre)
       const archivado = await archivar(blob, 'xlsx', nombre)
       if (archivado) {
         toast.success(
@@ -329,7 +327,7 @@ export function DocumentosPage() {
       } else {
         // Popup bloqueado: caemos a descarga.
         URL.revokeObjectURL(url)
-        descargar(blob, nombre)
+        descargarBlob(blob, nombre)
         toast.success('Ticket POS80 descargado', 'Abrilo e imprimí a tamaño real (100%).')
       }
       await archivar(blob, 'pos80', nombre)
@@ -352,6 +350,8 @@ export function DocumentosPage() {
     })
     if (!ok) return
     setEstados((s) => ({ ...s, [active.id]: active.crearVacio() }))
+    // El papel en pantalla ya no es el que se archivó: no se ofrece enviarlo.
+    setUltimoArchivado(({ [active.id]: _, ...resto }) => resto)
   }
 
   const Paper = active.Paper
@@ -480,6 +480,20 @@ export function DocumentosPage() {
                 {busy === 'pdf' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
                 PDF
               </Button>
+              {/* Aparece recién cuando hay algo para mandar: el envío usa el
+                  archivo que quedó guardado al exportar, así que es el paso
+                  siguiente natural del botón de al lado. */}
+              {enviable && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setAEnviar(enviable)}
+                  disabled={!!busy}
+                  title="Enviar al cliente por WhatsApp o email el último documento exportado"
+                >
+                  <Send className="h-4 w-4" /> Enviar
+                </Button>
+              )}
             </div>
           </div>
 
@@ -563,6 +577,8 @@ export function DocumentosPage() {
           onCerrar={() => setSumarInv(false)}
         />
       )}
+
+      <EnviarDocumentoModal doc={aEnviar} onCerrar={() => setAEnviar(null)} />
     </div>
   )
 }

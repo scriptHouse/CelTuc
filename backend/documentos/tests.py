@@ -9,6 +9,7 @@ import json
 import tempfile
 from unittest.mock import patch
 
+from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -392,3 +393,149 @@ class AutocompletadoClientesTests(TestCase):
 
     def test_pide_sesion(self):
         self.assertEqual(APIClient().get(self.url).status_code, 401)
+
+
+@override_settings(
+    MEDIA_ROOT=MEDIA_TEMPORAL,
+    EMAIL_HOST='smtp.test',
+    EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend',
+)
+class EnviarDocumentoPorEmailTests(TestCase):
+    """El envio por email adjunta el ARCHIVO GUARDADO y respeta quien ve que."""
+
+    def setUp(self):
+        self.admin = Usuario.objects.create_user(
+            email='adm2@celtuc.ar', username='admmail', password='x',
+            rol=Rol.objects.get(nombre='Administrador'),
+        )
+        self.empleado = Usuario.objects.create_user(
+            email='emp2@celtuc.ar', username='empmail', password='x',
+            rol=Rol.objects.get(nombre='Empleado'),
+        )
+        self.otro = Usuario.objects.create_user(
+            email='otro2@celtuc.ar', username='otromail', password='x',
+            rol=Rol.objects.get(nombre='Empleado'),
+        )
+
+    def _client(self, user):
+        c = APIClient()
+        c.force_authenticate(user)
+        return c
+
+    def _documento(self, user, *, formato='pdf', nombre='compraventa-1234.pdf'):
+        r = self._client(user).post(
+            reverse('documentos:documento-list'),
+            {
+                'tipo': 'compraventa',
+                'tipo_nombre': 'Compra / Venta',
+                'formato': formato,
+                'nombre_archivo': nombre,
+                'sucursal': 'Salta',
+                'referencia': '1234',
+                'cliente': 'Juan Perez',
+                'cliente_documento': '30111222',
+                'detalle': 'iPhone 13 Pro',
+                'total': '1500000.00',
+                'datos': json.dumps(DATOS_CV),
+                'archivo': SimpleUploadedFile(nombre, b'%PDF-1.4 fake',
+                                              content_type='application/pdf'),
+            },
+            format='multipart',
+        )
+        self.assertEqual(r.status_code, 201)
+        return r.data['id']
+
+    def _url(self, doc_id):
+        return reverse('documentos:documento-email', args=[doc_id])
+
+    def test_envia_el_archivo_guardado_como_adjunto(self):
+        doc_id = self._documento(self.empleado)
+        r = self._client(self.empleado).post(
+            self._url(doc_id),
+            {'email': 'dest@x.com', 'mensaje': 'Hola Juan,\n*Compra / Venta*'},
+            format='json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+        correo = mail.outbox[0]
+        self.assertEqual(correo.to, ['dest@x.com'])
+        self.assertIn('1234', correo.subject)
+        self.assertIn('Hola Juan,', correo.body)
+        nombre, contenido, tipo = correo.attachments[0]
+        self.assertEqual(nombre, 'compraventa-1234.pdf')
+        self.assertEqual(contenido, b'%PDF-1.4 fake')
+        self.assertEqual(tipo, 'application/pdf')
+
+    def test_el_mensaje_del_usuario_no_inyecta_html(self):
+        doc_id = self._documento(self.empleado)
+        self._client(self.empleado).post(
+            self._url(doc_id), {'email': 'dest@x.com', 'mensaje': '<script>alert(1)</script>'},
+            format='json',
+        )
+        html_correo = mail.outbox[0].alternatives[0][0]
+        self.assertNotIn('<script>', html_correo)
+        self.assertIn('&lt;script&gt;', html_correo)
+
+    def test_sin_mensaje_usa_el_cuerpo_por_defecto(self):
+        doc_id = self._documento(self.empleado)
+        r = self._client(self.empleado).post(
+            self._url(doc_id), {'email': 'dest@x.com'}, format='json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('Hola Juan Perez,', mail.outbox[0].body)
+
+    def test_el_excel_va_con_su_content_type(self):
+        doc_id = self._documento(self.empleado, formato='xlsx', nombre='compraventa-1234.xlsx')
+        self._client(self.empleado).post(self._url(doc_id), {'email': 'd@x.com'}, format='json')
+        nombre, _, tipo = mail.outbox[0].attachments[0]
+        self.assertEqual(nombre, 'compraventa-1234.xlsx')
+        self.assertEqual(
+            tipo,
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+
+    def test_un_empleado_no_envia_el_documento_de_otro(self):
+        doc_id = self._documento(self.otro)
+        r = self._client(self.empleado).post(self._url(doc_id), {'email': 'd@x.com'}, format='json')
+        self.assertEqual(r.status_code, 404)
+        self.assertEqual(len(mail.outbox), 0)
+        # El admin ve (y por lo tanto envia) el de todo el equipo.
+        r = self._client(self.admin).post(self._url(doc_id), {'email': 'd@x.com'}, format='json')
+        self.assertEqual(r.status_code, 200)
+
+    def test_sin_sesion_no_se_envia_nada(self):
+        doc_id = self._documento(self.empleado)
+        r = APIClient().post(self._url(doc_id), {'email': 'd@x.com'}, format='json')
+        self.assertIn(r.status_code, (401, 403))
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_email_invalido_es_400(self):
+        doc_id = self._documento(self.empleado)
+        r = self._client(self.empleado).post(self._url(doc_id), {'email': 'no-es-un-mail'},
+                                             format='json')
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(len(mail.outbox), 0)
+
+    @override_settings(EMAIL_HOST='')
+    def test_sin_smtp_configurado_avisa(self):
+        doc_id = self._documento(self.empleado)
+        r = self._client(self.empleado).post(self._url(doc_id), {'email': 'd@x.com'},
+                                             format='json')
+        self.assertEqual(r.status_code, 503)
+
+    def test_si_el_archivo_ya_no_esta_avisa(self):
+        doc_id = self._documento(self.empleado)
+        doc = DocumentoGenerado.objects.get(pk=doc_id)
+        doc.archivo.storage.delete(doc.archivo.name)
+        r = self._client(self.empleado).post(self._url(doc_id), {'email': 'd@x.com'},
+                                             format='json')
+        self.assertEqual(r.status_code, 404)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_enviar_no_toca_el_historial(self):
+        doc_id = self._documento(self.empleado)
+        antes = DocumentoGenerado.objects.get(pk=doc_id).actualizado
+        self._client(self.empleado).post(self._url(doc_id), {'email': 'd@x.com'}, format='json')
+        doc = DocumentoGenerado.objects.get(pk=doc_id)
+        self.assertEqual(doc.actualizado, antes)
+        self.assertTrue(doc.archivo.storage.exists(doc.archivo.name))

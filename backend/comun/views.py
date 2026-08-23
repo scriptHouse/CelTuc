@@ -18,6 +18,9 @@ from .models import Preferencia
 CLAVES_PREFERENCIAS = {
     'facturacion.mensaje_whatsapp': 'ver_facturacion',
     'cotizaciones.mensaje_whatsapp': 'ver_cotizaciones',
+    # Documentos no tiene permiso de modulo propio (lo usa cualquier cuenta
+    # autenticada, igual que su historial), por eso la clave va sin permiso.
+    'documentos.mensaje_envio': None,
 }
 
 # Tope holgado para plantillas de texto; corta un mal uso, no un uso real.

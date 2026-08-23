@@ -219,5 +219,24 @@ export const DOC_MODULES: DocModule<any>[] = [
   garantiaAccModule,
 ]
 
+/**
+ * Todos los módulos por id, incluidos los que hoy no aparecen en el selector:
+ * el historial guarda documentos de tipos que después se ocultaron (Recepción),
+ * y para ellos también hay que saber qué campo del formulario era el teléfono.
+ */
+// `any` por lo mismo que `DOC_MODULES`: la colección es heterogénea (cada
+// módulo tiene su propio tipo de datos) y se usa de forma genérica.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ModuloCualquiera = DocModule<any>
+
+const MODULOS_POR_ID = new Map<string, ModuloCualquiera>(
+  [...DOC_MODULES, recepcionModule].map((m) => [m.id, m] as [string, ModuloCualquiera]),
+)
+
+/** El módulo de un tipo de documento (`compraventa`, `sena`…), si existe. */
+export function moduloDe(tipo: string): ModuloCualquiera | undefined {
+  return MODULOS_POR_ID.get(tipo)
+}
+
 /** Próximos documentos (aún sin construir). */
 export const PROXIMOS_DOCS: Array<{ id: string; nombre: string; descripcion: string }> = []

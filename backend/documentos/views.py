@@ -6,6 +6,8 @@
   equipo.
 - Eliminar: solo administradores, y es borrado logico (sale del historial pero
   no se pierde, y queda en /auditoria quien lo saco).
+- Enviar por email: el mismo alcance que la descarga (cada uno puede mandar lo
+  que puede ver). No cambia el documento: es como volver a imprimirlo.
 
 Los archivos no tienen URL publica: se sirven por un endpoint autenticado con
 el content-type que decide el servidor segun el formato guardado.
@@ -24,8 +26,13 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .email import ArchivoNoDisponible, EmailNoConfigurado, enviar_documento
 from .models import FORMATOS, DocumentoGenerado
-from .serializers import DocumentoGeneradoSerializer, NuevoDocumentoSerializer
+from .serializers import (
+    DocumentoGeneradoSerializer,
+    EnviarDocumentoEmailSerializer,
+    NuevoDocumentoSerializer,
+)
 
 # nginx (deploy/nginx.conf) corta el request en 20 MB. Un PDF de estos pesa
 # menos de 1 MB; el tope es un cinturon de seguridad, no un limite real.
@@ -337,14 +344,42 @@ class DocumentoArchivoView(APIView):
         except (FileNotFoundError, ValueError):
             return Response({'detail': 'El archivo ya no esta disponible en el servidor.'},
                             status=status.HTTP_404_NOT_FOUND)
-        respuesta = FileResponse(
-            contenido,
-            content_type=documento.content_type or FORMATOS.get(documento.formato, ('', ''))[1]
-            or 'application/octet-stream',
-        )
-        nombre = documento.nombre_archivo or f'documento-{documento.pk}{documento.extension}'
-        if not nombre.lower().endswith(documento.extension):
-            nombre = f'{nombre}{documento.extension}'
+        respuesta = FileResponse(contenido, content_type=documento.content_type_efectivo)
         disposicion = 'attachment' if request.query_params.get('descargar') else 'inline'
-        respuesta['Content-Disposition'] = f"{disposicion}; filename*=UTF-8''{quote(nombre)}"
+        respuesta['Content-Disposition'] = (
+            f"{disposicion}; filename*=UTF-8''{quote(documento.nombre_descarga)}"
+        )
         return respuesta
+
+
+class EnviarDocumentoEmailView(APIView):
+    """POST: manda por email el documento archivado, con su archivo adjunto.
+
+    Mismo alcance que la descarga (`_visibles_para`): cada cuenta puede enviar
+    lo que puede ver, y un empleado no puede mandar el documento de otro. No
+    toca el historial ni el archivo: es la misma entrega, por otro canal.
+
+    Nunca devuelve un 500 opaco: sin SMTP configurado avisa 503, si el archivo
+    ya no esta 404, y cualquier otro fallo del correo 502 con el detalle.
+    """
+
+    permission_classes = [HistorialDocumentos]
+
+    def post(self, request, pk):
+        documento = get_object_or_404(_visibles_para(request.user), pk=pk)
+        entrada = EnviarDocumentoEmailSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        destino = entrada.validated_data['email']
+        mensaje = (entrada.validated_data.get('mensaje') or '').strip()
+
+        try:
+            enviar_documento(documento, destino, mensaje or None)
+        except EmailNoConfigurado as e:
+            return Response({'detail': str(e)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        except ArchivoNoDisponible as e:
+            return Response({'detail': str(e)}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:  # SMTP caido, credenciales mal, timeout...
+            logger.exception('No se pudo enviar por email el documento %s', documento.pk)
+            return Response({'detail': f'No se pudo enviar el email: {e}'},
+                            status=status.HTTP_502_BAD_GATEWAY)
+        return Response({'detail': f'Documento enviado a {destino}.'})
