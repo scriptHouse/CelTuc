@@ -463,10 +463,20 @@ export function PresupuestoServicePdf({
             </View>
 
             <View style={{ height: 7 }} />
-            <PdfRotulo>{SERVICE_LABELS.equipo}</PdfRotulo>
-            <PdfCaja>
-              <Text style={{ fontSize: pt(11) }}>{datos.equipo}</Text>
-            </PdfCaja>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <View style={{ flex: 1 }}>
+                <PdfRotulo>{SERVICE_LABELS.equipo}</PdfRotulo>
+                <PdfCaja>
+                  <Text style={{ fontSize: pt(11) }}>{datos.equipo}</Text>
+                </PdfCaja>
+              </View>
+              <View style={{ width: 210 }}>
+                <PdfRotulo>{SERVICE_LABELS.pin}</PdfRotulo>
+                <PdfCaja>
+                  <Text style={{ fontSize: pt(11) }}>{datos.pin}</Text>
+                </PdfCaja>
+              </View>
+            </View>
 
             <View style={{ height: 7 }} />
             <PdfRotulo>{SERVICE_LABELS.reparacion}</PdfRotulo>

@@ -325,12 +325,18 @@ export async function construirPresupuestoServiceXlsx(
   pintar(ws, 'B6', GRIS)
   pintar(ws, 'E6', GRIS)
 
-  // Equipo
+  // Equipo y PIN: mismo reparto de columnas que CLIENTE / TEL, asi las dos
+  // cajas de la derecha quedan alineadas igual que en el PDF.
   put(ws, 'B7', SERVICE_LABELS.equipo, calibri(10, true), ALIGN.left)
-  ws.mergeCells('B8:F8')
+  put(ws, 'E7', SERVICE_LABELS.pin, calibri(10, true), ALIGN.right)
+  ws.mergeCells('B8:D8')
   put(ws, 'B8', d.equipo, calibri(11), ALIGN.left)
-  b.caja(2, 8, 6, 8)
+  ws.mergeCells('E8:F8')
+  put(ws, 'E8', d.pin, calibri(11), ALIGN.center)
+  b.caja(2, 8, 4, 8)
+  b.caja(5, 8, 6, 8)
   pintar(ws, 'B8', GRIS)
+  pintar(ws, 'E8', GRIS)
 
   // Reparación a realizar
   put(ws, 'B9', SERVICE_LABELS.reparacion, calibri(10, true), ALIGN.left)

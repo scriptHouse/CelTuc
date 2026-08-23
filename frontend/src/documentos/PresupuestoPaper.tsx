@@ -913,10 +913,22 @@ export function PresupuestoServicePaper({
 
         <Spacer h={7} />
 
-        <Rotulo>{SERVICE_LABELS.equipo}</Rotulo>
-        <CajaCampo>
-          <Field value={datos.equipo} onChange={set('equipo')} readOnly={readOnly} ariaLabel="Equipo" style={{ fontSize: pt(11) }} />
-        </CajaCampo>
+        {/* El PIN va al lado del equipo y con el mismo ancho que el TEL de
+            arriba: las dos cajas de la derecha quedan alineadas. */}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ flex: 1 }}>
+            <Rotulo>{SERVICE_LABELS.equipo}</Rotulo>
+            <CajaCampo>
+              <Field value={datos.equipo} onChange={set('equipo')} readOnly={readOnly} ariaLabel="Equipo" style={{ fontSize: pt(11) }} />
+            </CajaCampo>
+          </div>
+          <div style={{ width: 210 }}>
+            <Rotulo>{SERVICE_LABELS.pin}</Rotulo>
+            <CajaCampo>
+              <Field value={datos.pin} onChange={set('pin')} readOnly={readOnly} ariaLabel="PIN del equipo" style={{ fontSize: pt(11) }} />
+            </CajaCampo>
+          </div>
+        </div>
 
         <Spacer h={7} />
 

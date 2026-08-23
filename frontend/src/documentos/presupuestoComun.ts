@@ -230,6 +230,8 @@ export interface PresupuestoServiceData {
   cliente: string
   telefono: string
   equipo: string
+  /** Codigo de desbloqueo del equipo: sin el, el service no puede probarlo. */
+  pin: string
   reparacion: string
   obs: string
   /** Precio de lista, en pesos. Es la base de las cuotas. */
@@ -249,6 +251,7 @@ export function presupuestoServiceVacio(): PresupuestoServiceData {
     cliente: '',
     telefono: '',
     equipo: '',
+    pin: '',
     reparacion: '',
     obs: '',
     precioLista: '',
@@ -280,6 +283,7 @@ export const SERVICE_LABELS = {
   cliente: 'CLIENTE',
   telefono: 'TEL',
   equipo: 'EQUIPO',
+  pin: 'PIN',
   reparacion: 'REPARACIÓN A REALIZAR',
   obs: 'OBS.',
   total: 'TOTAL PESOS',
