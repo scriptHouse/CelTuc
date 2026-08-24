@@ -203,10 +203,16 @@ export interface NuevoComprobante {
   /** True = el usuario ya confirmó emitir aunque se pase el límite mensual. */
   confirmar_limite?: boolean
   /**
-   * Concepto del banco con el que emitir: si viene, TODOS los renglones se
-   * juntan en uno solo con ese texto. Vacío = factura con el detalle real.
+   * Concepto del banco con el que emitir: si viene, los renglones dicen ese
+   * texto. Vacío = factura con el detalle real.
    */
   concepto_generico?: number | null
+  /**
+   * Cómo sale ese concepto: `true` (por defecto) junta TODO en un renglón por
+   * el total; `false` deja un renglón por ítem, cada uno con su cantidad y su
+   * precio. El total no cambia en ningún caso.
+   */
+  concepto_agrupar?: boolean
 }
 
 /** Emite el comprobante: el backend pide el CAE a ARCA y lo guarda. */

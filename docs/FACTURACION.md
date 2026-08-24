@@ -168,13 +168,33 @@ La app sigue los patrones del proyecto:
 
 ### `concepto.py` — el concepto de factura
 
-Una factura se puede emitir **«con concepto»**: en vez de un renglón por producto, sale
-**UN solo renglón** con un texto del banco, por el total. Quien factura lo decide en el
-propio modal de emisión, con un check:
+Una factura se puede emitir **«con concepto»**: en vez de decir qué producto se vendió,
+los renglones dicen un texto del banco. Quien factura toma **dos decisiones** en el propio
+modal de emisión.
+
+**1. Si usa concepto**, con un check:
 
 - Emisor **Monotributista** → el check arranca **tildado**. Si lo destildan, aparece una
   advertencia de que la factura va a mostrar el nombre de cada producto.
 - Emisor **Responsable Inscripto** → arranca **destildado** (detalle real).
+
+**2. Cómo sale**, con dos botones. Las dos formas suman exactamente lo mismo; lo único que
+cambia es en cuántos renglones se imprime:
+
+| | Qué imprime | Dos ítems de $700.000 |
+|---|---|---|
+| **Todo en un renglón** (por defecto, lo de siempre) | UN renglón con el texto, `cantidad = 1` y precio igual a la suma | un renglón de $1.400.000 |
+| **Un renglón por ítem** | Se mantienen los renglones, cada uno con **su** cantidad y **su** precio; solo cambia lo que dice | dos renglones de $700.000 |
+
+La segunda forma sirve cuando el cliente necesita ver los renglones separados (dos
+equipos, dos servicios) pero sin que la factura diga qué era cada cosa.
+
+Debajo de los dos botones hay una **vista previa real** de los renglones que se van a
+imprimir, con su cantidad, su precio y su subtotal: se ve el resultado antes de emitir. La
+calcula `renglonesDeFactura()` (`frontend/src/lib/conceptoGenerico.ts`), que espeja a
+`aplicar_concepto()` del backend — y hay un test
+(`facturacion/test_preview_concepto.py`) que corre los mismos casos de los dos lados y
+compara, para que la vista previa no pueda mentir.
 
 El texto sale del **banco de conceptos** (`ConceptoFactura`, tabla
 `facturacion_conceptos`): los administradores crean, editan, desactivan y marcan cuál es
@@ -185,20 +205,23 @@ Permisos: leer el banco alcanza con `ver_facturacion` (para poder elegir al fact
 crear/editar/desactivar es de administradores (`LecturaConPermisoEscrituraAdmin`). Además,
 quien factura solo ve los activos; el administrador ve todos, para reactivarlos.
 
-Al emitir, el front manda `concepto_generico` (el id elegido) o nada. Con id,
-`agrupar_en_concepto()` junta todos los renglones en uno con `cantidad = 1` y precio igual
-a la suma de los subtotales.
+Al emitir, el front manda `concepto_generico` (el id elegido) o nada, y
+`concepto_agrupar` (`true` por defecto). Con id, `aplicar_concepto()` arma los renglones:
+agrupados (`agrupar_en_concepto()`, uno con `cantidad = 1` y precio igual a la suma) o uno
+por ítem con el texto. Sin `concepto_agrupar` se agrupa, así que **quien ya emitía como
+antes sigue emitiendo igual**.
 
 Lo que **no** cambia, y es la razón de que esto sea seguro:
 
 - **ARCA no se entera.** El WSFEv1 solo recibe importes (`ImpTotal`, `ImpNeto`, `ImpIVA`,
   `DocTipo`…): el detalle de los renglones nunca viaja. Cambiar descripciones no puede
   alterar un CAE.
-- **El total no se mueve.** Los totales se calculan **después** de agrupar, sobre la
-  lista final, así que la factura siempre cierra consigo misma (que es lo que ARCA
-  valida contra `ImpTotal`).
+- **El total no se mueve, en ninguna de las dos formas.** Los totales se calculan
+  **después** de armar los renglones, sobre la lista final, así que la factura siempre
+  cierra consigo misma (que es lo que ARCA valida contra `ImpTotal`).
 - **El stock se descuenta aparte**, con la lista de ítems **original**
-  (`views._descontar_stock`): agrupar no le saca el descuento a ningún producto.
+  (`views._descontar_stock`): ni agrupar ni renombrar le sacan el descuento a ningún
+  producto.
 - Una factura emitida **sin** concepto sale exactamente igual que siempre.
 
 Quien realmente agrupa es el backend, así que no se puede saltear desde la API, y un

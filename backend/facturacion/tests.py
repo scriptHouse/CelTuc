@@ -20,7 +20,7 @@ from usuarios.models import Permiso, Rol, Usuario
 
 from .arca import qr
 from .arca.servicio import _construir_detalle, _iva_id
-from .concepto import agrupar_en_concepto
+from .concepto import agrupar_en_concepto, aplicar_concepto
 from .limites import facturado_del_mes
 from .logica import calcular_totales, tipo_comprobante
 from .models import Comprobante, ConceptoFactura, Emisor, LimiteMensual
@@ -801,6 +801,58 @@ class AgruparEnConceptoTests(TestCase):
         self.assertEqual(len(agrupar_en_concepto(items, largo)[0]['descripcion']), 200)
 
 
+class AplicarConceptoTests(TestCase):
+    """`aplicar_concepto`: agrupado (lo de siempre) o un renglon por item."""
+
+    ITEMS = [
+        {'descripcion': 'iPhone 13', 'cantidad': Decimal('1'), 'precio_unitario': Decimal('700000')},
+        {'descripcion': 'iPhone 14', 'cantidad': Decimal('1'), 'precio_unitario': Decimal('700000')},
+    ]
+
+    def test_agrupado_junta_todo_en_uno(self):
+        r = aplicar_concepto(self.ITEMS, 'Equipos de telefonia', agrupar=True)
+        self.assertEqual(len(r), 1)
+        self.assertEqual(r[0]['descripcion'], 'Equipos de telefonia')
+        self.assertEqual(r[0]['precio_unitario'], Decimal('1400000.00'))
+
+    def test_sin_agrupar_mantiene_un_renglon_por_item(self):
+        r = aplicar_concepto(self.ITEMS, 'Equipos de telefonia', agrupar=False)
+        self.assertEqual(len(r), 2)
+        self.assertEqual([i['descripcion'] for i in r], ['Equipos de telefonia'] * 2)
+        # Cantidad y precio de cada uno quedan intactos: solo cambia el texto.
+        self.assertEqual([i['cantidad'] for i in r], [Decimal('1'), Decimal('1')])
+        self.assertEqual([i['precio_unitario'] for i in r], [Decimal('700000')] * 2)
+
+    def test_las_dos_formas_suman_lo_mismo(self):
+        agrupado = aplicar_concepto(self.ITEMS, 'X', agrupar=True)
+        suelto = aplicar_concepto(self.ITEMS, 'X', agrupar=False)
+        total = lambda items: sum(i['cantidad'] * i['precio_unitario'] for i in items)
+        self.assertEqual(total(agrupado), total(suelto))
+        self.assertEqual(total(agrupado), Decimal('1400000'))
+
+    def test_por_defecto_agrupa(self):
+        self.assertEqual(len(aplicar_concepto(self.ITEMS, 'X')), 1)
+
+    def test_sin_texto_no_toca_nada(self):
+        for agrupar in (True, False):
+            self.assertEqual(aplicar_concepto(self.ITEMS, '', agrupar=agrupar), self.ITEMS)
+
+    def test_sin_items_no_rompe(self):
+        for agrupar in (True, False):
+            self.assertEqual(aplicar_concepto([], 'X', agrupar=agrupar), [])
+
+    def test_el_texto_largo_se_recorta_igual_en_las_dos(self):
+        largo = 'A' * 400
+        for agrupar in (True, False):
+            r = aplicar_concepto(self.ITEMS, largo, agrupar=agrupar)
+            self.assertEqual(len(r[0]['descripcion']), 200)
+
+    def test_no_modifica_la_lista_original(self):
+        original = [dict(i) for i in self.ITEMS]
+        aplicar_concepto(self.ITEMS, 'Otro texto', agrupar=False)
+        self.assertEqual(self.ITEMS, original)
+
+
 class ConceptoPermisosTests(TestCase):
     """Leer el banco lo puede hacer quien factura; crearlo/editarlo es de admins."""
 
@@ -945,6 +997,59 @@ class EmitirConConceptoTests(TestCase):
             StockProducto.objects.get(producto=self.producto, sucursal=self.sucursal).cantidad, 3)
         self.assertEqual(
             StockProducto.objects.get(producto=self.otro, sucursal=self.sucursal).cantidad, 4)
+
+    @patch('facturacion.views.servicio.emitir')
+    def test_sin_agrupar_sale_un_renglon_por_item_con_el_texto(self, mock_emitir):
+        """Lo que se pidio: dos items no tienen por que salir en un solo renglon."""
+        mock_emitir.side_effect = self._emitir_mock
+        r = self.api.post(
+            reverse('facturacion:comprobante-list'),
+            self._payload(concepto_generico=self.concepto.id, concepto_agrupar=False),
+            format='json',
+        )
+        self.assertEqual(r.status_code, 201)
+        enviados = mock_emitir.call_args.args[1]['items']
+        self.assertEqual(len(enviados), 2)
+        self.assertEqual([i['descripcion'] for i in enviados], ['Accesorios varios'] * 2)
+        self.assertEqual([i['cantidad'] for i in enviados], [2, 1])
+        self.assertEqual([i['precio_unitario'] for i in enviados], [100, 50])
+        # El flag es interno: no viaja a la emision.
+        self.assertNotIn('concepto_agrupar', mock_emitir.call_args.args[1])
+        # Y la plata es exactamente la misma que agrupando.
+        self.assertEqual(Comprobante.objects.get(pk=r.data['id']).total, Decimal('250.00'))
+
+    @patch('facturacion.views.servicio.emitir')
+    def test_sin_agrupar_tampoco_le_saca_el_stock_a_nadie(self, mock_emitir):
+        from inventario.models import StockProducto
+        mock_emitir.side_effect = self._emitir_mock
+        r = self.api.post(
+            reverse('facturacion:comprobante-list'),
+            self._payload(concepto_generico=self.concepto.id, concepto_agrupar=False,
+                          sucursal_stock=self.sucursal.id),
+            format='json',
+        )
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(
+            StockProducto.objects.get(producto=self.producto, sucursal=self.sucursal).cantidad, 3)
+        self.assertEqual(
+            StockProducto.objects.get(producto=self.otro, sucursal=self.sucursal).cantidad, 4)
+
+    @patch('facturacion.views.servicio.emitir')
+    def test_sin_el_flag_se_sigue_agrupando(self, mock_emitir):
+        """Compatibilidad: quien no manda nada emite igual que siempre."""
+        mock_emitir.side_effect = self._emitir_mock
+        self.api.post(reverse('facturacion:comprobante-list'),
+                      self._payload(concepto_generico=self.concepto.id), format='json')
+        self.assertEqual(len(mock_emitir.call_args.args[1]['items']), 1)
+
+    @patch('facturacion.views.servicio.emitir')
+    def test_el_flag_sin_concepto_no_hace_nada(self, mock_emitir):
+        """Sin concepto elegido, el detalle real sale igual con o sin el flag."""
+        mock_emitir.side_effect = self._emitir_mock
+        self.api.post(reverse('facturacion:comprobante-list'),
+                      self._payload(concepto_agrupar=False), format='json')
+        enviados = mock_emitir.call_args.args[1]['items']
+        self.assertEqual([i['descripcion'] for i in enviados], ['Parlante JBL', 'Cable comun'])
 
     @patch('facturacion.views.servicio.emitir')
     def test_no_se_puede_emitir_con_un_concepto_desactivado(self, mock_emitir):

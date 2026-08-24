@@ -181,6 +181,10 @@ class CrearComprobanteSerializer(serializers.Serializer):
         queryset=ConceptoFactura.objects.filter(activo=True),
         required=False, allow_null=True,
     )
+    # Como sale ese concepto: True (lo de siempre) junta TODO en un renglon por
+    # el total; False deja un renglon por item, cada uno con su cantidad y su
+    # precio y el texto del concepto. El total no cambia en ningun caso.
+    concepto_agrupar = serializers.BooleanField(default=True)
 
     def validate_cliente_nombre(self, value):
         value = value.strip()

@@ -83,6 +83,7 @@ import { tomarBorradorFacturaVenta, type BorradorFacturaVenta } from '@/lib/borr
 import {
   conceptoPorDefecto,
   MAX_LARGO_CONCEPTO,
+  renglonesDeFactura,
 } from '@/lib/conceptoGenerico'
 import { AperturaModal, type AperturaValues } from '@/components/caja/AperturaModal'
 import { CuentaCard } from '@/components/facturacion/CuentaCard'
@@ -1782,6 +1783,9 @@ function NuevaFacturaModal({
   // Monotributo y destildado en Responsable Inscripto (ver `conceptoPorDefecto`).
   const [usarConcepto, setUsarConcepto] = useState(false)
   const [conceptoId, setConceptoId] = useState('')
+  // Cómo sale ese concepto: todo junto en un renglón (lo de siempre) o un
+  // renglón por ítem, cada uno con su cantidad y su precio.
+  const [agruparConcepto, setAgruparConcepto] = useState(true)
 
   // Autocompletado de clientes: al escribir el nombre se busca en la base (por
   // nombre, teléfono o documento) y se puede precargar un cliente ya guardado.
@@ -1860,6 +1864,7 @@ function NuevaFacturaModal({
     setUsarConcepto(conceptoPorDefecto(emisor.condicion) && conceptos.length > 0)
     const inicial = conceptos.find((c) => c.predeterminado) ?? conceptos[0]
     setConceptoId(inicial ? String(inicial.id) : '')
+    setAgruparConcepto(true)
   }, [open, emisor, prefill, conceptos])
 
   // El descuento de stock arranca SIEMPRE activado: preseleccionado en la sucursal
@@ -1893,6 +1898,32 @@ function NuevaFacturaModal({
         tipo,
       ),
     [items, tipo],
+  )
+
+  /**
+   * Cómo va a quedar la factura: los renglones tal cual se van a imprimir, ya
+   * con el concepto aplicado (o el detalle real). Se calcula con la misma
+   * función que espeja al backend, así la vista previa no puede mentir.
+   */
+  const textoConcepto = conceptos.find((c) => String(c.id) === conceptoId)?.texto ?? ''
+  const itemsCargados = useMemo(
+    () =>
+      items
+        .filter((i) => i.descripcion.trim() && i.cantidad > 0)
+        .map((i) => ({
+          descripcion: i.descripcion.trim(),
+          cantidad: i.cantidad,
+          precioUnitario: i.precioUnitario,
+        })),
+    [items],
+  )
+  const renglonesFactura = useMemo(
+    () =>
+      renglonesDeFactura(
+        itemsCargados,
+        usarConcepto && textoConcepto ? { texto: textoConcepto, agrupar: agruparConcepto } : null,
+      ),
+    [itemsCargados, usarConcepto, textoConcepto, agruparConcepto],
   )
 
   // Aviso preventivo: si con este total el mes de la fecha de emisión queda
@@ -2030,9 +2061,11 @@ function NuevaFacturaModal({
       // nunca viaja (el selector ni se muestra), así nada se descuenta dos veces.
       sucursal_stock:
         prefill?.items.length || !sucursalStock ? undefined : Number(sucursalStock),
-      // Con concepto elegido, el backend junta TODOS los renglones en uno solo
-      // con ese texto. Sin concepto, la factura sale con el detalle real.
+      // Con concepto elegido, el backend escribe ese texto en los renglones.
+      // Sin concepto, la factura sale con el detalle real.
       concepto_generico: usarConcepto && conceptoId ? Number(conceptoId) : undefined,
+      // Y cómo: todo junto en un renglón, o uno por ítem.
+      concepto_agrupar: usarConcepto && conceptoId ? agruparConcepto : undefined,
       // Si la factura nace de una venta de mostrador, se manda su id: la venta
       // queda ligada y esa plata no se cuenta dos veces en el cliente.
       venta: prefill?.ventaId,
@@ -2336,10 +2369,58 @@ function NuevaFacturaModal({
                     onChange={setConceptoId}
                     className="mt-2.5"
                   />
-                  <p className="mt-1.5 text-xs leading-relaxed text-ink-400">
-                    La factura va a tener un solo renglón con este texto, por {money(totales.total)}.
-                    El total y el stock no cambian.
-                  </p>
+
+                  {/* Cómo sale ese concepto. Las dos formas suman lo mismo: lo
+                      único que cambia es en cuántos renglones se imprime. */}
+                  <div className="mt-2.5 grid gap-2 sm:grid-cols-2">
+                    <ModoConcepto
+                      activo={agruparConcepto}
+                      titulo="Todo en un renglón"
+                      detalle={`1 renglón por ${money(totales.total)}`}
+                      onClick={() => setAgruparConcepto(true)}
+                    />
+                    <ModoConcepto
+                      activo={!agruparConcepto}
+                      titulo="Un renglón por ítem"
+                      detalle={
+                        itemsCargados.length === 1
+                          ? '1 renglón, con su cantidad y su precio'
+                          : `${itemsCargados.length} renglones, cada uno con su precio`
+                      }
+                      onClick={() => setAgruparConcepto(false)}
+                    />
+                  </div>
+
+                  {/* Vista previa REAL de los renglones que se van a imprimir. */}
+                  {renglonesFactura.length > 0 && (
+                    <div className="mt-2.5 rounded-xl border border-line bg-surface p-3">
+                      <p className="mb-2 text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-ink-400">
+                        Así va a salir la factura
+                      </p>
+                      <ul className="space-y-1.5">
+                        {renglonesFactura.map((r, i) => (
+                          <li
+                            key={i}
+                            className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs"
+                          >
+                            <span className="min-w-0 flex-1 basis-40 truncate text-ink-800">
+                              {r.descripcion}
+                            </span>
+                            <span className="tnum text-ink-400">
+                              {num(r.cantidad)} × {money(r.precioUnitario)}
+                            </span>
+                            <span className="tnum w-24 text-right font-semibold text-ink-900">
+                              {money(r.cantidad * r.precioUnitario)}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="mt-2 text-xs leading-relaxed text-ink-400">
+                        El total ({money(totales.total)}) y el stock son los mismos en las dos
+                        formas: solo cambia lo que dice el papel.
+                      </p>
+                    </div>
+                  )}
                 </>
               ) : (
                 avisaSinConcepto && (
@@ -2461,6 +2542,40 @@ function NuevaFacturaModal({
         </div>
       </div>
     </Modal>
+  )
+}
+
+/** Una de las dos formas de imprimir el concepto. Táctil y legible en móvil. */
+function ModoConcepto({
+  activo,
+  titulo,
+  detalle,
+  onClick,
+}: {
+  activo: boolean
+  titulo: string
+  detalle: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={activo}
+      className={cn(
+        'rounded-xl border px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900',
+        activo
+          ? 'border-ink-950 bg-ink-950 text-on-ink'
+          : 'border-line-strong bg-surface hover:border-ink-300 hover:bg-ink-50',
+      )}
+    >
+      <span className={cn('block text-sm font-semibold', activo ? 'text-on-ink' : 'text-ink-900')}>
+        {titulo}
+      </span>
+      <span className={cn('mt-0.5 block text-xs', activo ? 'text-on-ink/70' : 'text-ink-400')}>
+        {detalle}
+      </span>
+    </button>
   )
 }
 

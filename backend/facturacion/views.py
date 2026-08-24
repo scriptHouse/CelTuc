@@ -29,7 +29,7 @@ from . import logica
 from .arca import servicio
 from .arca.errores import ErrorARCA
 from .clientes import registrar_cliente_desde_comprobante
-from .concepto import agrupar_en_concepto
+from .concepto import aplicar_concepto
 from .email import EmailNoConfigurado, enviar_comprobante
 from .limites import estado_limites_del_anio, guardar_limites, verificar_limite_mensual
 from .models import Cliente, Comprobante, ConceptoFactura, Emisor
@@ -234,6 +234,8 @@ class ComprobanteListCreateView(generics.ListCreateAPIView):
         # Concepto elegido para ESTA factura (o None = detalle real). Lo elige
         # quien factura en el modal; no cambia nada del banco de conceptos.
         concepto = datos.pop('concepto_generico', None)
+        # Y como sale: todo junto en un renglon, o un renglon por item.
+        concepto_agrupar = datos.pop('concepto_agrupar', True)
         # Venta de mostrador que origina esta factura (opcional, viene de Caja).
         venta_origen = datos.pop('venta', None)
         items_limpios, productos_stock = [], []
@@ -242,12 +244,15 @@ class ComprobanteListCreateView(generics.ListCreateAPIView):
             productos_stock.append(item.pop('producto', None))
             item.pop('item_service', None)  # solo trazabilidad; no viaja a emitir
             items_limpios.append(item)
-        # Con concepto elegido, TODOS los renglones se juntan en uno solo. Cambia
-        # el DETALLE que se guarda y se imprime, nada mas: los totales se calculan
+        # Con concepto elegido, los renglones pasan a decir su texto: todos
+        # juntos en uno solo, o uno por item segun lo que se eligio. Cambia el
+        # DETALLE que se guarda y se imprime, nada mas: los totales se calculan
         # despues, sobre esta lista, y ARCA no recibe renglones. `items_limpios`
         # queda intacto para el stock.
         datos['items'] = (
-            agrupar_en_concepto(items_limpios, concepto.texto) if concepto else items_limpios
+            aplicar_concepto(items_limpios, concepto.texto, agrupar=concepto_agrupar)
+            if concepto
+            else items_limpios
         )
         usuario = request.user if request.user.is_authenticated else None
         # Control interno de limite mensual, ANTES de pedir el CAE (no toca la
