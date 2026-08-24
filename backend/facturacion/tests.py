@@ -1797,3 +1797,116 @@ class NotaCreditoGuardasDelServicioTests(TestCase):
         self.emisor.save(update_fields=['activo'])
         self.factura.refresh_from_db()
         self.assertIn('inactivo', self._intentar(self.factura))
+
+
+class DevolverStockNotaCreditoTests(TestCase):
+    """Devolver mercaderia al inventario despues de acreditar.
+
+    Es opcional y aparte de la emision: la nota ya tiene CAE. Lo que se prueba
+    es que sume donde corresponde, que quede firmado con el numero de la nota,
+    que no se pueda repetir y que un problema de stock avise sin romper nada.
+    """
+
+    def setUp(self):
+        from inventario.models import Sucursal, aplicar_ajuste
+        from productos.models import CategoriaProducto, Producto
+
+        rol = Rol.objects.create(nombre='CajeroDevStock')
+        rol.permisos.set(Permiso.objects.filter(codigo='ver_facturacion'))
+        self.fact = Usuario.objects.create_user(
+            email='dev@celtuc.ar', username='facdev', password='x', rol=rol,
+        )
+        self.emisor = Emisor.objects.create(
+            nombre='RI Test', condicion='responsable_inscripto', cuit='30111111116',
+            punto_venta=1,
+        )
+        self.factura = Comprobante.objects.create(
+            emisor=self.emisor, tipo='B', punto_venta=1, numero=4,
+            cliente_nombre='Cliente', cliente_condicion='consumidor_final',
+            fecha=datetime.date(2026, 8, 10),
+            neto=Decimal('100.00'), iva=Decimal('21.00'), total=Decimal('121.00'), cae='751',
+        )
+        self.nota = Comprobante.objects.create(
+            emisor=self.emisor, clase=Comprobante.Clase.NOTA_CREDITO,
+            comprobante_asociado=self.factura, tipo='B', punto_venta=1, numero=2,
+            cliente_nombre='Cliente', cliente_condicion='consumidor_final',
+            fecha=datetime.date(2026, 8, 12),
+            neto=Decimal('100.00'), iva=Decimal('21.00'), total=Decimal('121.00'), cae='752',
+        )
+        categoria, _ = CategoriaProducto.objects.get_or_create(nombre='Categoria dev stock')
+        self.producto = Producto.objects.create(categoria=categoria, nombre='Fuente dev stock')
+        self.sucursal = Sucursal.objects.create(nombre='Solar dev stock', orden=91)
+        aplicar_ajuste(self.producto, self.sucursal, delta=3)
+
+        self.cliente = APIClient()
+        self.cliente.force_authenticate(self.fact)
+
+    def _url(self, comprobante=None):
+        return reverse('facturacion:comprobante-devolver-stock',
+                       args=[(comprobante or self.nota).pk])
+
+    def _cuerpo(self, cantidad=2):
+        return {
+            'sucursal': self.sucursal.id,
+            'items': [{'producto': self.producto.id, 'cantidad': cantidad}],
+        }
+
+    def test_suma_al_stock_y_queda_firmado_con_la_nota(self):
+        from inventario.models import MovimientoStock, StockProducto
+
+        r = self.cliente.post(self._url(), self._cuerpo(2), format='json')
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data['movimientos'], 1)
+        self.assertEqual(r.data['unidades'], 2)
+        self.assertEqual(r.data['avisos'], [])
+        fila = StockProducto.objects.get(producto=self.producto, sucursal=self.sucursal)
+        self.assertEqual(fila.cantidad, 5)          # 3 + 2
+        mov = MovimientoStock.objects.get(nota='Nota de crédito B 0001-00000002')
+        self.assertEqual(mov.delta, 2)
+        self.assertEqual(mov.tipo, MovimientoStock.Tipo.INGRESO)
+        self.assertEqual(mov.producto_id, self.producto.id)
+        self.assertEqual(mov.sucursal_id, self.sucursal.id)
+
+    def test_no_se_puede_devolver_dos_veces(self):
+        from inventario.models import StockProducto
+
+        self.assertEqual(self.cliente.post(self._url(), self._cuerpo(2), format='json').status_code, 200)
+        r = self.cliente.post(self._url(), self._cuerpo(2), format='json')
+        self.assertEqual(r.status_code, 409)
+        self.assertIn('ya se devolvio', r.data['detail'])
+        # El stock no se toco de nuevo.
+        self.assertEqual(
+            StockProducto.objects.get(producto=self.producto, sucursal=self.sucursal).cantidad, 5,
+        )
+
+    def test_una_factura_no_devuelve_stock(self):
+        r = self.cliente.post(self._url(self.factura), self._cuerpo(), format='json')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('nota de credito', r.data['detail'])
+
+    def test_sin_items_es_400(self):
+        r = self.cliente.post(
+            self._url(), {'sucursal': self.sucursal.id, 'items': []}, format='json',
+        )
+        self.assertEqual(r.status_code, 400)
+
+    def test_cantidad_cero_o_negativa_es_400(self):
+        for cantidad in (0, -3):
+            r = self.cliente.post(self._url(), self._cuerpo(cantidad), format='json')
+            self.assertEqual(r.status_code, 400, cantidad)
+
+    def test_sin_sesion_no_se_devuelve_nada(self):
+        from inventario.models import StockProducto
+
+        r = APIClient().post(self._url(), self._cuerpo(), format='json')
+        self.assertIn(r.status_code, (401, 403))
+        self.assertEqual(
+            StockProducto.objects.get(producto=self.producto, sucursal=self.sucursal).cantidad, 3,
+        )
+
+    def test_devolver_no_toca_el_comprobante(self):
+        antes = self.nota.actualizado
+        self.cliente.post(self._url(), self._cuerpo(1), format='json')
+        self.nota.refresh_from_db()
+        self.assertEqual(self.nota.actualizado, antes)
+        self.assertEqual(self.nota.total, Decimal('121.00'))

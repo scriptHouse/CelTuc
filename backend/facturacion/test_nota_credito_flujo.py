@@ -171,6 +171,88 @@ class FlujoCompletoNotaCreditoTests(TestCase):
             {('factura', 1), ('nota_credito', 1), ('nota_credito', 2)},
         )
 
+
+    def test_el_stock_baja_al_facturar_y_vuelve_si_la_persona_dice_que_si(self):
+        """El circuito completo de la mercaderia: sale al facturar, vuelve al acreditar.
+
+        La vuelta NO es automatica: la dispara la persona contestando que si en
+        el modal que aparece despues de emitir la nota. Por eso son dos llamadas.
+        """
+        from inventario.models import MovimientoStock, StockProducto, Sucursal, aplicar_ajuste
+        from productos.models import CategoriaProducto, Producto
+
+        categoria, _ = CategoriaProducto.objects.get_or_create(nombre='Categoria flujo NC')
+        producto = Producto.objects.create(categoria=categoria, nombre='Modulo flujo NC')
+        sucursal = Sucursal.objects.create(nombre='Central flujo NC', orden=92)
+        aplicar_ajuste(producto, sucursal, delta=10)
+
+        # 1. Se factura 3 unidades: el stock baja a 7.
+        ta, ultimo, cae = self._con_arca(1)
+        with ta, ultimo, cae:
+            r = self.cliente.post(
+                reverse('facturacion:comprobante-list'),
+                {
+                    'emisor': self.emisor.id,
+                    'cliente_nombre': 'Ana Gomez',
+                    'cliente_condicion': 'consumidor_final',
+                    'fecha': '2026-08-10',
+                    'sucursal_stock': sucursal.id,
+                    'items': [{'descripcion': 'Modulo flujo NC', 'cantidad': 3,
+                               'precio_unitario': '100', 'producto': producto.id}],
+                },
+                format='json',
+            )
+        self.assertEqual(r.status_code, 201, r.data)
+        factura_id = r.data['id']
+        self.assertEqual(
+            StockProducto.objects.get(producto=producto, sucursal=sucursal).cantidad, 7,
+        )
+
+        # 2. Se acredita todo. La nota sale con CAE y NO toca el stock sola.
+        ta, ultimo, cae = self._con_arca(1)
+        with ta, ultimo, cae:
+            r = self.cliente.post(
+                reverse('facturacion:comprobante-nota-credito', args=[factura_id]),
+                {'items': [{'descripcion': 'Modulo flujo NC', 'cantidad': 3,
+                            'precio_unitario': '100'}]},
+                format='json',
+            )
+        self.assertEqual(r.status_code, 201, r.data)
+        nota_id = r.data['id']
+        self.assertEqual(
+            StockProducto.objects.get(producto=producto, sucursal=sucursal).cantidad, 7,
+        )
+
+        # 3. La persona contesta que SI: las 3 unidades vuelven.
+        r = self.cliente.post(
+            reverse('facturacion:comprobante-devolver-stock', args=[nota_id]),
+            {'sucursal': sucursal.id,
+             'items': [{'producto': producto.id, 'cantidad': 3}]},
+            format='json',
+        )
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data['unidades'], 3)
+        self.assertEqual(
+            StockProducto.objects.get(producto=producto, sucursal=sucursal).cantidad, 10,
+        )
+        # Los dos movimientos quedan trazados con su comprobante.
+        salida = MovimientoStock.objects.get(nota='Factura B 0001-00000001')
+        vuelta = MovimientoStock.objects.get(nota='Nota de crédito B 0001-00000001')
+        self.assertEqual(salida.delta, -3)
+        self.assertEqual(vuelta.delta, 3)
+
+        # 4. Y no se puede repetir.
+        r = self.cliente.post(
+            reverse('facturacion:comprobante-devolver-stock', args=[nota_id]),
+            {'sucursal': sucursal.id,
+             'items': [{'producto': producto.id, 'cantidad': 3}]},
+            format='json',
+        )
+        self.assertEqual(r.status_code, 409)
+        self.assertEqual(
+            StockProducto.objects.get(producto=producto, sucursal=sucursal).cantidad, 10,
+        )
+
     def test_una_factura_c_se_acredita_con_el_13(self):
         mono = Emisor.objects.create(
             nombre='Mono', condicion='monotributista', cuit='20111111112',

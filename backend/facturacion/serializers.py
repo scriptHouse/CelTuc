@@ -345,6 +345,31 @@ class CrearNotaCreditoSerializer(serializers.Serializer):
         return value
 
 
+class DevolverStockItemSerializer(serializers.Serializer):
+    """Un producto que vuelve al stock, con cuantas unidades."""
+
+    producto = serializers.PrimaryKeyRelatedField(queryset=Producto.objects.all())
+    cantidad = serializers.IntegerField(min_value=1, max_value=100000)
+
+
+class DevolverStockSerializer(serializers.Serializer):
+    """Entrada del "devolver al stock" de una nota de credito.
+
+    Que producto vuelve y cuanto lo decide quien atiende: los renglones del
+    comprobante son texto libre (y con concepto generico son UNO solo), asi que
+    el sistema no puede adivinarlo. La pantalla los propone ya emparejados por
+    nombre y la persona confirma.
+    """
+
+    sucursal = serializers.PrimaryKeyRelatedField(queryset=Sucursal.objects.filter(activa=True))
+    items = DevolverStockItemSerializer(many=True)
+
+    def validate_items(self, value):
+        if not value:
+            raise serializers.ValidationError('Elegi al menos un producto para devolver al stock.')
+        return value
+
+
 class EnviarEmailSerializer(serializers.Serializer):
     """Entrada para enviar un comprobante por email. El PDF lo genera el front y
     lo manda en base64 (asi el email adjunta el mismo PDF que se descarga)."""

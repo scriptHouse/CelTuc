@@ -5,6 +5,7 @@ from .views import (
     ClienteListView,
     ComprobanteDetailView,
     ComprobanteListCreateView,
+    DevolverStockNotaCreditoView,
     ConceptoDetailView,
     ConceptoListCreateView,
     EmisorDetailView,
@@ -30,6 +31,7 @@ urlpatterns = [
     path('comprobantes/<int:pk>/', ComprobanteDetailView.as_view(), name='comprobante-detail'),
     path('comprobantes/<int:pk>/enviar-email/', EnviarComprobanteEmailView.as_view(), name='comprobante-email'),
     path('comprobantes/<int:pk>/nota-credito/', NotaCreditoCreateView.as_view(), name='comprobante-nota-credito'),
+    path('comprobantes/<int:pk>/devolver-stock/', DevolverStockNotaCreditoView.as_view(), name='comprobante-devolver-stock'),
     path('clientes/', ClienteListView.as_view(), name='cliente-list'),
     path('clientes/<int:pk>/', ClienteDetailView.as_view(), name='cliente-detail'),
 ]

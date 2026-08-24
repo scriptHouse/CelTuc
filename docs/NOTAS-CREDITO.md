@@ -44,9 +44,33 @@ Además: **motivo** (con atajos: devolución, error, anulación, descuento),
 **fecha** (hoy por defecto, nunca anterior a la factura) y **con qué se devuelve
 la plata** (por defecto, el mismo medio con el que se cobró la factura).
 
-Lo que la nota **no** hace, y el modal lo dice antes de emitir: no toca el stock
-(si el equipo volvió, el ingreso se carga desde Inventario) y no borra la
-factura, que sigue existiendo en ARCA.
+Lo que la nota **no** hace por su cuenta, y el modal lo dice antes de emitir: no
+mueve stock ni borra la factura, que sigue existiendo en ARCA.
+
+## 2 bis. Y después: «¿volvió la mercadería?»
+
+Apenas la nota sale con su CAE, aparece un **segundo modal que pregunta** si el
+producto volvió al local. Decide la persona, siempre:
+
+- **«No volvió nada»** → no pasa nada más. Es lo correcto cuando se acreditó por
+  un error de facturación, un descuento acordado, o una devolución que todavía
+  no llegó.
+- **«Sumar al stock»** → las unidades vuelven al inventario.
+
+Son dos cosas distintas a propósito: acreditar es fiscal, recibir mercadería es
+físico, y pasan en momentos distintos (o no pasan). Por eso el sistema no lo
+asume: pregunta.
+
+Qué producto vuelve tampoco se puede adivinar — los renglones del comprobante son
+texto libre, y con concepto genérico son UNO solo que dice «Servicio técnico».
+Así que el modal los **propone ya emparejados por nombre** con el catálogo (sin
+tildes ni mayúsculas de por medio); lo que no empareja arranca destildado y pide
+elegir el producto a mano. La sucursal viene puesta en la del empleado logueado.
+
+Detalles: la cantidad es editable, el movimiento queda firmado en Inventario como
+«Nota de crédito B 0001-00000003», y **se puede una sola vez** (el backend
+responde 409 si ya se hizo, así un doble clic no duplica unidades). Si la cuenta
+no tiene acceso a Inventario, el modal lo dice y no ofrece nada.
 
 ## 3. El signo: dónde resta
 
@@ -90,12 +114,21 @@ El chequeo del saldo corre **dentro del lock del emisor**: si dos cajas acredita
 la misma factura al mismo tiempo, la segunda espera y recién ahí lee cuánto
 quedó. Chequearlo antes dejaría pasar las dos (ARCA no valida eso).
 
-### `views.py` — `POST /api/facturacion/comprobantes/<pk>/nota-credito/`
+### `views.py` — dos endpoints
+`POST /api/facturacion/comprobantes/<pk>/nota-credito/`
 Permiso `PuedeFacturar`, el mismo que emitir: acreditar es operación de
 mostrador. El límite mensual **no** se chequea (una nota resta, nunca hace pasar
 el tope). Errores: **400** con motivo claro y sin hablar con ARCA (ya acreditada,
 se pasa del saldo, fecha anterior, es una nota, factura sin CAE), **502** si ARCA
 rechaza o no responde.
+
+`POST /api/facturacion/comprobantes/<pk>/devolver-stock/` con
+`{sucursal, items:[{producto, cantidad}]}` suma las unidades al inventario y
+firma cada movimiento con el número de la nota. Mismo permiso que emitir (igual
+que el descuento de stock al facturar: son las dos caras de la misma operación de
+mostrador). Devuelve `409` si el stock de esa nota ya se devolvió, y los
+problemas por producto salen como `avisos` sin voltear nada — la nota ya está
+emitida.
 
 `GET /api/facturacion/comprobantes/` acepta `?clase=factura|nota_credito`.
 
@@ -107,7 +140,9 @@ rechaza o no responde.
 
 ## 5. Frontend
 
-- **`components/facturacion/NotaCreditoModal.tsx`**: el modal completo.
+- **`components/facturacion/NotaCreditoModal.tsx`**: el modal de emisión.
+- **`components/facturacion/DevolverStockModal.tsx`**: el que pregunta por la
+  mercadería después de emitir.
 - **`FacturacionPage`**: ícono en la fila, botón en el detalle, filtro
   Todos/Facturas/Notas, fila con cuadro «NC» e importe en negativo, y stats netas.
   La fila pasó a `flex-wrap`: en el celular el importe baja al bloque del cliente
@@ -130,10 +165,20 @@ rechaza o no responde.
   502 de ARCA, parcial + saldo, nota oculta, detalle y filtro por clase.
 - `NotaCreditoRestaTests`: que reste en el mes, en el tope y en el cliente.
 - `NotaCreditoGuardasDelServicioTests`: las guardas del servicio (las del lock).
+- `DevolverStockNotaCreditoTests`: que sume donde va, que quede firmado con el
+  número de la nota, que no se pueda repetir, que una factura no devuelva stock y
+  que devolver no toque el comprobante.
 
-`facturacion/test_nota_credito_flujo.py`: el recorrido completo de punta a punta
-(facturar → acreditar parcial → intentar de más → acreditar el saldo → intentar
-otra vez → lista, filtro, resumen y tope).
+`facturacion/test_nota_credito_flujo.py`: los recorridos completos de punta a
+punta — el de los números (facturar → acreditar parcial → intentar de más →
+acreditar el saldo → intentar otra vez → lista, filtro, resumen y tope) y el de
+la mercadería (el stock baja al facturar, **no** se mueve al acreditar, y vuelve
+solo cuando la persona contesta que sí).
+
+> Nota de infraestructura: los tests corren **sin el límite de peticiones** de
+> DRF (`celtuc/settings.py`). Su contador vive en la cache, que no se limpia
+> entre tests, así que con la suite completa se acumulaban pedidos del mismo id
+> de usuario y empezaban a fallar con 429 pruebas que no tenían nada que ver.
 
 ## 7. Deploy
 

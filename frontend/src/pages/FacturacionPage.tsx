@@ -86,6 +86,7 @@ import {
 } from '@/lib/conceptoGenerico'
 import { AperturaModal, type AperturaValues } from '@/components/caja/AperturaModal'
 import { CuentaCard } from '@/components/facturacion/CuentaCard'
+import { DevolverStockModal } from '@/components/facturacion/DevolverStockModal'
 import { NotaCreditoModal } from '@/components/facturacion/NotaCreditoModal'
 import { ExportarFacturacionModal } from '@/components/facturacion/exportar/ExportarFacturacionModal'
 import { LimiteUsoBar } from '@/components/facturacion/LimiteUsoBar'
@@ -297,6 +298,8 @@ export function FacturacionPage() {
   const [detalleId, setDetalleId] = useState<number | null>(null)
   // Factura que se está por acreditar (abre el modal de nota de crédito).
   const [notaCreditoId, setNotaCreditoId] = useState<number | null>(null)
+  // Nota recién emitida: se pregunta si la mercadería volvió al stock.
+  const [notaParaStock, setNotaParaStock] = useState<Comprobante | null>(null)
   // Filtro de la lista: todo, solo facturas o solo notas de crédito.
   const [claseFiltro, setClaseFiltro] = useState<'todos' | ClaseComprobante>('todos')
   // Studio de exportación: arma la planilla del mes (formato de siempre) con lo
@@ -974,7 +977,20 @@ export function FacturacionPage() {
           // El detalle de la factura acreditada cambió (saldo y lista de notas).
           queryClient.invalidateQueries({ queryKey: ['comprobante'] })
           setNotaCreditoId(null)
-          setDetalleId(nota.id)
+          // Recién ahora se pregunta por el stock: la nota ya tiene CAE, así que
+          // la respuesta (sí o no) no puede afectar al comprobante.
+          setNotaParaStock(nota)
+        }}
+      />
+
+      {/* ¿Volvió la mercadería? Lo decide quien atiende, después de acreditar.
+          Al cerrarlo se abre el detalle de la nota recién emitida. */}
+      <DevolverStockModal
+        nota={notaParaStock}
+        onCerrar={() => {
+          const nota = notaParaStock
+          setNotaParaStock(null)
+          if (nota) setDetalleId(nota.id)
         }}
       />
 

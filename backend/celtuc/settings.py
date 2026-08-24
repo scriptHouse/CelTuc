@@ -10,6 +10,7 @@ Pensada para ser simple y clara:
 from datetime import timedelta
 from pathlib import Path
 import os
+import sys
 from urllib.parse import parse_qsl, unquote, urlparse
 
 from django.core.exceptions import ImproperlyConfigured
@@ -244,6 +245,17 @@ REST_FRAMEWORK = {
         'agente': '300/min',
     },
 }
+
+# Corriendo los tests, el limite de peticiones se apaga.
+#
+# El contador de DRF vive en la cache (LocMemCache), que NO se limpia entre
+# tests: con la suite completa se acumulan pedidos del mismo id de usuario (las
+# pk se reusan porque cada test hace rollback) y, pasado el tope, empiezan a
+# fallar con 429 pruebas que no tienen nada que ver. Algunos tests ya llamaban a
+# `cache.clear()` por esto (ver `usuarios/tests.py`); apagarlo aca lo resuelve
+# de una vez y para todas las apps. En produccion no cambia nada.
+if sys.argv[1:2] == ['test']:
+    REST_FRAMEWORK['DEFAULT_THROTTLE_CLASSES'] = ()
 
 
 # --- JWT ---------------------------------------------------------------------

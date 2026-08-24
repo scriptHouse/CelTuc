@@ -45,6 +45,7 @@ from .serializers import (
     ConceptoFacturaSerializer,
     CrearComprobanteSerializer,
     CrearNotaCreditoSerializer,
+    DevolverStockSerializer,
     EmisorSerializer,
     EnviarEmailSerializer,
     GuardarLimitesSerializer,
@@ -372,6 +373,86 @@ def _revisar_nota_credito(origen, datos) -> str:
     if fecha and fecha < origen.fecha:
         return 'La nota de credito no puede tener fecha anterior a la factura.'
     return ''
+
+
+class DevolverStockNotaCreditoView(APIView):
+    """POST: devuelve al inventario la mercaderia de una nota de credito.
+
+    Es OPCIONAL y va aparte de la emision: la nota ya salio con su CAE y esto
+    solo mueve stock. Lo dispara la persona contestando que si en el modal que
+    aparece despues de acreditar; si dice que no, no pasa nada (y siempre puede
+    cargar el ingreso a mano desde Inventario).
+
+    Que producto vuelve y cuanto llega decidido desde la pantalla: los renglones
+    del comprobante son texto (y con concepto generico son uno solo), asi que el
+    sistema no puede deducirlo.
+
+    Mismo permiso que emitir, igual que el descuento de stock al facturar: son
+    las dos caras de la misma operacion de mostrador.
+    """
+
+    permission_classes = [PuedeFacturar]
+
+    def post(self, request, pk):
+        nota = get_object_or_404(Comprobante.objects.select_related('emisor'), pk=pk)
+        if not nota.es_nota_credito:
+            return Response(
+                {'detail': 'Solo una nota de credito devuelve mercaderia al stock.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        entrada = DevolverStockSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        datos = entrada.validated_data
+        sucursal = datos['sucursal']
+
+        from django.core.exceptions import ValidationError
+
+        from inventario.models import MovimientoStock, aplicar_ajuste
+
+        # Texto con el que queda firmado el movimiento en Inventario. Sirve
+        # ademas de guarda: si ya hay movimientos con esta nota, el stock de
+        # esta nota de credito ya se devolvio y no se repite (un doble clic o un
+        # reintento no puede duplicar unidades).
+        etiqueta = f'{nota.nombre_comprobante} {nota.numero_formateado}'
+        if MovimientoStock.objects.filter(nota=etiqueta).exists():
+            return Response(
+                {'detail': f'El stock de esta nota ya se devolvio ({etiqueta}). '
+                           'Miralo en los movimientos de Inventario.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        usuario = request.user if request.user.is_authenticated else None
+        avisos, movidos, unidades = [], 0, 0
+        for fila in datos['items']:
+            producto, cantidad = fila['producto'], fila['cantidad']
+            try:
+                aplicar_ajuste(
+                    producto, sucursal,
+                    delta=cantidad,
+                    tipo=MovimientoStock.Tipo.INGRESO,
+                    nota=etiqueta,
+                    usuario=usuario,
+                )
+                movidos += 1
+                unidades += cantidad
+            except ValidationError as exc:
+                avisos.append(' '.join(exc.messages))
+            except Exception:  # el inventario jamas voltea una nota ya emitida
+                logger.exception('Error devolviendo stock de la nota %s', nota.pk)
+                avisos.append(f'"{producto.nombre}": no se pudo sumar al stock.')
+
+        return Response({
+            'detail': (
+                f'{unidades} unidad{"" if unidades == 1 else "es"} de vuelta en '
+                f'{sucursal.nombre}.'
+                if movidos
+                else 'No se pudo sumar ninguna unidad al stock.'
+            ),
+            'movimientos': movidos,
+            'unidades': unidades,
+            'avisos': avisos,
+        })
 
 
 class ResumenMensualView(APIView):

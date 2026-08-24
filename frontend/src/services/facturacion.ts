@@ -214,6 +214,43 @@ export function emitirComprobante(input: NuevoComprobante): Promise<Comprobante>
   return api.post<Comprobante>('/facturacion/comprobantes/', input, token())
 }
 
+/** Qué se le devuelve al inventario después de acreditar. */
+export interface DevolucionStock {
+  /** Sucursal a la que vuelve la mercadería. */
+  sucursal: number
+  items: Array<{ producto: number; cantidad: number }>
+}
+
+export interface ResultadoDevolucionStock {
+  detail: string
+  /** Cuántos productos se movieron y cuántas unidades en total. */
+  movimientos: number
+  unidades: number
+  /** Lo que NO se pudo sumar (el resto sí se sumó). */
+  avisos: string[]
+}
+
+/**
+ * Devuelve al stock la mercadería de una nota de crédito ya emitida.
+ *
+ * Es OPCIONAL y va aparte: la nota tiene su CAE haya stock o no. Acreditar y
+ * recibir la mercadería son cosas distintas (se acredita por un error, por un
+ * descuento, por una devolución que todavía no llegó), así que decide la
+ * persona en el modal que aparece después de emitir.
+ *
+ * Se puede una sola vez por nota: si ya se hizo, el backend responde 409.
+ */
+export function devolverStockNotaCredito(
+  notaId: number,
+  input: DevolucionStock,
+): Promise<ResultadoDevolucionStock> {
+  return api.post<ResultadoDevolucionStock>(
+    `/facturacion/comprobantes/${notaId}/devolver-stock/`,
+    input,
+    token(),
+  )
+}
+
 export function cambiarEstadoCobro(id: number, estado: EstadoCobro): Promise<Comprobante> {
   return api.patch<Comprobante>(`/facturacion/comprobantes/${id}/`, { estado_cobro: estado }, token())
 }
