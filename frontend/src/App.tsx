@@ -3,6 +3,7 @@ import { Layout } from '@/components/Layout'
 import { RequireAuth } from '@/components/RequireAuth'
 import { RequirePermiso } from '@/components/RequirePermiso'
 import { LoginPage } from '@/pages/LoginPage'
+import { ImpersonarPage } from '@/pages/ImpersonarPage'
 import { PanelPage } from '@/pages/PanelPage'
 import { DolarPage } from '@/pages/DolarPage'
 import { InventarioPage } from '@/pages/InventarioPage'
@@ -22,6 +23,9 @@ import { AsistenciaPage } from '@/pages/AsistenciaPage'
 
 const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
+  // Aterrizaje del botón «Impersonar» del admin de Django: canjea el pase y
+  // deja la sesión de esa cuenta lista (fuera de RequireAuth, todavía no hay).
+  { path: '/impersonar', element: <ImpersonarPage /> },
   {
     element: (
       <RequireAuth>

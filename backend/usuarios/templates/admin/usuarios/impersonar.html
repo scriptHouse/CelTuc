@@ -1,0 +1,74 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{#
+  Confirmacion del boton "Impersonar" del listado de usuarios.
+
+  Existe por dos razones: para que la accion (que tiene efectos) viaje por POST
+  con su token CSRF, y para que un clic al pasar no te saque de tu propia sesion
+  del panel sin avisar.
+#}
+
+{% block breadcrumbs %}
+    <div class="px-4 lg:px-12">
+        <div class="container mb-6 mx-auto -my-3 lg:mb-12">
+            <ul class="flex flex-wrap">
+                <li class="lg:leading-6">
+                    <a href="{% url 'admin:index' %}" class="mr-2 text-font-important-light dark:text-font-important-dark">{% trans 'Home' %}</a>
+                </li>
+                <li class="mr-2">/</li>
+                <li class="lg:leading-6">
+                    <a href="{{ url_listado }}" class="mr-2 text-font-important-light dark:text-font-important-dark">{{ opts.verbose_name_plural|capfirst }}</a>
+                </li>
+                <li class="mr-2">/</li>
+                <li class="lg:leading-6">{{ title }}</li>
+            </ul>
+        </div>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <div class="border border-base-200 rounded-default shadow-xs bg-white max-w-2xl p-6 dark:bg-base-900 dark:border-base-800">
+
+        {% if motivo %}
+            <h1 class="font-semibold mb-4 text-font-important-light text-lg dark:text-font-important-dark">
+                No se puede impersonar a {{ objetivo.username }}
+            </h1>
+            <p class="mb-6 text-sm">{{ motivo }}</p>
+            <a href="{{ url_listado }}"
+               class="border border-base-200 bg-white cursor-pointer font-medium inline-flex items-center px-3 py-2 rounded-default shadow-xs text-sm text-font-important-light hover:bg-base-100/80 dark:bg-transparent dark:border-base-700 dark:text-font-important-dark dark:hover:bg-base-800/80">
+                Volver al listado
+            </a>
+        {% else %}
+            <h1 class="font-semibold mb-4 text-font-important-light text-lg dark:text-font-important-dark">
+                ¿Entrar al sistema como {{ objetivo.username }}?
+            </h1>
+
+            <p class="mb-3 text-sm">
+                Vas a ver CelTuc exactamente como lo ve
+                <strong class="text-font-important-light dark:text-font-important-dark">{{ objetivo.username }}</strong>
+                ({{ objetivo.email }}){% if objetivo.rol %}, con el rol <strong class="text-font-important-light dark:text-font-important-dark">{{ objetivo.rol }}</strong>{% endif %}.
+            </p>
+
+            <ul class="list-disc mb-6 pl-5 space-y-1 text-sm">
+                <li>Todo lo que hagas queda registrado en la auditoria a nombre de {{ objetivo.username }}, con tu usuario anotado como responsable real.</li>
+                <li>La sesion se corta sola a las {{ horas }} horas, y podes volver a tu cuenta cuando quieras desde la barra de arriba.</li>
+                <li>No se toca la contrasena ni el "ultimo ingreso" de la cuenta.</li>
+            </ul>
+
+            <form method="post">
+                {% csrf_token %}
+                <div class="flex flex-wrap gap-2 items-center">
+                    <button type="submit"
+                            class="bg-primary-600 border border-transparent cursor-pointer font-medium inline-flex items-center px-3 py-2 rounded-default text-sm text-white hover:bg-primary-600/80">
+                        Si, entrar como {{ objetivo.username }}
+                    </button>
+                    <a href="{{ url_listado }}"
+                       class="border border-base-200 bg-white cursor-pointer font-medium inline-flex items-center px-3 py-2 rounded-default shadow-xs text-sm text-font-important-light hover:bg-base-100/80 dark:bg-transparent dark:border-base-700 dark:text-font-important-dark dark:hover:bg-base-800/80">
+                        Cancelar
+                    </a>
+                </div>
+            </form>
+        {% endif %}
+    </div>
+{% endblock %}

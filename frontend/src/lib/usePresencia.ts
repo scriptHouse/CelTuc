@@ -34,6 +34,9 @@ export function usePresencia() {
     const latir = () => {
       if (document.visibilityState !== 'visible') return
       if (Date.now() - ultimaInteraccion.current > LIMITE_INACTIVIDAD_MS) return
+      // Sesión prestada (impersonación): no marcamos presencia, sería mentira
+      // decir que esa persona está en línea. El backend también lo ignora.
+      if (useAuth.getState().impersonacion) return
       const token = useAuth.getState().access
       if (!token) return
       api.post('/auth/heartbeat/', undefined, token).catch(() => {})

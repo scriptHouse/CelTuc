@@ -1,12 +1,26 @@
 from django import forms
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.forms import ReadOnlyPasswordHashField
+from django.http import Http404, HttpResponseRedirect
+from django.shortcuts import redirect, render
+from django.urls import reverse
 from unfold.admin import ModelAdmin
+from unfold.decorators import action
 
+from auditoria.registro import registrar_impersonacion
 from comun.admin import ModeloBaseAdminMixin
 
-from .models import Permiso, Rol, Usuario
+from .impersonacion import DURACION_MAXIMA, motivo_no_impersonable, url_de_retorno
+from .models import Permiso, Rol, TicketImpersonacion, Usuario
+
+
+def _ip_de(request):
+    """IP del pedido, respetando el proxy (Traefik/nginx delante de gunicorn)."""
+    reenviada = request.META.get('HTTP_X_FORWARDED_FOR', '')
+    if reenviada:
+        return reenviada.split(',')[0].strip() or None
+    return request.META.get('REMOTE_ADDR') or None
 
 
 class UsuarioCreationForm(forms.ModelForm):
@@ -70,6 +84,57 @@ class UsuarioAdmin(ModeloBaseAdminMixin, BaseUserAdmin, ModelAdmin):
             },
         ),
     )
+    # Boton "Impersonar" en cada renglon del listado (solo lo ve el superadmin).
+    actions_row = ('impersonar',)
+
+    def has_impersonar_permission(self, request) -> bool:
+        """Quien ve el boton: unicamente el superadministrador."""
+        return bool(request.user.is_active and request.user.is_superuser)
+
+    @action(
+        description='Impersonar',
+        url_path='impersonar',
+        permissions=['impersonar'],
+        icon='switch_account',
+        extra_options={'display_in_dropdown': False},
+    )
+    def impersonar(self, request, object_id):
+        """Entra al panel como esa cuenta (ver usuarios/impersonacion.py).
+
+        En GET muestra la confirmacion; el pase se emite SOLO en el POST: una
+        accion con efectos nunca cuelga de un simple link (y asi el formulario
+        viaja con su token CSRF).
+        """
+        try:
+            objetivo = self.get_queryset(request).filter(pk=object_id).first()
+        except (TypeError, ValueError):
+            objetivo = None
+        if objetivo is None:
+            raise Http404('No existe esa cuenta.')
+
+        motivo = motivo_no_impersonable(request.user, objetivo)
+        listado = reverse('admin:usuarios_usuario_changelist')
+
+        if request.method != 'POST':
+            contexto = {
+                **self.admin_site.each_context(request),
+                'title': f'Impersonar a {objetivo.username}',
+                'objetivo': objetivo,
+                'motivo': motivo,
+                'horas': int(DURACION_MAXIMA.total_seconds() // 3600),
+                'url_listado': listado,
+                'opts': self.model._meta,
+            }
+            return render(request, 'admin/usuarios/impersonar.html', contexto)
+
+        if motivo is not None:
+            self.message_user(request, motivo, level=messages.ERROR)
+            return redirect(listado)
+
+        pase = TicketImpersonacion.emitir(request.user, objetivo, ip=_ip_de(request))
+        # El historial guarda quien entro como quien, antes de irse al frontend.
+        registrar_impersonacion(request.user, objetivo, request)
+        return HttpResponseRedirect(url_de_retorno(pase))
 
 
 @admin.register(Rol)

@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { api, setUnauthorizedHandler } from '@/lib/api'
-import type { Usuario } from '@/types'
+import type { Impersonacion, Usuario } from '@/types'
 
 interface LoginResponse {
   access: string
@@ -14,12 +14,19 @@ interface TokenPair {
   refresh: string
 }
 
+/** Respuesta del canje del pase de impersonación (ver `ImpersonarPage`). */
+export interface CanjeImpersonacion extends LoginResponse {
+  impersonacion: { actor: { id: number; username: string }; expira: string }
+}
+
 interface AuthState {
   usuario: Usuario | null
   access: string | null
   refresh: string | null
   /** Marca de la última actividad real del usuario (ms). Para el corte por inactividad. */
   lastActivity: number
+  /** Sesión prestada: quién impersona, hasta cuándo y a qué cuenta volver. */
+  impersonacion: Impersonacion | null
   /** Login real contra el backend: identificador (email O usuario) + contraseña. */
   login: (identifier: string, password: string) => Promise<void>
   /** Refresca los datos del usuario (rol/permisos) desde `/api/auth/me/`. */
@@ -28,6 +35,10 @@ interface AuthState {
   refrescarTokens: () => Promise<boolean>
   /** Registra actividad del usuario (con throttle) para el corte por inactividad. */
   marcarActividad: () => void
+  /** Entra como otra cuenta guardando la sesión propia para poder volver. */
+  entrarComo: (datos: CanjeImpersonacion) => void
+  /** Vuelve a la cuenta propia. `false` si ya no había sesión a la que volver. */
+  volverAMiCuenta: () => boolean
   logout: () => void
 }
 
@@ -48,9 +59,16 @@ export const useAuth = create<AuthState>()(
       access: null,
       refresh: null,
       lastActivity: Date.now(),
+      impersonacion: null,
       login: async (identifier, password) => {
         const data = await api.post<LoginResponse>('/auth/login/', { identifier, password })
-        set({ usuario: data.user, access: data.access, refresh: data.refresh, lastActivity: Date.now() })
+        set({
+          usuario: data.user,
+          access: data.access,
+          refresh: data.refresh,
+          lastActivity: Date.now(),
+          impersonacion: null,
+        })
       },
       refrescarUsuario: async () => {
         const access = get().access
@@ -87,19 +105,63 @@ export const useAuth = create<AuthState>()(
         ultimaMarca = ahora
         set({ lastActivity: ahora })
       },
-      logout: () => set({ usuario: null, access: null, refresh: null }),
+      entrarComo: (datos) => {
+        const { usuario, access, refresh, impersonacion } = get()
+        // La sesión propia queda guardada tal cual para volver a ella sin tener
+        // que iniciar sesión de nuevo. Si no había (se entró desde el admin en
+        // una pestaña limpia), al salir se va al login. Si ya se estaba
+        // impersonando, se conserva la ORIGINAL: encadenar impersonaciones no
+        // debe perder la cuenta propia.
+        const sesionPrevia =
+          impersonacion?.sesionPrevia ??
+          (usuario && access && refresh ? { usuario, access, refresh } : null)
+        set({
+          usuario: datos.user,
+          access: datos.access,
+          refresh: datos.refresh,
+          lastActivity: Date.now(),
+          impersonacion: {
+            actor: datos.impersonacion.actor,
+            expira: datos.impersonacion.expira,
+            sesionPrevia,
+          },
+        })
+      },
+      volverAMiCuenta: () => {
+        const previa = get().impersonacion?.sesionPrevia ?? null
+        if (!previa) {
+          set({ usuario: null, access: null, refresh: null, impersonacion: null })
+          return false
+        }
+        set({
+          usuario: previa.usuario,
+          access: previa.access,
+          refresh: previa.refresh,
+          lastActivity: Date.now(),
+          impersonacion: null,
+        })
+        return true
+      },
+      logout: () => set({ usuario: null, access: null, refresh: null, impersonacion: null }),
     }),
     {
       name: 'celtuc-auth',
       // v3: el usuario ahora trae rol/permisos. Las sesiones viejas no los tienen,
       // así que al subir de versión descartamos la sesión y obligamos a re-loguear.
       version: 3,
-      migrate: () => ({ usuario: null, access: null, refresh: null, lastActivity: Date.now() }),
+      migrate: () => ({
+        usuario: null,
+        access: null,
+        refresh: null,
+        lastActivity: Date.now(),
+        impersonacion: null,
+      }),
       partialize: (s) => ({
         usuario: s.usuario,
         access: s.access,
         refresh: s.refresh,
         lastActivity: s.lastActivity,
+        impersonacion: s.impersonacion,
       }),
     },
   ),
@@ -110,6 +172,12 @@ export const useAuth = create<AuthState>()(
 setUnauthorizedHandler(async () => {
   const ok = await useAuth.getState().refrescarTokens()
   if (ok) return useAuth.getState().access
+  // Si era una sesión prestada (venció el límite de 2 h, o al superadmin le
+  // sacaron el poder), no se pierde la sesión propia: se vuelve a ella.
+  if (useAuth.getState().impersonacion) {
+    useAuth.getState().volverAMiCuenta()
+    return null
+  }
   useAuth.getState().logout()
   return null
 })

@@ -10,6 +10,7 @@ import { useConfirm } from '@/components/ConfirmProvider'
 import { BrandMark, BrandWordmark } from '@/components/Brand'
 import { MobileNav } from '@/components/MobileNav'
 import { ThemeToggle } from '@/components/ThemeToggle'
+import { BannerImpersonacion } from '@/components/BannerImpersonacion'
 import { navItems } from '@/components/navItems'
 
 /**
@@ -21,6 +22,9 @@ import { navItems } from '@/components/navItems'
 export function Layout() {
   const usuario = useAuth((s) => s.usuario)
   const logout = useAuth((s) => s.logout)
+  // Sesión prestada (ver <BannerImpersonacion />): la barra fija de arriba ocupa
+  // 2.75rem, así que todo lo que está pegado al borde superior se corre.
+  const impersonando = useAuth((s) => s.impersonacion !== null)
   const refrescarUsuario = useAuth((s) => s.refrescarUsuario)
   // Cada vez que entra al panel, refrescamos rol/permisos: si un admin cambió la
   // configuración del rol, el sidebar se actualiza sin tener que re-loguear.
@@ -50,7 +54,11 @@ export function Layout() {
   async function handleLogout() {
     const ok = await confirm({
       title: '¿Cerrar sesión?',
-      description: 'Vas a volver a la pantalla de ingreso.',
+      // Impersonando, «cerrar sesión» cierra TAMBIÉN la sesión propia: se avisa,
+      // porque para volver a la cuenta propia está la barra de arriba.
+      description: impersonando
+        ? `Estás viendo el sistema como ${usuario?.username}. Vas a cerrar también tu sesión y volver a la pantalla de ingreso; si solo querés volver a tu cuenta, usá la barra de arriba.`
+        : 'Vas a volver a la pantalla de ingreso.',
       confirmLabel: 'Cerrar sesión',
       cancelLabel: 'Quedarme',
       tone: 'danger',
@@ -62,9 +70,16 @@ export function Layout() {
   }
 
   return (
-    <div className="min-h-[100dvh] lg:flex">
+    <div className={cn('min-h-[100dvh] lg:flex', impersonando && 'pt-11')}>
+      <BannerImpersonacion />
+
       {/* ===== Sidebar (escritorio) ===== */}
-      <aside className="hidden shrink-0 border-r border-line bg-surface/80 backdrop-blur-xl lg:sticky lg:top-0 lg:flex lg:h-[100dvh] lg:w-[5.5rem] lg:flex-col xl:w-64">
+      <aside
+        className={cn(
+          'hidden shrink-0 border-r border-line bg-surface/80 backdrop-blur-xl lg:sticky lg:top-0 lg:flex lg:h-[100dvh] lg:w-[5.5rem] lg:flex-col xl:w-64',
+          impersonando && 'lg:top-11 lg:h-[calc(100dvh-2.75rem)]',
+        )}
+      >
         <div className="flex h-20 items-center justify-center gap-2.5 px-3 xl:justify-start xl:px-6">
           <BrandMark className="h-9 w-9 shrink-0 xl:hidden" />
           <BrandWordmark className="hidden text-[1.75rem] xl:inline-flex" />
@@ -152,6 +167,7 @@ export function Layout() {
             scrolled
               ? 'top-3 mx-3 rounded-[1.35rem] border border-line bg-surface/90 shadow-[0_14px_36px_rgba(10,10,11,0.14)]'
               : 'border-b border-line bg-surface/85',
+            impersonando && (scrolled ? 'top-[3.5rem]' : 'top-11'),
           )}
         >
           <div className="flex shrink-0 items-center gap-2">

@@ -101,6 +101,12 @@ CSRF_TRUSTED_ORIGINS = env_list(
     'https://celtuc.scripthouse.com.ar',
 )
 
+# A donde vuelve el navegador con el pase de impersonacion (ver
+# usuarios/impersonacion.py). Vacio = mismo origen, que es el caso de
+# produccion: nginx sirve el frontend y el admin juntos. En desarrollo, con Vite
+# en otro puerto, se apunta con FRONTEND_URL=http://localhost:5173.
+FRONTEND_URL = os.environ.get('FRONTEND_URL', '').strip().rstrip('/')
+
 
 # --- Aplicaciones ------------------------------------------------------------
 INSTALLED_APPS = [

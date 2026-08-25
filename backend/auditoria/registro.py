@@ -137,9 +137,14 @@ def _escribir(accion, usuario, request=None, instancia=None, cambios=None,
     from .models import RegistroAuditoria
     try:
         meta = instancia._meta if instancia is not None else None
+        # Si la cuenta esta siendo impersonada, la accion queda a su nombre (es lo
+        # que paso) pero se guarda TAMBIEN quien estaba detras: una impersonacion
+        # sin rastro del actor real seria un agujero de auditoria.
+        actor = getattr(usuario, 'impersonado_por', None)
         return RegistroAuditoria.objects.create(
             usuario=usuario if getattr(usuario, 'pk', None) else None,
             usuario_username=getattr(usuario, 'username', '') or '',
+            actor_username=getattr(actor, 'username', '') or '',
             accion=accion,
             app=(meta.app_label if meta else app) or '',
             modelo=(str(meta.verbose_name) if meta else modelo) or '',
@@ -159,6 +164,15 @@ def registrar_ingreso(usuario, request=None):
         'ingreso', usuario, request,
         app='usuarios', modelo='sesion',
     )
+
+
+def registrar_impersonacion(actor, objetivo, request=None):
+    """Registro del inicio de una impersonacion (lo llama el admin de Django).
+
+    Queda a nombre del superadministrador, apuntando a la cuenta en la que
+    entro: el "quien entro como quien" del historial.
+    """
+    _escribir('impersonar', actor, request, instancia=objetivo)
 
 
 # --- Señales -----------------------------------------------------------------

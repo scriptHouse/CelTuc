@@ -1,15 +1,16 @@
 from datetime import timedelta
 
 from django.core.cache import cache
-from django.test import TestCase
+from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
 
+from auditoria.models import RegistroAuditoria
 from empleados.models import Empleado
 
-from .models import Permiso, Rol, Usuario
-from .tokens import create_token_pair
+from .models import Permiso, Rol, TicketImpersonacion, Usuario
+from .tokens import create_token, create_token_pair, decode_token
 
 
 class UsuarioModelTests(TestCase):
@@ -473,3 +474,230 @@ class PresenciaTests(TestCase):
         self.assertIn('last_login', fila)
         self.assertIn('ultima_actividad', fila)
         self.assertIn('en_linea', fila)
+
+
+class ImpersonacionTests(TestCase):
+    """El boton "Impersonar" del admin y el canje del pase (ver impersonacion.py)."""
+
+    def setUp(self):
+        cache.clear()
+        self.superadmin = Usuario.objects.create_superuser(
+            email='dueno@celtuc.ar', username='dueno', password='clave-segura-123',
+        )
+        self.empleado = Usuario.objects.create_user(
+            email='noe@celtuc.ar', username='noe', password='clave-segura-123',
+        )
+        self.client = Client()
+
+    # --- Helpers -------------------------------------------------------------
+
+    def _url(self, usuario):
+        return reverse('admin:usuarios_usuario_impersonar', args=[usuario.pk])
+
+    def _pase_de(self, respuesta) -> str:
+        """El pase que viaja en el fragmento de la URL de redireccion."""
+        return respuesta['Location'].split('#ticket=')[1]
+
+    def _impersonar(self, objetivo=None):
+        """Flujo completo: boton del admin + canje. Devuelve el cuerpo del canje."""
+        self.client.force_login(self.superadmin)
+        redir = self.client.post(self._url(objetivo or self.empleado))
+        canje = APIClient().post(
+            reverse('usuarios:impersonar-canjear'),
+            {'ticket': self._pase_de(redir)},
+            format='json',
+        )
+        self.assertEqual(canje.status_code, 200)
+        return canje.json()
+
+    # --- El boton en el admin ------------------------------------------------
+
+    def test_el_listado_muestra_el_boton_al_superadmin(self):
+        self.client.force_login(self.superadmin)
+        html = self.client.get(reverse('admin:usuarios_usuario_changelist')).content.decode()
+        self.assertIn('Impersonar', html)
+        self.assertIn(self._url(self.empleado), html)
+
+    def test_un_staff_que_no_es_superadmin_no_puede_impersonar(self):
+        staff = Usuario.objects.create_user(
+            email='staff@celtuc.ar', username='staff', password='clave-segura-123', is_staff=True,
+        )
+        self.client.force_login(staff)
+        html = self.client.get(reverse('admin:usuarios_usuario_changelist')).content.decode()
+        self.assertNotIn(self._url(self.empleado), html)
+        self.assertEqual(self.client.post(self._url(self.empleado)).status_code, 403)
+        self.assertEqual(TicketImpersonacion.objects.count(), 0)
+
+    def test_anonimo_no_puede_impersonar(self):
+        resp = self.client.post(self._url(self.empleado))
+        self.assertEqual(resp.status_code, 302)  # al login del admin
+        self.assertIn('/admin/login/', resp['Location'])
+        self.assertEqual(TicketImpersonacion.objects.count(), 0)
+
+    def test_el_get_solo_muestra_la_confirmacion(self):
+        """Una accion con efectos NUNCA cuelga de un simple link (GET)."""
+        self.client.force_login(self.superadmin)
+        resp = self.client.get(self._url(self.empleado))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'noe')
+        self.assertEqual(TicketImpersonacion.objects.count(), 0)
+
+    def test_el_post_emite_el_pase_y_redirige_al_frontend(self):
+        self.client.force_login(self.superadmin)
+        resp = self.client.post(self._url(self.empleado))
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(resp['Location'].startswith('/impersonar#ticket='))
+        ticket = TicketImpersonacion.objects.get()
+        self.assertEqual(ticket.actor, self.superadmin)
+        self.assertEqual(ticket.objetivo, self.empleado)
+        self.assertIsNone(ticket.usado)
+        # Lo que se guarda es el hash, nunca el pase en claro.
+        self.assertNotIn(ticket.token_hash, resp['Location'])
+        self.assertEqual(ticket.token_hash, TicketImpersonacion.hashear(self._pase_de(resp)))
+
+    def test_el_inicio_queda_en_la_auditoria(self):
+        self.client.force_login(self.superadmin)
+        self.client.post(self._url(self.empleado))
+        registro = RegistroAuditoria.objects.get(accion='impersonar')
+        self.assertEqual(registro.usuario_username, 'dueno')
+        self.assertEqual(registro.objeto, 'noe')
+
+    def test_no_se_puede_impersonar_a_otro_superadministrador(self):
+        otro = Usuario.objects.create_superuser(
+            email='socio@celtuc.ar', username='socio', password='clave-segura-123',
+        )
+        self.client.force_login(self.superadmin)
+        self.assertContains(self.client.get(self._url(otro)), 'No se puede impersonar')
+        self.assertEqual(self.client.post(self._url(otro)).status_code, 302)
+        self.assertEqual(TicketImpersonacion.objects.count(), 0)
+
+    def test_no_se_puede_impersonar_a_uno_mismo(self):
+        self.client.force_login(self.superadmin)
+        self.client.post(self._url(self.superadmin))
+        self.assertEqual(TicketImpersonacion.objects.count(), 0)
+
+    def test_no_se_puede_impersonar_una_cuenta_inactiva(self):
+        self.empleado.is_active = False
+        self.empleado.save(update_fields=['is_active'])
+        self.client.force_login(self.superadmin)
+        self.client.post(self._url(self.empleado))
+        self.assertEqual(TicketImpersonacion.objects.count(), 0)
+
+    # --- El canje del pase ---------------------------------------------------
+
+    def test_el_canje_devuelve_la_sesion_de_la_cuenta_impersonada(self):
+        cuerpo = self._impersonar()
+        self.assertEqual(cuerpo['user']['username'], 'noe')
+        self.assertEqual(cuerpo['impersonacion']['actor']['username'], 'dueno')
+        me = APIClient().get(
+            reverse('usuarios:me'), HTTP_AUTHORIZATION=f"Bearer {cuerpo['access']}",
+        )
+        self.assertEqual(me.status_code, 200)
+        self.assertEqual(me.json()['username'], 'noe')
+
+    def test_el_pase_sirve_una_sola_vez(self):
+        self.client.force_login(self.superadmin)
+        pase = self._pase_de(self.client.post(self._url(self.empleado)))
+        url = reverse('usuarios:impersonar-canjear')
+        self.assertEqual(APIClient().post(url, {'ticket': pase}, format='json').status_code, 200)
+        self.assertEqual(APIClient().post(url, {'ticket': pase}, format='json').status_code, 400)
+
+    def test_el_pase_vencido_no_sirve(self):
+        self.client.force_login(self.superadmin)
+        pase = self._pase_de(self.client.post(self._url(self.empleado)))
+        TicketImpersonacion.objects.update(expira=timezone.now() - timedelta(seconds=1))
+        resp = APIClient().post(
+            reverse('usuarios:impersonar-canjear'), {'ticket': pase}, format='json',
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_un_pase_inventado_no_sirve(self):
+        resp = APIClient().post(
+            reverse('usuarios:impersonar-canjear'), {'ticket': 'a' * 43}, format='json',
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_si_desactivan_la_cuenta_entre_medio_el_canje_falla(self):
+        self.client.force_login(self.superadmin)
+        pase = self._pase_de(self.client.post(self._url(self.empleado)))
+        self.empleado.is_active = False
+        self.empleado.save(update_fields=['is_active'])
+        resp = APIClient().post(
+            reverse('usuarios:impersonar-canjear'), {'ticket': pase}, format='json',
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    # --- La sesion impersonada -----------------------------------------------
+
+    def test_la_sesion_impersonada_no_marca_presencia(self):
+        """Impersonar no puede hacer figurar "en linea" a quien no esta usando el sistema."""
+        cuerpo = self._impersonar()
+        APIClient().get(reverse('usuarios:me'), HTTP_AUTHORIZATION=f"Bearer {cuerpo['access']}")
+        self.empleado.refresh_from_db()
+        self.assertIsNone(self.empleado.ultima_actividad)
+        self.assertIsNone(self.empleado.last_login)
+
+    def test_el_refresh_conserva_la_marca_de_impersonacion(self):
+        cuerpo = self._impersonar()
+        r = APIClient().post(
+            reverse('usuarios:refresh'), {'refresh': cuerpo['refresh']}, format='json',
+        )
+        self.assertEqual(r.status_code, 200)
+        payload = decode_token(r.json()['access'], expected_type='access')
+        self.assertEqual(payload['act'], str(self.superadmin.pk))
+        self.assertEqual(payload['imp_exp'], decode_token(cuerpo['access'], 'access')['imp_exp'])
+
+    def test_si_el_actor_deja_de_ser_superadmin_la_sesion_muere(self):
+        cuerpo = self._impersonar()
+        self.superadmin.is_superuser = False
+        self.superadmin.save(update_fields=['is_superuser'])
+        me = APIClient().get(
+            reverse('usuarios:me'), HTTP_AUTHORIZATION=f"Bearer {cuerpo['access']}",
+        )
+        self.assertEqual(me.status_code, 401)
+        r = APIClient().post(
+            reverse('usuarios:refresh'), {'refresh': cuerpo['refresh']}, format='json',
+        )
+        self.assertEqual(r.status_code, 401)
+
+    def test_la_impersonacion_caduca_a_las_dos_horas_aunque_se_renueve(self):
+        """`imp_exp` es un tope ABSOLUTO: no se estira renovando tokens."""
+        vencido = int((timezone.now() - timedelta(minutes=1)).timestamp())
+        extra = {'act': str(self.superadmin.pk), 'imp_exp': vencido}
+        access = create_token(self.empleado, 'access', timedelta(hours=1), extra)
+        refresh = create_token(self.empleado, 'refresh', timedelta(hours=7), extra)
+        self.assertEqual(
+            APIClient().get(
+                reverse('usuarios:me'), HTTP_AUTHORIZATION=f'Bearer {access}',
+            ).status_code,
+            401,
+        )
+        self.assertEqual(
+            APIClient().post(
+                reverse('usuarios:refresh'), {'refresh': refresh}, format='json',
+            ).status_code,
+            401,
+        )
+
+    def test_la_auditoria_guarda_quien_estaba_realmente_detras(self):
+        """Lo hecho impersonando queda a nombre de la cuenta, con el actor anotado."""
+        self.empleado.is_staff = True
+        self.empleado.save(update_fields=['is_staff'])
+        cuerpo = self._impersonar()
+        api = APIClient()
+        api.credentials(HTTP_AUTHORIZATION=f"Bearer {cuerpo['access']}")
+        r = api.post(
+            reverse('usuarios_gestion:list'),
+            {'username': 'nuevo', 'email': 'nuevo@celtuc.ar', 'password': 'clave-123'},
+            format='json',
+        )
+        self.assertEqual(r.status_code, 201)
+        registro = RegistroAuditoria.objects.filter(accion='crear').latest('creado')
+        self.assertEqual(registro.usuario_username, 'noe')
+        self.assertEqual(registro.actor_username, 'dueno')
+
+    def test_una_sesion_normal_no_lleva_marcas_de_impersonacion(self):
+        access = create_token_pair(self.empleado)['access']
+        payload = decode_token(access, expected_type='access')
+        self.assertNotIn('act', payload)
+        self.assertNotIn('imp_exp', payload)

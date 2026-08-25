@@ -1,3 +1,5 @@
+import hashlib
+import secrets
 from datetime import timedelta
 
 from django.contrib.auth.base_user import AbstractBaseUser
@@ -219,3 +221,89 @@ class Usuario(ModeloBase, AbstractBaseUser, PermissionsMixin):
         if not self.ultima_actividad:
             return False
         return timezone.now() - self.ultima_actividad <= self.VENTANA_EN_LINEA
+
+
+class TicketImpersonacion(models.Model):
+    """Pase de un solo uso para entrar al panel como otra cuenta.
+
+    Lo emite el admin de Django (boton "Impersonar") y lo canjea el frontend por
+    un par de tokens JWT. Dos cuidados, como con una contrasena: aca se guarda
+    SOLO el hash del pase (nunca el pase en claro) y el canje lo quema. Ver
+    `usuarios/impersonacion.py` para el flujo completo.
+    """
+
+    # Vida del pase: lo unico que tiene que alcanzar es una redireccion.
+    VIDA = timedelta(minutes=1)
+    # Cuanto se conservan los pases ya vencidos/usados (la tabla se limpia sola
+    # al emitir; el registro real de la impersonacion vive en la auditoria).
+    RETENCION = timedelta(days=1)
+
+    token_hash = models.CharField('hash del pase', max_length=64, unique=True, editable=False)
+    actor = models.ForeignKey(
+        'usuarios.Usuario',
+        verbose_name='superadministrador',
+        on_delete=models.CASCADE,
+        related_name='impersonaciones_iniciadas',
+    )
+    objetivo = models.ForeignKey(
+        'usuarios.Usuario',
+        verbose_name='cuenta impersonada',
+        on_delete=models.CASCADE,
+        related_name='impersonaciones_recibidas',
+    )
+    creado = models.DateTimeField('emitido', default=timezone.now)
+    expira = models.DateTimeField('vence')
+    usado = models.DateTimeField('canjeado', null=True, blank=True)
+    ip = models.GenericIPAddressField('IP', null=True, blank=True)
+
+    class Meta:
+        db_table = 'usuarios_tickets_impersonacion'
+        verbose_name = 'pase de impersonacion'
+        verbose_name_plural = 'pases de impersonacion'
+        ordering = ('-creado',)
+
+    def __str__(self):
+        return f'{self.actor} -> {self.objetivo}'
+
+    @staticmethod
+    def hashear(pase: str) -> str:
+        return hashlib.sha256(pase.encode('utf-8')).hexdigest()
+
+    @classmethod
+    def emitir(cls, actor, objetivo, ip=None) -> str:
+        """Crea un pase y devuelve el secreto EN CLARO (unica vez que existe)."""
+        ahora = timezone.now()
+        # Limpieza oportunista: la tabla nunca crece.
+        cls.objects.filter(creado__lt=ahora - cls.RETENCION).delete()
+        pase = secrets.token_urlsafe(32)
+        cls.objects.create(
+            token_hash=cls.hashear(pase),
+            actor=actor,
+            objetivo=objetivo,
+            expira=ahora + cls.VIDA,
+            ip=ip,
+        )
+        return pase
+
+    @classmethod
+    def canjear(cls, pase: str):
+        """Quema el pase y devuelve el ticket, o None si no sirve.
+
+        El UPDATE condicional (`usado__isnull=True`) es lo que garantiza el "un
+        solo uso" aunque lleguen dos canjes a la vez, incluso a workers distintos:
+        gana el que consigue marcar la fila.
+        """
+        if not pase:
+            return None
+        ahora = timezone.now()
+        ticket = (
+            cls.objects.select_related('actor', 'objetivo')
+            .filter(token_hash=cls.hashear(pase), usado__isnull=True, expira__gt=ahora)
+            .first()
+        )
+        if ticket is None:
+            return None
+        if cls.objects.filter(pk=ticket.pk, usado__isnull=True).update(usado=ahora) != 1:
+            return None
+        ticket.usado = ahora
+        return ticket

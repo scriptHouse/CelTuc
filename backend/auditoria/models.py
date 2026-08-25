@@ -19,6 +19,7 @@ class RegistroAuditoria(models.Model):
         ELIMINAR = 'eliminar', 'Elimino'
         RESTAURAR = 'restaurar', 'Restauro'
         INGRESO = 'ingreso', 'Inicio sesion'
+        IMPERSONAR = 'impersonar', 'Impersono'
 
     usuario = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -30,6 +31,9 @@ class RegistroAuditoria(models.Model):
     )
     # Foto del username: si la cuenta se elimina, el historial sigue diciendo quien fue.
     usuario_username = models.CharField('usuario (foto)', max_length=150, blank=True)
+    # Impersonacion: `usuario` es la cuenta con la que se hizo la accion y esto,
+    # el superadministrador que estaba realmente detras. Vacio en lo normal.
+    actor_username = models.CharField('actor real', max_length=150, blank=True)
     accion = models.CharField('accion', max_length=12, choices=Accion.choices)
     app = models.CharField('modulo', max_length=50, blank=True)
     modelo = models.CharField('modelo', max_length=80, blank=True)

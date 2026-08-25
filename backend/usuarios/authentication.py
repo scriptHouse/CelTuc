@@ -33,8 +33,33 @@ class JWTAuthentication(BaseAuthentication):
         if user is None:
             raise AuthenticationFailed('Usuario no encontrado o inactivo.')
 
-        self._registrar_actividad(user)
+        actor = self._actor_de(payload)
+        if actor is not None:
+            # Sesion impersonada: la cuenta la "usa" el superadministrador, no su
+            # dueño. No se le marca presencia (no seria cierto que esta en linea)
+            # y queda anotado quien esta detras para la auditoria.
+            user.impersonado_por = actor
+        else:
+            self._registrar_actividad(user)
         return (user, payload)
+
+    @staticmethod
+    def _actor_de(payload):
+        """El superadministrador detras de una sesion impersonada (o None).
+
+        Se revalida en CADA peticion: si le quitan el poder o desactivan su
+        cuenta, la sesion impersonada muere al instante, sin esperar al `exp`.
+        """
+        actor_id = payload.get('act')
+        if not actor_id:
+            return None
+        try:
+            actor = Usuario.objects.filter(pk=actor_id, is_active=True, is_superuser=True).first()
+        except (TypeError, ValueError):
+            actor = None
+        if actor is None:
+            raise AuthenticationFailed('La impersonacion ya no es valida.')
+        return actor
 
     @staticmethod
     def _registrar_actividad(user):

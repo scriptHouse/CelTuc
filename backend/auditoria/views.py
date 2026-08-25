@@ -45,7 +45,7 @@ class RegistroSerializer(serializers.ModelSerializer):
         model = RegistroAuditoria
         fields = (
             'id', 'creado', 'accion', 'accion_display',
-            'usuario', 'usuario_username',
+            'usuario', 'usuario_username', 'actor_username',
             'app', 'modulo', 'modelo', 'objeto_id', 'objeto',
             'cambios', 'ip',
         )

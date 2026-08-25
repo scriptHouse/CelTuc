@@ -33,6 +33,19 @@ export interface Usuario {
   sucursal?: SucursalBreve | null
 }
 
+/**
+ * Sesión prestada: el superadministrador entró como otra cuenta desde el admin
+ * de Django. Guarda su propia sesión para poder volver de un clic.
+ */
+export interface Impersonacion {
+  /** El superadministrador que está realmente detrás. */
+  actor: { id: number; username: string }
+  /** Momento (ISO) en que la impersonación caduca sí o sí. */
+  expira: string
+  /** Sesión propia a la que se vuelve al salir (null = habrá que loguearse). */
+  sesionPrevia: { usuario: Usuario; access: string; refresh: string } | null
+}
+
 /** Permiso del catálogo (un módulo del panel). */
 export interface Permiso {
   codigo: string
@@ -823,7 +836,13 @@ export const MOTIVOS_MOVIMIENTO_CAJA: Record<'ingreso' | 'egreso' | 'retiro', st
 
 // ===== Auditoría (solo superadministrador) =====
 
-export type AccionAuditoria = 'crear' | 'editar' | 'eliminar' | 'restaurar' | 'ingreso'
+export type AccionAuditoria =
+  | 'crear'
+  | 'editar'
+  | 'eliminar'
+  | 'restaurar'
+  | 'ingreso'
+  | 'impersonar'
 
 /** El antes y el después de UN campo que cambió. */
 export interface CambioAuditoria {
@@ -841,6 +860,8 @@ export interface RegistroAuditoria {
   usuario: { id: number; username: string; nombre: string } | null
   /** Foto del username al momento de la acción (sobrevive a la cuenta). */
   usuario_username: string
+  /** Si la acción se hizo impersonando: el superadmin real detrás. Vacío si no. */
+  actor_username: string
   app: string
   /** Nombre visible del módulo ("Inventario", "Facturación"...). */
   modulo: string

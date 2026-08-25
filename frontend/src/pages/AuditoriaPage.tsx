@@ -14,6 +14,7 @@ import {
   RotateCcw,
   Search,
   Trash2,
+  UserRoundCog,
   Users,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -40,6 +41,7 @@ const VERBOS: Record<AccionAuditoria, string> = {
   eliminar: 'eliminó',
   restaurar: 'restauró',
   ingreso: 'inició sesión',
+  impersonar: 'entró como',
 }
 
 const ICONOS: Record<AccionAuditoria, LucideIcon> = {
@@ -48,6 +50,7 @@ const ICONOS: Record<AccionAuditoria, LucideIcon> = {
   eliminar: Trash2,
   restaurar: RotateCcw,
   ingreso: LogIn,
+  impersonar: UserRoundCog,
 }
 
 /** Módulos disponibles para filtrar (alineado con el backend). */
@@ -72,6 +75,7 @@ const ACCIONES = [
   { value: 'eliminar', label: 'Eliminaciones' },
   { value: 'restaurar', label: 'Restauraciones' },
   { value: 'ingreso', label: 'Inicios de sesión' },
+  { value: 'impersonar', label: 'Impersonaciones' },
 ]
 
 type Rango = 'hoy' | '7d' | '30d' | 'todo'
@@ -122,6 +126,7 @@ const FEMENINAS = new Set([
 function fraseDe(registro: RegistroAuditoria): { verbo: string; sustantivo: string; objeto: string } {
   const verbo = VERBOS[registro.accion] ?? registro.accion_display.toLowerCase()
   if (registro.accion === 'ingreso') return { verbo, sustantivo: '', objeto: '' }
+  if (registro.accion === 'impersonar') return { verbo, sustantivo: '', objeto: registro.objeto }
   const primera = registro.modelo.split(' ')[0]?.toLowerCase() ?? ''
   const seNombra = primera !== '' && registro.objeto.toLowerCase().startsWith(primera)
   if (seNombra) return { verbo, sustantivo: '', objeto: registro.objeto }
@@ -368,6 +373,11 @@ function FilaAuditoria({ registro }: { registro: RegistroAuditoria }) {
 
           <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
             <Badge tone="soft">{registro.modulo}</Badge>
+            {registro.actor_username && (
+              <Badge tone="outline" className="text-amber-600 dark:text-amber-400">
+                vía {registro.actor_username}
+              </Badge>
+            )}
             <span className="tnum text-xs text-ink-400">{hora(registro.creado)} h</span>
             {cambios.length > 0 && (
               <button
