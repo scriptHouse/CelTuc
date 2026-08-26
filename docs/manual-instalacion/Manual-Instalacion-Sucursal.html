@@ -1,0 +1,1279 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Manual de instalación en sucursal — CelTuc Asistencia</title>
+</head>
+<body>
+
+<style>
+  :root {
+    --paper: #ffffff;
+    --surface: #ffffff;
+    --surface-2: #f4f4f2;
+    --ink: #16171a;
+    --ink-2: #3f4045;
+    --muted: #6b6d73;
+    --line: #dededb;
+    --line-2: #c9c9c5;
+    --signal: #b45309;
+    --signal-bg: #fdf6ec;
+    --signal-line: #ecd7b8;
+    --stop: #9f1239;
+    --stop-bg: #fdf2f4;
+    --stop-line: #f0cdd5;
+    --ok: #15803d;
+    --ok-bg: #f1f8f3;
+    --ok-line: #cbe4d3;
+    --mark: #e0473a;
+
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  }
+
+  @page { size: A4; margin: 15mm 14mm 16mm; }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    font-family: var(--sans);
+    font-size: 10.4pt;
+    line-height: 1.55;
+    color: var(--ink);
+    background: var(--paper);
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  h1, h2, h3, h4 { line-height: 1.2; margin: 0; }
+
+  /* --- Portada ------------------------------------------------------------ */
+  .portada {
+    height: 250mm;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    page-break-after: always;
+  }
+  .portada .marca {
+    font-size: 9pt; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--muted); font-weight: 600;
+  }
+  .portada h1 { font-size: 34pt; letter-spacing: -.02em; margin: 6mm 0 4mm; }
+  .portada .bajada { font-size: 12.5pt; color: var(--ink-2); max-width: 130mm; }
+  .portada .pie { font-size: 9pt; color: var(--muted); border-top: 1px solid var(--line); padding-top: 4mm; }
+  .sello {
+    display: inline-block; border: 1.5px solid var(--ink); border-radius: 3mm;
+    padding: 2mm 4mm; font-weight: 700; font-size: 10pt; letter-spacing: .04em;
+  }
+
+  /* --- Estructura --------------------------------------------------------- */
+  .parte { page-break-before: always; }
+  .parte-cabecera {
+    border-top: 3px solid var(--ink);
+    padding-top: 4mm; margin-bottom: 6mm;
+  }
+  .parte-cabecera .etiqueta {
+    font-size: 8.5pt; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--muted); font-weight: 700;
+  }
+  .parte-cabecera h2 { font-size: 20pt; margin-top: 1.5mm; letter-spacing: -.01em; }
+  .parte-cabecera p { margin: 2mm 0 0; color: var(--ink-2); max-width: 150mm; }
+
+  h3.seccion {
+    font-size: 13pt; margin: 8mm 0 3mm;
+    padding-bottom: 1.5mm; border-bottom: 1px solid var(--line);
+    page-break-after: avoid;
+  }
+
+  /* --- Pasos numerados ---------------------------------------------------- */
+  /* Los pasos NO se marcan como indivisibles: uno con una captura grande no
+     entra entero y empujaba la página completa, dejando medio pliego en
+     blanco. Se deja fluir, y lo que sí se mantiene unido es cada figura y el
+     título con su primer párrafo. */
+  .paso { margin: 5mm 0 6mm; }
+  .paso > .titulo {
+    display: flex; gap: 3.5mm; align-items: baseline;
+    page-break-after: avoid; page-break-inside: avoid;
+  }
+  .paso .n {
+    flex: 0 0 auto;
+    min-width: 7.5mm; height: 7.5mm; padding: 0 1.5mm;
+    border-radius: 999px; background: var(--ink); color: #fff;
+    font-weight: 700; font-size: 9.5pt;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .paso .titulo h4 { font-size: 12pt; }
+  .paso .cuerpo { padding-left: 11mm; }
+  .paso .cuerpo > :first-child { margin-top: 1.5mm; }
+
+  p { margin: 0 0 2.5mm; }
+  ul, ol { margin: 0 0 3mm; padding-left: 5mm; }
+  li { margin-bottom: 1.5mm; }
+
+  code {
+    font-family: var(--mono); font-size: .9em;
+    background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: 1.2mm; padding: .3mm 1.2mm;
+  }
+
+  pre.consola {
+    font-family: var(--mono); font-size: 8.6pt; line-height: 1.5;
+    background: #1b1d20; color: #e8e8e6;
+    border-radius: 2mm; padding: 3mm 4mm; margin: 2.5mm 0 3mm;
+    white-space: pre-wrap; word-break: break-word;
+    page-break-inside: avoid;
+  }
+  pre.consola .prompt { color: #8fb8e8; }
+  pre.consola .ok { color: #7fd39a; }
+  pre.consola .warn { color: #f0b969; }
+  pre.consola .com { color: #9a9ca1; }
+
+  /* --- Cajas -------------------------------------------------------------- */
+  .caja {
+    border: 1px solid var(--line); border-left-width: 3px;
+    border-radius: 2mm; padding: 3mm 4mm; margin: 3mm 0;
+    background: var(--surface-2); page-break-inside: avoid;
+  }
+  .caja .rotulo {
+    font-size: 8.5pt; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .1em; margin-bottom: 1.5mm;
+  }
+  .caja p:last-child, .caja ul:last-child { margin-bottom: 0; }
+  .caja.ojo { background: var(--signal-bg); border-color: var(--signal-line); border-left-color: var(--signal); }
+  .caja.ojo .rotulo { color: var(--signal); }
+  .caja.alto { background: var(--stop-bg); border-color: var(--stop-line); border-left-color: var(--stop); }
+  .caja.alto .rotulo { color: var(--stop); }
+  .caja.bien { background: var(--ok-bg); border-color: var(--ok-line); border-left-color: var(--ok); }
+  .caja.bien .rotulo { color: var(--ok); }
+
+  /* --- Imágenes ----------------------------------------------------------- */
+  figure { margin: 3mm 0 4mm; page-break-inside: avoid; }
+  figure img[style] { width: 100%; }
+  figure img {
+    width: 100%; display: block;
+    border: 1px solid var(--line-2); border-radius: 2mm;
+  }
+  figcaption {
+    font-size: 8.6pt; color: var(--muted); margin-top: 1.5mm;
+    padding-left: .5mm;
+  }
+  figcaption b { color: var(--ink-2); }
+
+  .globo {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 4.6mm; height: 4.6mm; border-radius: 999px;
+    background: var(--mark); color: #fff;
+    font-size: 7.5pt; font-weight: 700; vertical-align: -.6mm;
+    margin: 0 .3mm;
+  }
+
+  /* --- Tablas ------------------------------------------------------------- */
+  table { width: 100%; border-collapse: collapse; margin: 3mm 0 4mm; font-size: 9.4pt; }
+  th, td { text-align: left; padding: 2mm 2.5mm; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th {
+    font-size: 8.4pt; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--muted); border-bottom: 1.5px solid var(--line-2);
+  }
+  tr { page-break-inside: avoid; }
+
+  /* --- Checklist ---------------------------------------------------------- */
+  ul.checklist { list-style: none; padding-left: 0; }
+  ul.checklist li {
+    display: flex; gap: 2.5mm; align-items: flex-start;
+    padding: 1.6mm 0; border-bottom: 1px dotted var(--line);
+  }
+  ul.checklist li::before {
+    content: ""; flex: 0 0 auto;
+    width: 3.8mm; height: 3.8mm; margin-top: .8mm;
+    border: 1.3px solid var(--line-2); border-radius: 1mm;
+  }
+
+  /* --- Ficha para completar a mano --------------------------------------- */
+  .ficha { border: 1px solid var(--line-2); border-radius: 2mm; padding: 4mm 5mm; }
+  .ficha .fila { display: flex; gap: 3mm; align-items: baseline; padding: 2.2mm 0; border-bottom: 1px dotted var(--line-2); }
+  .ficha .fila:last-child { border-bottom: 0; }
+  .ficha .rot { flex: 0 0 52mm; font-weight: 600; font-size: 9.6pt; }
+  .ficha .val { flex: 1; color: var(--muted); font-size: 9pt; }
+
+  /* --- Índice ------------------------------------------------------------- */
+  .indice ol { list-style: none; padding-left: 0; counter-reset: parte -1; }
+  .indice > ol > li {
+    counter-increment: parte;
+    padding: 2.5mm 0; border-bottom: 1px solid var(--line);
+  }
+  .indice > ol > li > .t { font-weight: 700; font-size: 11.5pt; }
+  .indice > ol > li > .t::before {
+    content: "Parte " counter(parte) " — "; color: var(--muted); font-weight: 600;
+  }
+  .indice .d { color: var(--ink-2); font-size: 9.6pt; margin-top: .8mm; }
+
+  /* --- Mapa de menús del reloj ------------------------------------------- */
+  .menu-reloj { border: 1px solid var(--line-2); border-radius: 2mm; overflow: hidden; margin: 3mm 0 4mm; }
+  .menu-reloj .rama { display: flex; border-bottom: 1px solid var(--line); }
+  .menu-reloj .rama:last-child { border-bottom: 0; }
+  .menu-reloj .ruta {
+    flex: 0 0 78mm; padding: 2.5mm 3mm; background: var(--surface-2);
+    font-family: var(--mono); font-size: 8.8pt; border-right: 1px solid var(--line);
+  }
+  .menu-reloj .que { padding: 2.5mm 3mm; font-size: 9.4pt; }
+
+  .nota-pie { font-size: 8.8pt; color: var(--muted); border-top: 1px solid var(--line); padding-top: 2.5mm; margin-top: 5mm; }
+</style>
+
+<!-- ====================================================================== -->
+<!-- PORTADA                                                                -->
+<!-- ====================================================================== -->
+<section class="portada">
+  <div>
+    <div class="marca">ScriptHouse · CelTuc</div>
+    <h1>Instalación de Asistencia<br>en una sucursal</h1>
+    <p class="bajada">
+      Todo lo que hay que hacer en el reloj, en la notebook y en
+      celtuc.scripthouse.com.ar para que la sucursal quede fichando sola.
+      Paso a paso, en el orden en que conviene hacerlo.
+    </p>
+  </div>
+
+  <div>
+    <div class="caja ojo">
+      <div class="rotulo">Antes de salir</div>
+      <p style="margin-bottom:2mm">
+        Este manual arranca en la <b>Parte 0</b>, que es lo que se prepara
+        <b>antes</b> de ir. Si llegás a la sucursal sin el ejecutable del agente
+        y sin acceso a CelTuc, no se puede terminar la instalación.
+      </p>
+      <p>
+        Tiempo estimado en la sucursal: <b>45 a 90 minutos</b>, según cuántos
+        empleados haya que registrar en el reloj.
+      </p>
+    </div>
+    <p class="pie" style="margin-top:5mm">
+      <span class="sello">Reloj Hikvision DS-K1A340WX</span>
+      &nbsp;&nbsp; Versión del manual: agosto 2026 · Agente 1.0.0
+    </p>
+  </div>
+</section>
+
+<!-- ====================================================================== -->
+<!-- ÍNDICE                                                                 -->
+<!-- ====================================================================== -->
+<section class="parte" style="page-break-before:auto">
+  <div class="parte-cabecera">
+    <div class="etiqueta">Cómo está ordenado</div>
+    <h2>Qué vas a hacer, en orden</h2>
+    <p>
+      El orden importa: el reloj tiene que estar en la red y con IP fija
+      <em>antes</em> de crearlo en CelTuc, y el agente de la notebook necesita
+      el token que CelTuc genera recién en la Parte 2.
+    </p>
+  </div>
+
+  <div class="indice">
+    <ol>
+      <li>
+        <div class="t">Antes de salir</div>
+        <div class="d">Qué llevar, de dónde sale cada archivo y cómo armar el pendrive.</div>
+      </li>
+      <li>
+        <div class="t">El reloj</div>
+        <div class="d">Montaje, hora, Wi-Fi, <b>IP fija</b> y alta de los rostros.</div>
+      </li>
+      <li>
+        <div class="t">CelTuc en la web</div>
+        <div class="d">Dar de alta el reloj y el agente, y bajar el <code>config.toml</code> con el token.</div>
+      </li>
+      <li>
+        <div class="t">La notebook</div>
+        <div class="d">Probar la conexión con el reloj e instalar el agente como servicio.</div>
+      </li>
+      <li>
+        <div class="t">Verificar que quedó andando</div>
+        <div class="d">Fichada de prueba, vincular empleados y la prueba de fuego.</div>
+      </li>
+      <li>
+        <div class="t">Dejar el sistema configurado</div>
+        <div class="d">Turnos, licencias, feriados y reglas de inconsistencias.</div>
+      </li>
+    </ol>
+  </div>
+
+  <h3 class="seccion">Cómo funciona, en una línea</h3>
+  <p>
+    El reloj vive en la red interna de la sucursal y <b>nunca se publica a
+    Internet</b>. La notebook lo consulta cada 20 segundos por la red local y
+    manda las fichadas a CelTuc. Todo el tráfico sale de la notebook hacia
+    afuera: no hay que abrir ningún puerto en el router.
+  </p>
+  <pre class="consola">Reloj Hikvision ──(red local)──▶ Notebook con el agente ──(HTTPS)──▶ celtuc.scripthouse.com.ar</pre>
+
+  <div class="caja bien">
+    <div class="rotulo">Lo que esto implica</div>
+    <ul style="margin-bottom:0">
+      <li>Si se corta Internet, <b>no se pierde nada</b>: el agente guarda las fichadas en la notebook y las manda cuando vuelve.</li>
+      <li>Si se apaga la notebook, tampoco: el reloj sigue registrando y el agente recupera todo al prenderse.</li>
+      <li>La contraseña del reloj queda cifrada en la notebook y nunca viaja a CelTuc.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ====================================================================== -->
+<!-- PARTE 0                                                                -->
+<!-- ====================================================================== -->
+<section class="parte">
+  <div class="parte-cabecera">
+    <div class="etiqueta">Parte 0 · en tu casa, antes de salir</div>
+    <h2>Qué llevar</h2>
+    <p>Esto se prepara una sola vez y sirve para todas las sucursales.</p>
+  </div>
+
+  <h3 class="seccion">Equipamiento</h3>
+  <ul class="checklist">
+    <li><b>El reloj DS-K1A340WX</b> con su fuente de 12 V. <span style="color:var(--muted)">No tiene puerto de red: va por Wi-Fi, y solo de 2,4 GHz.</span></li>
+    <li><b>Notebook</b> con Windows 10 u 11, que va a quedar en la sucursal prendida.</li>
+    <li><b>Pendrive</b> con la carpeta que se arma abajo.</li>
+    <li><b>Tornillos / tarugos</b> y la plantilla de montaje del reloj.</li>
+    <li><b>Zapatilla o alargue</b>: el reloj y la notebook necesitan enchufe cerca.</li>
+    <li>Un <b>celular con datos</b>, por si el Wi-Fi de la sucursal da problemas.</li>
+  </ul>
+
+  <h3 class="seccion">Datos que tenés que conseguir antes o al llegar</h3>
+  <ul class="checklist">
+    <li><b>Nombre y contraseña del Wi-Fi</b> de la sucursal (la red de 2,4 GHz).</li>
+    <li><b>Usuario y contraseña del router</b>, para reservar la IP del reloj.</li>
+    <li><b>Lista de empleados</b> de esa sucursal, con nombre y apellido.</li>
+    <li>Tu usuario <b>superadministrador</b> de CelTuc (nadie más puede configurar Asistencia).</li>
+  </ul>
+
+  <h3 class="seccion">La carpeta del pendrive</h3>
+  <p>Armá una carpeta llamada <code>InstalarAgente</code> con estos dos archivos:</p>
+
+  <table>
+    <thead>
+      <tr><th style="width:42mm">Archivo</th><th>De dónde sale</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>hikvision-agent.exe</code></td>
+        <td>
+          Del proyecto CelTuc, en <code>hikvision-agent\dist\hikvision-agent.exe</code> (pesa unos 13 MB).
+          <br><span style="color:var(--muted)">Si esa carpeta no existe o el archivo está viejo, se genera de nuevo (ver abajo).</span>
+        </td>
+      </tr>
+      <tr>
+        <td><code>install_task.ps1</code></td>
+        <td>Del proyecto CelTuc, en <code>hikvision-agent\scripts\install_task.ps1</code>.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>
+    El tercer archivo, <code>config.toml</code>, <b>todavía no existe</b>: lo
+    genera CelTuc en la Parte 2, cuando crees el agente. Se descarga ahí y se
+    copia a esta misma carpeta.
+  </p>
+
+  <div class="caja ojo">
+    <div class="rotulo">Si tenés que regenerar el ejecutable</div>
+    <p style="margin-bottom:2mm">
+      En tu máquina de desarrollo, parado en la carpeta <code>hikvision-agent</code>,
+      en PowerShell:
+    </p>
+    <pre class="consola" style="margin-bottom:2mm"><span class="prompt">PS&gt;</span> powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1</pre>
+    <p>
+      Tarda unos minutos y deja el archivo en <code>dist\hikvision-agent.exe</code>.
+      Hacelo si tocaste el código del agente desde la última vez.
+    </p>
+  </div>
+
+  <div class="caja alto">
+    <div class="rotulo">Un error caro</div>
+    <p>
+      No lleves un <code>config.toml</code> de otra sucursal «para adaptarlo».
+      Cada agente tiene un token propio y el token de otra sucursal no sirve:
+      el reloj va a figurar siempre desconectado y vas a perder media hora
+      buscando el problema en el lugar equivocado.
+    </p>
+  </div>
+</section>
+
+<!-- ====================================================================== -->
+<!-- PARTE 1 — EL RELOJ                                                     -->
+<!-- ====================================================================== -->
+<section class="parte">
+  <div class="parte-cabecera">
+    <div class="etiqueta">Parte 1 · en la sucursal</div>
+    <h2>El reloj</h2>
+    <p>
+      Objetivo de esta parte: que el reloj esté colgado, en hora, conectado al
+      Wi-Fi y con una <b>IP que no se le vaya a cambiar</b>.
+    </p>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">1</span><h4>Elegir dónde va y colgarlo</h4></div>
+    <div class="cuerpo">
+      <ul>
+        <li><b>Altura</b>: el centro de la pantalla a unos <b>1,45 m</b> del piso. Si la mayoría del personal es más alto o más bajo, corregí unos centímetros.</li>
+        <li><b>Luz</b>: que no le dé el sol de frente ni tenga una ventana justo detrás. El contraluz es la causa número uno de lecturas fallidas.</li>
+        <li><b>Enchufe</b>: la fuente es de 12 V y el cable es corto. Verificá que llegue antes de perforar.</li>
+        <li><b>Señal Wi-Fi</b>: paralo un momento en el lugar elegido y fijate que el router llegue bien. Si el rincón es malo, es preferible moverlo medio metro que pelear después con desconexiones.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">2</span><h4>Primer encendido y contraseña de administrador</h4></div>
+    <div class="cuerpo">
+      <p>
+        Enchufalo y esperá a que arranque. La primera vez pide activar el
+        equipo y crear una contraseña de administrador.
+      </p>
+      <div class="caja alto">
+        <div class="rotulo">Anotala en el momento</div>
+        <p>
+          Esa contraseña <b>no se puede recuperar</b>: si se pierde, el reloj
+          se resetea de fábrica y hay que volver a cargar todos los rostros.
+          Escribila en la ficha de la última página de este manual apenas la
+          crees, no «después».
+        </p>
+      </div>
+      <p>Usá una contraseña con mayúscula, minúscula, número y símbolo. El equipo rechaza las simples.</p>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">3</span><h4>Fecha, hora y zona horaria</h4></div>
+    <div class="cuerpo">
+      <p>
+        Esto va <b>antes</b> que todo lo demás. Si el reloj está en otra hora,
+        las fichadas entran con la hora equivocada y todo el análisis de
+        horarios queda mal — y corregirlo después es reprocesar el histórico.
+      </p>
+      <div class="menu-reloj">
+        <div class="rama">
+          <div class="ruta">Menú ▸ Sistema ▸ Hora</div>
+          <div class="que">Poné la fecha y la hora actuales.</div>
+        </div>
+        <div class="rama">
+          <div class="ruta">Menú ▸ Sistema ▸ Zona horaria</div>
+          <div class="que">Elegí <b>GMT−03:00</b> (Buenos Aires).</div>
+        </div>
+      </div>
+      <div class="caja bien">
+        <div class="rotulo">Cómo verificar</div>
+        <p>
+          Comparalo con la hora de tu celular. Tienen que coincidir al minuto.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">4</span><h4>Conectarlo al Wi-Fi</h4></div>
+    <div class="cuerpo">
+      <div class="menu-reloj">
+        <div class="rama">
+          <div class="ruta">Menú ▸ Comunicación ▸ Wi-Fi</div>
+          <div class="que">Activá el Wi-Fi, elegí la red de la sucursal y escribí la contraseña.</div>
+        </div>
+      </div>
+      <div class="caja alto">
+        <div class="rotulo">Solo ve las redes de 2,4 GHz</div>
+        <p>
+          Este equipo <b>no toma redes de 5 GHz</b>. Si el router publica
+          <code>MiRed-2.4Ghz</code> y <code>MiRed-5Ghz</code>, en la lista del
+          reloj va a aparecer solamente la primera. Es normal, no es una falla.
+          Si no aparece ninguna, entrá al router y verificá que la banda de
+          2,4 GHz esté habilitada.
+        </p>
+      </div>
+      <p>
+        Cuando conecte, el reloj muestra la <b>IP</b> que tomó, algo como
+        <code>192.168.1.31</code>. <b>Anotala</b>: la vas a necesitar dos veces
+        más adelante.
+      </p>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">5</span><h4>Reservar esa IP en el router · el paso que no se puede saltear</h4></div>
+    <div class="cuerpo">
+      <div class="caja alto">
+        <div class="rotulo">Por qué es obligatorio</div>
+        <p>
+          La IP que el reloj tomó es <b>prestada</b>. El router se la puede dar
+          a otro equipo después de un corte de luz o de unos días. El día que
+          eso pase, el agente va a seguir buscando el reloj en la IP vieja y la
+          sucursal deja de sincronizar <b>sin que nadie se entere</b>, hasta que
+          alguien mire el panel. Reservarla toma dos minutos ahora y evita una
+          visita después.
+        </p>
+      </div>
+
+      <p><b>Cómo se hace</b> (los nombres cambian según la marca del router):</p>
+      <ol>
+        <li>Desde la notebook, conectada al mismo Wi-Fi, abrí el navegador y entrá a <code>192.168.1.1</code> (o <code>192.168.0.1</code>).</li>
+        <li>Ingresá con el usuario y la contraseña del router.</li>
+        <li>Buscá la sección <b>LAN</b>, <b>DHCP</b> o <b>Red local</b>. Adentro hay algo llamado <b>«Reserva de DHCP»</b>, <b>«DHCP estático»</b>, <b>«Address Reservation»</b> o <b>«IP fija por MAC»</b>.</li>
+        <li>Vas a ver la lista de equipos conectados. Identificá el reloj: aparece con la IP que anotaste, y su nombre suele empezar con <code>Hikvision</code> o ser el número de serie.</li>
+        <li>Reservale <b>esa misma IP</b>. No le pongas otra: si le cambiás la IP acá, el reloj se va a reconectar con la nueva y tenés que volver a anotarla.</li>
+        <li>Guardá los cambios.</li>
+      </ol>
+
+      <div class="caja ojo">
+        <div class="rotulo">Cómo estar seguro de que agarraste el equipo correcto</div>
+        <p>
+          Comparalo por la <b>MAC</b>. La del reloj la ves en
+          <code>Menú ▸ Sistema ▸ Información del equipo</code> y tiene que
+          coincidir con la que muestra el router en esa fila. Dos equipos pueden
+          tener nombres parecidos; la MAC es única.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">6</span><h4>Verificar entrando al panel del reloj</h4></div>
+    <div class="cuerpo">
+      <p>
+        Desde la notebook, en el navegador, escribí la IP del reloj:
+        <code>http://192.168.1.31</code> (con la que hayas anotado). Entrá con
+        el usuario <code>admin</code> y la contraseña del paso 2.
+      </p>
+      <div class="caja bien">
+        <div class="rotulo">Si entrás, esta parte está lista</div>
+        <p>
+          Significa que el reloj está en la red, con la IP correcta, y que la
+          notebook lo alcanza. Es exactamente lo que va a hacer el agente.
+        </p>
+      </div>
+      <div class="caja ojo">
+        <div class="rotulo">Si no entrás</div>
+        <ul style="margin-bottom:0">
+          <li>Verificá que la notebook esté en el <b>mismo Wi-Fi</b> que el reloj (no en el de un vecino ni en datos del celular).</li>
+          <li>Revisá que la IP sea la correcta: si la anotaste mal, mirala de nuevo en el reloj.</li>
+          <li>Probá apagar un momento el antivirus o el firewall de la notebook.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">7</span><h4>Registrar los rostros de los empleados</h4></div>
+    <div class="cuerpo">
+      <p>
+        Se puede hacer desde el propio reloj o desde el panel web. En el reloj:
+        <code>Menú ▸ Usuario ▸ Agregar</code>.
+      </p>
+      <p>Por cada empleado se carga:</p>
+      <ul>
+        <li><b>Número de empleado</b>: un número correlativo (1, 2, 3…). Es el identificador interno del equipo.</li>
+        <li><b>Nombre</b>: escribilo <b>igual que en CelTuc</b>. Después hay que vincularlos y coincidir te ahorra confusión. Si el nombre completo no entra, usá el nombre de pila.</li>
+        <li><b>Rostro</b>: la persona se para de frente, a unos 50 cm, sin barbijo, sin anteojos de sol y sin gorra.</li>
+      </ul>
+
+      <div class="caja ojo">
+        <div class="rotulo">Consejo que ahorra reclamos</div>
+        <p>
+          Después de registrar a cada uno, <b>pedile que fiche una vez ahí
+          mismo</b>. Si el equipo no lo reconoce, se vuelve a tomar la cara en
+          el momento. Es mucho más barato que enterarse mañana, cuando ya te
+          fuiste.
+        </p>
+      </div>
+
+      <div class="caja">
+        <div class="rotulo">Anotá esta lista</div>
+        <p>
+          Escribí en la ficha de la última página qué número le tocó a cada
+          persona. En la Parte 4 vas a tener que decirle a CelTuc quién es quién,
+          y con la lista a mano son dos minutos.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================================== -->
+<!-- PARTE 2 — CELTUC                                                       -->
+<!-- ====================================================================== -->
+<section class="parte">
+  <div class="parte-cabecera">
+    <div class="etiqueta">Parte 2 · en el navegador</div>
+    <h2>CelTuc: dar de alta el reloj y el agente</h2>
+    <p>
+      Acá se genera el <code>config.toml</code> que la notebook necesita. Sin
+      este paso no se puede seguir.
+    </p>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">8</span><h4>Entrar a CelTuc</h4></div>
+    <div class="cuerpo">
+      <p>
+        Abrí <b>celtuc.scripthouse.com.ar</b> y entrá con tu usuario
+        superadministrador.
+      </p>
+      <figure>
+        <img src="img/01b-login.png" alt="Pantalla de ingreso a CelTuc" style="max-width:105mm;margin:0 auto">
+        <figcaption>La pantalla de ingreso.</figcaption>
+      </figure>
+      <div class="caja alto">
+        <div class="rotulo">Tiene que ser el superadministrador</div>
+        <p>
+          Todo el módulo Asistencia es exclusivo del superadministrador. Con un
+          usuario administrador común, <b>«Asistencia» ni siquiera aparece en el
+          menú</b> de la izquierda. Si no lo ves, estás con la cuenta equivocada.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">9</span><h4>Ir a Asistencia ▸ Configuración</h4></div>
+    <div class="cuerpo">
+      <p>
+        En el menú de la izquierda, abajo de todo, <b>Asistencia</b>. Después,
+        la pestaña <b>Configuración</b>.
+      </p>
+      <figure>
+        <img src="img/30-configuracion-marcada.png" alt="Pestaña Configuración de Asistencia">
+        <figcaption>
+          <b><span class="globo">1</span> Nuevo reloj</b> — se usa en el paso 10.
+          <b><span class="globo">2</span> Nuevo agente</b> — en el paso 11.
+          Más abajo de esta misma pantalla hay una guía resumida siempre a mano.
+        </figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">10</span><h4>Crear el reloj</h4></div>
+    <div class="cuerpo">
+      <p>Apretá <b>«Nuevo reloj»</b> y completá:</p>
+      <table>
+        <thead><tr><th style="width:42mm">Campo</th><th>Qué poner</th></tr></thead>
+        <tbody>
+          <tr><td><b>Sucursal</b></td><td>La sucursal donde lo estás instalando. Si no está en la lista, hay que crearla primero en el módulo Empleados.</td></tr>
+          <tr><td><b>Nombre</b></td><td>Algo reconocible: «Reloj Yerba Buena». Es solo para vos.</td></tr>
+          <tr><td><b>IP o host</b></td><td><b>La IP que reservaste</b> en el paso 5. Este es el campo que importa.</td></tr>
+          <tr><td><b>Usuario ISAPI</b></td><td><code>admin</code>, salvo que hayas creado otro usuario en el reloj.</td></tr>
+          <tr><td><b>Días a recuperar</b></td><td>Cuánto histórico traer la primera vez. <b>90</b> está bien: si el reloj ya venía usándose, trae todo lo que tenga guardado.</td></tr>
+        </tbody>
+      </table>
+      <figure>
+        <img src="img/40-modal-reloj.png" alt="Formulario de alta de un reloj" style="max-width:120mm;margin:0 auto">
+        <figcaption>El alta del reloj. Los valores de sincronización de abajo se pueden dejar como vienen.</figcaption>
+      </figure>
+      <div class="caja">
+        <div class="rotulo">La contraseña del reloj no se pide acá</div>
+        <p>
+          Y es a propósito: vive únicamente en la notebook, cifrada. CelTuc
+          nunca la conoce.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">11</span><h4>Crear el agente y descargar el <code>config.toml</code></h4></div>
+    <div class="cuerpo">
+      <p>
+        El «agente» es el programita que va a correr en la notebook. Apretá
+        <b>«Nuevo agente»</b>:
+      </p>
+      <table>
+        <thead><tr><th style="width:42mm">Campo</th><th>Qué poner</th></tr></thead>
+        <tbody>
+          <tr><td><b>Reloj que sincroniza</b></td><td>El que acabás de crear.</td></tr>
+          <tr><td><b>Nombre del agente</b></td><td>Identificá la máquina: <code>yerbabuena-notebook-01</code>.</td></tr>
+        </tbody>
+      </table>
+      <figure>
+        <img src="img/41-modal-agente.png" alt="Formulario de alta del agente" style="max-width:120mm;margin:0 auto">
+        <figcaption>El alta del agente. Los tiempos de abajo se dejan como vienen.</figcaption>
+      </figure>
+
+      <p>Al apretar <b>«Crear y generar token»</b> aparece esta pantalla:</p>
+      <figure>
+        <img src="img/42-modal-token.png" alt="Modal con el token del agente y el botón de descarga" style="max-width:125mm;margin:0 auto">
+        <figcaption>El token se muestra <b>una sola vez</b>.</figcaption>
+      </figure>
+
+      <div class="caja alto">
+        <div class="rotulo">Este es el momento más importante del manual</div>
+        <p style="margin-bottom:2mm">
+          Apretá <b>«Descargar config.toml»</b> <em>antes</em> de cerrar esta
+          ventana. Ese archivo ya trae adentro la dirección de CelTuc, la IP del
+          reloj y el token: es todo lo que la notebook necesita.
+        </p>
+        <p>
+          Si cerrás sin descargarlo, el token <b>no se puede volver a ver</b>.
+          No es grave — se regenera con el botón de las flechas circulares en la
+          fila del agente — pero es un paso al pepe.
+        </p>
+      </div>
+
+      <p>
+        Copiá el <code>config.toml</code> descargado a la carpeta
+        <code>InstalarAgente</code> del pendrive, al lado del <code>.exe</code>.
+        Ahora tenés los tres archivos.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================================== -->
+<!-- PARTE 3 — LA NOTEBOOK                                                  -->
+<!-- ====================================================================== -->
+<section class="parte">
+  <div class="parte-cabecera">
+    <div class="etiqueta">Parte 3 · en la notebook de la sucursal</div>
+    <h2>Instalar el agente</h2>
+    <p>Quince minutos. La mitad es esperar.</p>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">12</span><h4>Preparar la notebook</h4></div>
+    <div class="cuerpo">
+      <p>Antes de instalar nada, dejá la máquina lista para quedarse prendida:</p>
+      <ul>
+        <li><b>Que no se suspenda.</b> Panel de control ▸ Opciones de energía ▸ <b>Nunca</b> suspender, ni con la tapa cerrada. Si se suspende, deja de sincronizar.</li>
+        <li><b>Que se prenda sola al volver la luz</b>, si el modelo lo permite (en la BIOS, «Restore on AC power loss»).</li>
+        <li><b>Wi-Fi de la sucursal</b> conectado y marcado como red conocida.</li>
+        <li><b>Actualizaciones de Windows</b> al día, para que no reinicie sola en horario de trabajo.</li>
+      </ul>
+      <div class="caja">
+        <div class="rotulo">No hace falta dejar la sesión abierta</div>
+        <p>
+          El agente corre como servicio del sistema: arranca con Windows aunque
+          nadie inicie sesión, y no muestra ninguna ventana.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">13</span><h4>Copiar la carpeta</h4></div>
+    <div class="cuerpo">
+      <p>
+        Copiá <code>InstalarAgente</code> del pendrive al escritorio de la
+        notebook. Adentro tienen que estar los tres archivos:
+      </p>
+      <pre class="consola">C:\Users\...\Desktop\InstalarAgente\
+   ├── hikvision-agent.exe
+   ├── install_task.ps1
+   └── config.toml          <span class="com">← el que bajaste en el paso 11</span></pre>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">14</span><h4>Probar la conexión con el reloj</h4></div>
+    <div class="cuerpo">
+      <p>
+        Este paso es opcional pero conviene: si falla, falla <em>acá</em>, donde
+        el mensaje te dice exactamente qué pasa.
+      </p>
+      <p>Abrí <b>PowerShell</b>, entrá a la carpeta y corré:</p>
+      <pre class="consola"><span class="prompt">PS&gt;</span> cd $HOME\Desktop\InstalarAgente
+<span class="prompt">PS&gt;</span> .\hikvision-agent.exe diag --host 192.168.1.31 --username admin --password TU_CLAVE</pre>
+      <p>Tiene que responder algo así:</p>
+      <pre class="consola"><span class="ok">[OK]</span> Model      : DS-K1A340WX
+<span class="ok">[OK]</span> Firmware   : V1.2.7 build 240228
+<span class="ok">[OK]</span> Device time: 2026-08-27T09:14:22-03:00
+<span class="ok">[OK]</span> Events query: 128 eventos en los últimos 7 días</pre>
+
+      <div class="caja ojo">
+        <div class="rotulo">Si dice que no llega al reloj</div>
+        <p>La notebook no lo ve en la red. Repasá el paso 6: mismo Wi-Fi, IP correcta, firewall.</p>
+      </div>
+      <div class="caja ojo">
+        <div class="rotulo">Si dice que rechazó las credenciales</div>
+        <p>La contraseña está mal escrita. Ojo con los símbolos: en PowerShell conviene encerrarla entre comillas simples.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">15</span><h4>Instalar el agente como servicio</h4></div>
+    <div class="cuerpo">
+      <p>
+        Cerrá esa ventana y abrí <b>PowerShell como Administrador</b> (botón
+        derecho sobre el ícono ▸ «Ejecutar como administrador»). Es
+        imprescindible: sin permisos de administrador no puede registrar el
+        servicio.
+      </p>
+      <pre class="consola"><span class="prompt">PS&gt;</span> cd $HOME\Desktop\InstalarAgente
+<span class="prompt">PS&gt;</span> powershell -ExecutionPolicy Bypass -File install_task.ps1</pre>
+
+      <p>El instalador va a hacer todo solo y en el medio te va a pedir dos cosas:</p>
+      <table>
+        <thead><tr><th style="width:52mm">Cuando pregunte…</th><th>Qué escribir</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><b>Contraseña del reloj</b></td>
+            <td>La del paso 2. Queda cifrada en la notebook, atada a <em>esa</em> máquina.</td>
+          </tr>
+          <tr>
+            <td><b>Token del agente</b></td>
+            <td>
+              Escribí un guion: <code>-</code><br>
+              <span style="color:var(--muted)">El token ya viene adentro del <code>config.toml</code>; no hace falta cargarlo de nuevo.</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>Al terminar tiene que mostrar algo así:</p>
+      <pre class="consola"><span class="ok">[OK]</span> Ejecutable en C:\Program Files\CelTuc\HikvisionAgent\hikvision-agent.exe
+<span class="ok">[OK]</span> Carpeta de datos C:\ProgramData\CelTuc\HikvisionAgent
+<span class="ok">[OK]</span> config.toml instalado
+<span class="ok">[OK]</span> Contraseña del reloj: guardada
+<span class="warn">[..]</span> Token del agente: no guardado (viene en config.toml)
+<span class="ok">[OK]</span> Tarea programada 'CelTuc Hikvision Agent' registrada y arrancada</pre>
+
+      <div class="caja alto">
+        <div class="rotulo">Si dice que el archivo está en uso</div>
+        <p style="margin-bottom:2mm">
+          Pasa cuando ya había un agente corriendo (por ejemplo, si estás
+          reinstalando). Frenalo y volvé a correr el instalador:
+        </p>
+        <pre class="consola" style="margin-bottom:0"><span class="prompt">PS&gt;</span> Stop-ScheduledTask -TaskName "CelTuc Hikvision Agent"</pre>
+      </div>
+
+      <div class="caja bien">
+        <div class="rotulo">Con esto la notebook ya está</div>
+        <p>
+          A partir de acá el agente arranca solo con Windows, sin ventanas y sin
+          que nadie tenga que acordarse de nada.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================================== -->
+<!-- PARTE 4 — VERIFICAR                                                    -->
+<!-- ====================================================================== -->
+<section class="parte">
+  <div class="parte-cabecera">
+    <div class="etiqueta">Parte 4 · de vuelta en el navegador</div>
+    <h2>Verificar que quedó andando</h2>
+    <p>No te vayas de la sucursal sin completar esta parte entera.</p>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">16</span><h4>Confirmar que el equipo reporta</h4></div>
+    <div class="cuerpo">
+      <p>
+        En CelTuc, <b>Asistencia ▸ Panel</b>. En uno o dos minutos la tarjeta de
+        la sucursal tiene que pasar a <b>«En línea»</b>.
+      </p>
+      <figure>
+        <img src="img/46-panel-marcado.png" alt="Panel de asistencia con el estado de cada reloj">
+        <figcaption>
+          <b><span class="globo">1</span></b> El reloj con su IP y su número de serie, tal como quedaron configurados.
+          <b><span class="globo">2</span></b> El estado que tenés que ver: <b>«Notebook en línea»</b>.
+          Abajo, <b>«Última fichada»</b> dice cuándo llegó la última, y <b>«Pendientes»</b> cuántas
+          quedan sin subir en la notebook: ese número tiene que tender a cero.
+          La tarjeta de al lado es una sucursal todavía sin instalar, para que veas el contraste.
+        </figcaption>
+      </figure>
+      <div class="caja ojo">
+        <div class="rotulo">Si dice «Notebook apagada» pasados 5 minutos</div>
+        <p>En la notebook, en PowerShell como Administrador, mirá el estado y el log:</p>
+        <pre class="consola" style="margin-bottom:0"><span class="prompt">PS&gt;</span> Get-ScheduledTask -TaskName "CelTuc Hikvision Agent"
+<span class="prompt">PS&gt;</span> Get-Content C:\ProgramData\CelTuc\HikvisionAgent\logs\agent.log -Tail 40</pre>
+      </div>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">17</span><h4>Hacer una fichada de prueba</h4></div>
+    <div class="cuerpo">
+      <p>
+        Pedile a alguien que fiche (o registrate vos). En menos de un minuto
+        tiene que aparecer en <b>Asistencia ▸ Fichadas</b>.
+      </p>
+      <figure>
+        <img src="img/29-fichadas-vista.png" alt="Listado de fichadas">
+        <figcaption>Cada fichada con su hora, el reloj que la tomó y cómo se identificó la persona.</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">18</span><h4>Vincular cada identificador con su empleado</h4></div>
+    <div class="cuerpo">
+      <p>
+        El reloj manda un número o un nombre; CelTuc necesita saber a qué
+        empleado corresponde. Andá a <b>Asistencia ▸ Identificadores</b>: los que
+        todavía no están vinculados aparecen listados para asignar.
+      </p>
+      <figure>
+        <img src="img/32-identificadores-marcado.png" alt="Pestaña de identificadores del reloj">
+        <figcaption>
+          <b><span class="globo">1</span></b> El identificador tal como lo manda el reloj. Asignalo al empleado que corresponda.
+        </figcaption>
+      </figure>
+      <div class="caja bien">
+        <div class="rotulo">Las fichadas viejas se corrigen solas</div>
+        <p>
+          Cuando vinculás a alguien, <b>todas sus fichadas anteriores se le
+          reasignan automáticamente</b>. No importa si el reloj venía usándose
+          desde antes: no hay que rehacer nada a mano.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">19</span><h4>La prueba de fuego</h4></div>
+    <div class="cuerpo">
+      <div class="caja alto">
+        <div class="rotulo">Este es el criterio de aceptación</div>
+        <p>
+          Todo lo anterior puede funcionar y aun así fallar el día que se corte
+          la luz. Esta prueba es la que demuestra que la sucursal quedó en modo
+          «prender y olvidarse». <b>Hacela sí o sí antes de irte.</b>
+        </p>
+      </div>
+      <ol>
+        <li><b>Apagá la notebook</b> del todo (no suspender: apagar).</li>
+        <li>Con la notebook apagada, hacé <b>dos o tres fichadas</b> en el reloj.</li>
+        <li><b>Prendé la notebook</b> y no toques absolutamente nada. No inicies sesión si no querés.</li>
+        <li>Esperá unos minutos y mirá el Panel en CelTuc desde tu celular o desde otra máquina.</li>
+      </ol>
+      <div class="caja bien">
+        <div class="rotulo">Tiene que pasar esto</div>
+        <ul style="margin-bottom:0">
+          <li>El equipo vuelve a <b>«En línea»</b> solo.</li>
+          <li>Las fichadas que se hicieron con la notebook apagada <b>aparecen todas</b>.</li>
+          <li><b>No hay duplicados</b>, aunque el agente reintente.</li>
+        </ul>
+      </div>
+      <p style="margin-top:3mm">
+        Si eso funciona, terminaste. La sucursal no necesita que nadie haga nada
+        nunca más.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================================== -->
+<!-- PARTE 5 — CONFIGURAR                                                   -->
+<!-- ====================================================================== -->
+<section class="parte">
+  <div class="parte-cabecera">
+    <div class="etiqueta">Parte 5 · se puede hacer después, desde cualquier lado</div>
+    <h2>Dejar el sistema configurado</h2>
+    <p>
+      Con lo anterior las fichadas ya entran. Esto es lo que convierte una lista
+      de horarios en información útil. No hace falta estar en la sucursal.
+    </p>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">20</span><h4>Cargar los turnos</h4></div>
+    <div class="cuerpo">
+      <p>
+        <b>Asistencia ▸ Turnos</b>. Un turno es un horario reutilizable: se crea
+        una vez y se le asigna a varias personas.
+      </p>
+      <ul>
+        <li><b>Semanal</b>: mismo horario todas las semanas. Dos tramos en un mismo día = jornada partida (mañana y tarde, cerrando al mediodía).</li>
+        <li><b>Rotativo</b>: un ciclo de N días (2×2, 4×2, semana A / semana B). El «desfase» pone a dos personas en fases opuestas: una entra cuando la otra descansa.</li>
+        <li><b>Tolerancias</b>: cuántos minutos de gracia hay antes de contar una llegada como tarde.</li>
+      </ul>
+      <figure>
+        <img src="img/22-turnos.png" alt="Pestaña de turnos">
+        <figcaption>Los turnos y quién trabaja en cada uno.</figcaption>
+      </figure>
+      <div class="caja ojo">
+        <div class="rotulo">Sin turno cargado no hay ausencias</div>
+        <p>
+          Si nadie tiene turno, las fichadas se registran igual pero no hay
+          contra qué compararlas: el sistema no puede saber que alguien faltó.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">21</span><h4>Si alguien rota entre sucursales</h4></div>
+    <div class="cuerpo">
+      <p>
+        En la misma pestaña Turnos, más abajo, <b>«Dónde trabaja cada uno»</b>.
+        Sirve para quien no está siempre en el mismo local.
+      </p>
+      <figure>
+        <img src="img/44-modal-sucursal.png" alt="Asignar sucursal a un empleado por fechas y días" style="max-width:88mm;margin:0 auto">
+        <figcaption>Se puede cargar por período, y limitarlo a ciertos días de la semana.</figcaption>
+      </figure>
+      <p>Con esto se cubren los tres casos:</p>
+      <ul>
+        <li><b>Se mudó de local</b>: desde tal fecha, sin fecha de fin.</li>
+        <li><b>Semana partida</b>: dos filas, una con lunes y martes en un local, otra con el resto en el otro.</li>
+        <li><b>Cubre a un compañero</b>: del 20 al 22, y listo.</li>
+      </ul>
+      <div class="caja bien">
+        <div class="rotulo">Las excepciones se deshacen solas</div>
+        <p>
+          Las asignaciones se pueden superponer a propósito: <b>gana siempre la
+          más puntual</b>. Un reemplazo de tres días le gana a la regla
+          permanente y, al terminar, todo vuelve a como estaba sin que tengas
+          que acordarte de nada.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">22</span><h4>Feriados y licencias</h4></div>
+    <div class="cuerpo">
+      <p><b>Asistencia ▸ Calendario</b>.</p>
+      <figure>
+        <img src="img/08-calendario.png" alt="Pestaña de calendario con feriados y licencias">
+        <figcaption>Feriados arriba, licencias abajo.</figcaption>
+      </figure>
+      <div class="caja ojo">
+        <div class="rotulo">Cargá los feriados primero</div>
+        <p>
+          Sin feriados cargados, <b>cada feriado aparece como una ausencia de
+          todo el equipo</b>. El botón «Cargar nacionales» pone de una los de
+          fecha fija; los que se trasladan (Carnaval, Viernes Santo, 17/8, 12/10
+          y 20/11) cambian cada año y se cargan a mano.
+        </p>
+      </div>
+      <p>
+        Las licencias pueden ser de día completo o <b>por horas</b> (media
+        jornada, un turno médico): en ese caso se descuenta solo esa franja y el
+        resto del día se sigue esperando normalmente.
+      </p>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">23</span><h4>Ajustar qué se considera una inconsistencia</h4></div>
+    <div class="cuerpo">
+      <p>
+        <b>Asistencia ▸ Inconsistencias ▸ Configurar reglas</b>. Vienen once
+        tipos cargados de fábrica, con valores razonables. Se pueden apagar,
+        cambiarles el umbral y decidir si piden justificación.
+      </p>
+      <figure>
+        <img src="img/20-reglas.png" alt="Catálogo de reglas de inconsistencia">
+        <figcaption>Cada regla con su interruptor, su umbral y su severidad.</figcaption>
+      </figure>
+      <div class="caja">
+        <div class="rotulo">Apagar una regla la apaga de verdad</div>
+        <p>
+          Si desactivás «llegó tarde», el día tampoco queda pintado como
+          <em>Llegó tarde</em>: pasa a <em>Presente</em>. Un interruptor que
+          apaga el reporte pero deja el cartel no serviría de nada.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">24</span><h4>Revisar y justificar</h4></div>
+    <div class="cuerpo">
+      <p>
+        La pestaña <b>Inconsistencias</b> junta todo lo que pide una mirada:
+        llegadas tarde, marcas faltantes, ausencias, salidas largas.
+      </p>
+      <figure>
+        <img src="img/26-inconsistencias-vista.png" alt="Pantalla de inconsistencias">
+        <figcaption>Filtrable por período, estado, tipo, severidad, empleado y sucursal.</figcaption>
+      </figure>
+      <p>
+        Cada una se revisa con un motivo, que queda en el historial con el
+        nombre de quien la resolvió:
+      </p>
+      <figure>
+        <img src="img/43-modal-justificar.png" alt="Ventana para justificar una inconsistencia" style="max-width:125mm;margin:0 auto">
+        <figcaption>Se puede <b>justificar</b> con motivo, marcarla <b>sin justificación</b>, o volverla a dejar pendiente.</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">25</span><h4>Consultar el legajo de una persona</h4></div>
+    <div class="cuerpo">
+      <p>
+        <b>Asistencia ▸ Empleados</b>. Elegís a alguien y ves todo lo suyo: por
+        día, por semana, por mes o por año, navegando con las flechas.
+      </p>
+      <figure>
+        <img src="img/24-legajo-vista.png" alt="Legajo de asistencia de un empleado">
+        <figcaption>Horas trabajadas contra esperadas, saldo del período, días trabajados y lo que queda por revisar.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/25-legajo-calendario.png" alt="Calendario mensual del legajo">
+        <figcaption>El mes completo: cada día con su color y sus horas. Haciendo clic en un día se abre el detalle.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================================== -->
+<!-- ANEXOS                                                                 -->
+<!-- ====================================================================== -->
+<section class="parte">
+  <div class="parte-cabecera">
+    <div class="etiqueta">Anexo A</div>
+    <h2>Si algo no funciona</h2>
+    <p>Los problemas que aparecen de verdad, y qué mirar en cada caso.</p>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th style="width:48mm">Qué ves</th><th>Qué está pasando y qué hacer</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>«Asistencia» no aparece en el menú</b></td>
+        <td>Estás con un usuario que no es superadministrador. Todo el módulo es exclusivo del superadmin.</td>
+      </tr>
+      <tr>
+        <td><b>El reloj no ve el Wi-Fi</b></td>
+        <td>Casi siempre es que la red es de 5 GHz. Verificá en el router que la banda de 2,4 GHz esté habilitada y con nombre propio.</td>
+      </tr>
+      <tr>
+        <td><b>«Notebook apagada» en el Panel</b></td>
+        <td>El agente no está reportando. Verificá que la notebook esté prendida y con Internet, y mirá el log (Anexo C). Si se suspendió, revisá las opciones de energía.</td>
+      </tr>
+      <tr>
+        <td><b>«Reloj sin conexión»</b></td>
+        <td>La notebook llega a CelTuc pero no al reloj. Suele ser que la IP cambió: si no hiciste la reserva DHCP del paso 5, es exactamente esto. Mirá la IP actual en el reloj y corregila en Configuración, o mejor, reservala.</td>
+      </tr>
+      <tr>
+        <td><b>«El reloj bloqueó el acceso por intentos fallidos»</b></td>
+        <td>Es la protección antifuerza-bruta del equipo, no una contraseña mal puesta. El mensaje dice cuántos minutos faltan. <b>No insistas</b>: cada intento durante el bloqueo reinicia el contador. El agente ya espera solo el tiempo correcto.</td>
+      </tr>
+      <tr>
+        <td><b>Fichadas que no aparecen</b></td>
+        <td>Mirá «Pendientes» en el Panel. Si es mayor que cero y no baja, la notebook no está llegando a CelTuc: revisá Internet en la sucursal.</td>
+      </tr>
+      <tr>
+        <td><b>Fichadas «sin asignar»</b></td>
+        <td>Ese identificador del reloj todavía no está vinculado a un empleado. Andá a Identificadores y asignalo: las fichadas viejas se corrigen solas.</td>
+      </tr>
+      <tr>
+        <td><b>Todo el equipo figura ausente un día</b></td>
+        <td>Era feriado y no estaba cargado. Cargalo en Calendario y el día se recalcula al instante.</td>
+      </tr>
+      <tr>
+        <td><b>Alguien figura ausente y estuvo trabajando</b></td>
+        <td>Puede ser que ese día le tocara otra sucursal. Cargalo en «Dónde trabaja cada uno» y el sistema deja de reclamarlo.</td>
+      </tr>
+      <tr>
+        <td><b>El instalador dice «archivo en uso»</b></td>
+        <td>Ya había un agente corriendo. <code>Stop-ScheduledTask -TaskName "CelTuc Hikvision Agent"</code> y volvé a correrlo.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3 class="seccion">Anexo B · Comandos útiles en la notebook</h3>
+  <p>Todos en <b>PowerShell como Administrador</b>.</p>
+  <pre class="consola"><span class="com"># Ver si el servicio está corriendo</span>
+<span class="prompt">PS&gt;</span> Get-ScheduledTask -TaskName "CelTuc Hikvision Agent"
+
+<span class="com"># Ver las últimas líneas del log (lo primero que hay que mirar)</span>
+<span class="prompt">PS&gt;</span> Get-Content C:\ProgramData\CelTuc\HikvisionAgent\logs\agent.log -Tail 40
+
+<span class="com"># Frenarlo y arrancarlo</span>
+<span class="prompt">PS&gt;</span> Stop-ScheduledTask  -TaskName "CelTuc Hikvision Agent"
+<span class="prompt">PS&gt;</span> Start-ScheduledTask -TaskName "CelTuc Hikvision Agent"
+
+<span class="com"># Probar la conexión con el reloj</span>
+<span class="prompt">PS&gt;</span> &amp; 'C:\Program Files\CelTuc\HikvisionAgent\hikvision-agent.exe' diag
+
+<span class="com"># Volver a cargar la contraseña del reloj (si la cambiaste)</span>
+<span class="prompt">PS&gt;</span> &amp; 'C:\Program Files\CelTuc\HikvisionAgent\hikvision-agent.exe' secrets set</pre>
+
+  <div class="caja">
+    <div class="rotulo">Casi todo se cambia desde la web</div>
+    <p>
+      La IP del reloj, cada cuánto consulta, cuántos días recupera: todo eso se
+      edita en <b>Asistencia ▸ Configuración</b> y el agente lo toma solo en
+      menos de un minuto. <b>No hace falta volver a la sucursal</b> ni tocar la
+      notebook. Lo único que vive únicamente ahí es la contraseña del reloj.
+    </p>
+  </div>
+</section>
+
+<!-- ====================================================================== -->
+<!-- FICHA                                                                  -->
+<!-- ====================================================================== -->
+<section class="parte">
+  <div class="parte-cabecera">
+    <div class="etiqueta">Anexo C</div>
+    <h2>Ficha de la sucursal</h2>
+    <p>Completala a mano durante la instalación. Después pasala a un lugar seguro.</p>
+  </div>
+
+  <div class="ficha">
+    <div class="fila"><div class="rot">Sucursal</div><div class="val">&nbsp;</div></div>
+    <div class="fila"><div class="rot">Fecha de instalación</div><div class="val">&nbsp;</div></div>
+    <div class="fila"><div class="rot">Red Wi-Fi (2,4 GHz)</div><div class="val">&nbsp;</div></div>
+    <div class="fila"><div class="rot">IP del reloj (reservada)</div><div class="val">&nbsp;</div></div>
+    <div class="fila"><div class="rot">MAC del reloj</div><div class="val">&nbsp;</div></div>
+    <div class="fila"><div class="rot">Contraseña del reloj</div><div class="val">&nbsp;</div></div>
+    <div class="fila"><div class="rot">IP y clave del router</div><div class="val">&nbsp;</div></div>
+    <div class="fila"><div class="rot">Nombre del agente en CelTuc</div><div class="val">&nbsp;</div></div>
+    <div class="fila"><div class="rot">Notebook (marca / usuario)</div><div class="val">&nbsp;</div></div>
+    <div class="fila"><div class="rot">¿Prueba de fuego superada?</div><div class="val">&nbsp;</div></div>
+  </div>
+
+  <h3 class="seccion">Empleados registrados en el reloj</h3>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:22mm">N.º en el reloj</th>
+        <th>Nombre cargado en el reloj</th>
+        <th>Empleado en CelTuc</th>
+        <th style="width:22mm">¿Vinculado?</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+      <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+      <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+      <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+      <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+      <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+      <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+      <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+      <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+      <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+      <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+      <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="seccion">Antes de irte</h3>
+  <ul class="checklist">
+    <li>El reloj está en hora y conectado al Wi-Fi.</li>
+    <li>La IP está <b>reservada en el router</b>.</li>
+    <li>Todos los empleados están registrados y <b>fichó cada uno al menos una vez</b>.</li>
+    <li>El equipo figura <b>«En línea»</b> en el Panel de CelTuc.</li>
+    <li>Todos los identificadores están vinculados a su empleado.</li>
+    <li>La <b>prueba de fuego</b> pasó: notebook apagada, fichadas, y aparecieron solas.</li>
+    <li>La notebook está configurada para <b>no suspenderse</b>.</li>
+    <li>Esta ficha está completa y la contraseña del reloj está anotada.</li>
+  </ul>
+
+  <p class="nota-pie">
+    Las capturas de este manual son de una sucursal de ejemplo con datos de
+    prueba. Los menús del reloj pueden variar levemente según la versión de
+    firmware; si un nombre no coincide exactamente, buscá la opción equivalente
+    en el mismo submenú. · ScriptHouse · CelTuc Asistencia · agosto 2026
+  </p>
+</section>
+
+</body>
+</html>
