@@ -60,6 +60,38 @@ if [[ -z "$PYTHON" ]]; then
 fi
 echo "[OK] Python: $PYTHON ($("$PYTHON" --version))"
 
+# --- FileVault: la advertencia más importante de todas -----------------------
+#
+# Con FileVault prendido, después de un corte de luz la Mac no bootea sola: se
+# queda en la pantalla de desbloqueo del disco, y hasta que alguien escriba la
+# contraseña NO corre ningún LaunchDaemon. O sea que el agente no arranca y la
+# sucursal deja de sincronizar sin que nadie se entere. Es el único caso en que
+# «prender y olvidarse» deja de ser cierto.
+
+FILEVAULT="$(fdesetup status 2>/dev/null || echo desconocido)"
+if [[ "$FILEVAULT" == *"FileVault is On"* ]]; then
+    echo ""
+    echo "  ====================================================================="
+    echo "   ATENCIÓN: FileVault está ACTIVADO en esta Mac."
+    echo ""
+    echo "   Tras un corte de luz, la Mac queda esperando la clave del disco y"
+    echo "   el agente NO arranca hasta que alguien la escriba. La sucursal deja"
+    echo "   de sincronizar sin aviso."
+    echo ""
+    echo "   Si esta Mac queda sola en la sucursal, conviene desactivarlo:"
+    echo "     Ajustes del Sistema > Privacidad y seguridad > FileVault"
+    echo "   (tarda un rato en descifrar el disco)."
+    echo "  ====================================================================="
+    echo ""
+    read -r -p "  ¿Seguir igual con la instalación? [s/N] " SEGUIR </dev/tty || SEGUIR="n"
+    if [[ ! "$SEGUIR" =~ ^[sS]$ ]]; then
+        echo "Instalación cancelada. Desactivá FileVault y volvé a correr esto."
+        exit 1
+    fi
+else
+    echo "[OK] FileVault desactivado: la Mac puede bootear sola tras un corte"
+fi
+
 # --- 0. Si ya estaba instalado, frenarlo -------------------------------------
 
 if launchctl print "system/${ETIQUETA}" >/dev/null 2>&1; then
@@ -178,7 +210,12 @@ pmset -c sleep 0 disksleep 0 displaysleep 10 womp 1 >/dev/null 2>&1 || true
 pmset -a disablesleep 1 >/dev/null 2>&1 || \
     echo "[!!] No se pudo desactivar la suspensión; hacelo a mano:
      sudo pmset -a disablesleep 1"
-echo "[OK] Suspensión desactivada (con la Mac enchufada)"
+# Que se prenda sola cuando vuelve la luz: es el equivalente del «Restore on AC
+# power loss» de la BIOS en una PC. Sin esto, un corte deja la sucursal muda
+# hasta que alguien vaya a apretar el botón.
+pmset -a autorestart 1 >/dev/null 2>&1 || true
+
+echo "[OK] Suspensión desactivada y arranque automático tras un corte de luz"
 
 # --- Verificación -------------------------------------------------------------
 

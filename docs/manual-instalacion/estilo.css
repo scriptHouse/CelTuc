@@ -1,0 +1,217 @@
+/* Estilo compartido por los manuales de instalacion (Windows y macOS).
+   Pensado para imprimir: A4, sin modo oscuro, con control de saltos de
+   pagina para que ningun paso quede partido a la mitad. */
+
+  :root {
+    --paper: #ffffff;
+    --surface: #ffffff;
+    --surface-2: #f4f4f2;
+    --ink: #16171a;
+    --ink-2: #3f4045;
+    --muted: #6b6d73;
+    --line: #dededb;
+    --line-2: #c9c9c5;
+    --signal: #b45309;
+    --signal-bg: #fdf6ec;
+    --signal-line: #ecd7b8;
+    --stop: #9f1239;
+    --stop-bg: #fdf2f4;
+    --stop-line: #f0cdd5;
+    --ok: #15803d;
+    --ok-bg: #f1f8f3;
+    --ok-line: #cbe4d3;
+    --mark: #e0473a;
+
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  }
+
+  @page { size: A4; margin: 15mm 14mm 16mm; }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    font-family: var(--sans);
+    font-size: 10.4pt;
+    line-height: 1.55;
+    color: var(--ink);
+    background: var(--paper);
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  h1, h2, h3, h4 { line-height: 1.2; margin: 0; }
+
+  /* --- Portada ------------------------------------------------------------ */
+  .portada {
+    height: 250mm;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    page-break-after: always;
+  }
+  .portada .marca {
+    font-size: 9pt; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--muted); font-weight: 600;
+  }
+  .portada h1 { font-size: 34pt; letter-spacing: -.02em; margin: 6mm 0 4mm; }
+  .portada .bajada { font-size: 12.5pt; color: var(--ink-2); max-width: 130mm; }
+  .portada .pie { font-size: 9pt; color: var(--muted); border-top: 1px solid var(--line); padding-top: 4mm; }
+  .sello {
+    display: inline-block; border: 1.5px solid var(--ink); border-radius: 3mm;
+    padding: 2mm 4mm; font-weight: 700; font-size: 10pt; letter-spacing: .04em;
+  }
+
+  /* --- Estructura --------------------------------------------------------- */
+  .parte { page-break-before: always; }
+  .parte-cabecera {
+    border-top: 3px solid var(--ink);
+    padding-top: 4mm; margin-bottom: 6mm;
+  }
+  .parte-cabecera .etiqueta {
+    font-size: 8.5pt; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--muted); font-weight: 700;
+  }
+  .parte-cabecera h2 { font-size: 20pt; margin-top: 1.5mm; letter-spacing: -.01em; }
+  .parte-cabecera p { margin: 2mm 0 0; color: var(--ink-2); max-width: 150mm; }
+
+  h3.seccion {
+    font-size: 13pt; margin: 8mm 0 3mm;
+    padding-bottom: 1.5mm; border-bottom: 1px solid var(--line);
+    page-break-after: avoid;
+  }
+
+  /* --- Pasos numerados ---------------------------------------------------- */
+  /* Los pasos NO se marcan como indivisibles: uno con una captura grande no
+     entra entero y empujaba la página completa, dejando medio pliego en
+     blanco. Se deja fluir, y lo que sí se mantiene unido es cada figura y el
+     título con su primer párrafo. */
+  .paso { margin: 5mm 0 6mm; }
+  .paso > .titulo {
+    display: flex; gap: 3.5mm; align-items: baseline;
+    page-break-after: avoid; page-break-inside: avoid;
+  }
+  .paso .n {
+    flex: 0 0 auto;
+    min-width: 7.5mm; height: 7.5mm; padding: 0 1.5mm;
+    border-radius: 999px; background: var(--ink); color: #fff;
+    font-weight: 700; font-size: 9.5pt;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .paso .titulo h4 { font-size: 12pt; }
+  .paso .cuerpo { padding-left: 11mm; }
+  .paso .cuerpo > :first-child { margin-top: 1.5mm; }
+
+  p { margin: 0 0 2.5mm; }
+  ul, ol { margin: 0 0 3mm; padding-left: 5mm; }
+  li { margin-bottom: 1.5mm; }
+
+  code {
+    font-family: var(--mono); font-size: .9em;
+    background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: 1.2mm; padding: .3mm 1.2mm;
+  }
+
+  pre.consola {
+    font-family: var(--mono); font-size: 8.6pt; line-height: 1.5;
+    background: #1b1d20; color: #e8e8e6;
+    border-radius: 2mm; padding: 3mm 4mm; margin: 2.5mm 0 3mm;
+    white-space: pre-wrap; word-break: break-word;
+    page-break-inside: avoid;
+  }
+  pre.consola .prompt { color: #8fb8e8; }
+  pre.consola .ok { color: #7fd39a; }
+  pre.consola .warn { color: #f0b969; }
+  pre.consola .com { color: #9a9ca1; }
+
+  /* --- Cajas -------------------------------------------------------------- */
+  .caja {
+    border: 1px solid var(--line); border-left-width: 3px;
+    border-radius: 2mm; padding: 3mm 4mm; margin: 3mm 0;
+    background: var(--surface-2); page-break-inside: avoid;
+  }
+  .caja .rotulo {
+    font-size: 8.5pt; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .1em; margin-bottom: 1.5mm;
+  }
+  .caja p:last-child, .caja ul:last-child { margin-bottom: 0; }
+  .caja.ojo { background: var(--signal-bg); border-color: var(--signal-line); border-left-color: var(--signal); }
+  .caja.ojo .rotulo { color: var(--signal); }
+  .caja.alto { background: var(--stop-bg); border-color: var(--stop-line); border-left-color: var(--stop); }
+  .caja.alto .rotulo { color: var(--stop); }
+  .caja.bien { background: var(--ok-bg); border-color: var(--ok-line); border-left-color: var(--ok); }
+  .caja.bien .rotulo { color: var(--ok); }
+
+  /* --- Imágenes ----------------------------------------------------------- */
+  figure { margin: 3mm 0 4mm; page-break-inside: avoid; }
+  figure img[style] { width: 100%; }
+  figure img {
+    width: 100%; display: block;
+    border: 1px solid var(--line-2); border-radius: 2mm;
+  }
+  figcaption {
+    font-size: 8.6pt; color: var(--muted); margin-top: 1.5mm;
+    padding-left: .5mm;
+  }
+  figcaption b { color: var(--ink-2); }
+
+  .globo {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 4.6mm; height: 4.6mm; border-radius: 999px;
+    background: var(--mark); color: #fff;
+    font-size: 7.5pt; font-weight: 700; vertical-align: -.6mm;
+    margin: 0 .3mm;
+  }
+
+  /* --- Tablas ------------------------------------------------------------- */
+  table { width: 100%; border-collapse: collapse; margin: 3mm 0 4mm; font-size: 9.4pt; }
+  th, td { text-align: left; padding: 2mm 2.5mm; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th {
+    font-size: 8.4pt; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--muted); border-bottom: 1.5px solid var(--line-2);
+  }
+  tr { page-break-inside: avoid; }
+
+  /* --- Checklist ---------------------------------------------------------- */
+  ul.checklist { list-style: none; padding-left: 0; }
+  ul.checklist li {
+    display: flex; gap: 2.5mm; align-items: flex-start;
+    padding: 1.6mm 0; border-bottom: 1px dotted var(--line);
+  }
+  ul.checklist li::before {
+    content: ""; flex: 0 0 auto;
+    width: 3.8mm; height: 3.8mm; margin-top: .8mm;
+    border: 1.3px solid var(--line-2); border-radius: 1mm;
+  }
+
+  /* --- Ficha para completar a mano --------------------------------------- */
+  .ficha { border: 1px solid var(--line-2); border-radius: 2mm; padding: 4mm 5mm; }
+  .ficha .fila { display: flex; gap: 3mm; align-items: baseline; padding: 2.2mm 0; border-bottom: 1px dotted var(--line-2); }
+  .ficha .fila:last-child { border-bottom: 0; }
+  .ficha .rot { flex: 0 0 52mm; font-weight: 600; font-size: 9.6pt; }
+  .ficha .val { flex: 1; color: var(--muted); font-size: 9pt; }
+
+  /* --- Índice ------------------------------------------------------------- */
+  .indice ol { list-style: none; padding-left: 0; counter-reset: parte -1; }
+  .indice > ol > li {
+    counter-increment: parte;
+    padding: 2.5mm 0; border-bottom: 1px solid var(--line);
+  }
+  .indice > ol > li > .t { font-weight: 700; font-size: 11.5pt; }
+  .indice > ol > li > .t::before {
+    content: "Parte " counter(parte) " — "; color: var(--muted); font-weight: 600;
+  }
+  .indice .d { color: var(--ink-2); font-size: 9.6pt; margin-top: .8mm; }
+
+  /* --- Mapa de menús del reloj ------------------------------------------- */
+  .menu-reloj { border: 1px solid var(--line-2); border-radius: 2mm; overflow: hidden; margin: 3mm 0 4mm; }
+  .menu-reloj .rama { display: flex; border-bottom: 1px solid var(--line); }
+  .menu-reloj .rama:last-child { border-bottom: 0; }
+  .menu-reloj .ruta {
+    flex: 0 0 78mm; padding: 2.5mm 3mm; background: var(--surface-2);
+    font-family: var(--mono); font-size: 8.8pt; border-right: 1px solid var(--line);
+  }
+  .menu-reloj .que { padding: 2.5mm 3mm; font-size: 9.4pt; }
+
+  .nota-pie { font-size: 8.8pt; color: var(--muted); border-top: 1px solid var(--line); padding-top: 2.5mm; margin-top: 5mm; }

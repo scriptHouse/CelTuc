@@ -2,12 +2,28 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<title>Manual de instalación en sucursal — CelTuc Asistencia</title>
+<title>Manual de instalación en sucursal (macOS) — CelTuc Asistencia</title>
 </head>
 <body>
 
 <link rel="stylesheet" href="estilo.css">
 
+<style>
+  /* Lo propio de este manual: los bloques de Terminal y la tabla de rutas. */
+  .terminal-tip {
+    display: flex; gap: 3mm; align-items: flex-start;
+    border: 1px solid var(--line-2); border-radius: 2mm;
+    padding: 3mm 4mm; margin: 3mm 0; background: var(--surface-2);
+    page-break-inside: avoid;
+  }
+  .terminal-tip .tecla {
+    flex: 0 0 auto;
+    border: 1px solid var(--line-2); border-bottom-width: 2px;
+    border-radius: 1.5mm; padding: 1mm 2.5mm;
+    font-family: var(--mono); font-size: 9.5pt; font-weight: 600;
+    background: var(--surface);
+  }
+</style>
 
 <!-- ====================================================================== -->
 <!-- PORTADA                                                                -->
@@ -17,20 +33,20 @@
     <div class="marca">ScriptHouse · CelTuc</div>
     <h1>Instalación de Asistencia<br>en una sucursal</h1>
     <p class="bajada">
-      Todo lo que hay que hacer en el reloj, en la notebook con <b>Windows</b> y
-      en celtuc.scripthouse.com.ar para que la sucursal quede fichando sola.
-      Paso a paso, en el orden en que conviene hacerlo.
-      <br><span style="font-size:10.5pt">Si el equipo es una <b>Mac</b>, us&aacute; el manual de macOS.</span>
+      El camino completo cuando el equipo que queda en la sucursal es una
+      <b>Mac</b>: el reloj, celtuc.scripthouse.com.ar y la instalación en macOS,
+      paso a paso y en el orden en que conviene hacerlo.
     </p>
   </div>
 
   <div>
-    <div class="caja ojo">
-      <div class="rotulo">Antes de salir</div>
+    <div class="caja alto">
+      <div class="rotulo">Dos cosas antes de salir</div>
       <p style="margin-bottom:2mm">
-        Este manual arranca en la <b>Parte 0</b>, que es lo que se prepara
-        <b>antes</b> de ir. Si llegás a la sucursal sin el ejecutable del agente
-        y sin acceso a CelTuc, no se puede terminar la instalación.
+        En una Mac hay <b>dos preparativos que conviene resolver antes de ir</b>,
+        porque descubrirlos en la sucursal con el cliente esperando es feo:
+        instalar <b>Python 3.11 o mayor</b>, y verificar si tiene
+        <b>FileVault</b> activado. Los dos están en la Parte 0.
       </p>
       <p>
         Tiempo estimado en la sucursal: <b>45 a 90 minutos</b>, según cuántos
@@ -38,7 +54,7 @@
       </p>
     </div>
     <p class="pie" style="margin-top:5mm">
-      <span class="sello">Windows &middot; Reloj Hikvision DS-K1A340WX</span>
+      <span class="sello">macOS · Reloj Hikvision DS-K1A340WX</span>
       &nbsp;&nbsp; Versión del manual: agosto 2026 · Agente 1.0.0
     </p>
   </div>
@@ -53,8 +69,8 @@
     <h2>Qué vas a hacer, en orden</h2>
     <p>
       El orden importa: el reloj tiene que estar en la red y con IP fija
-      <em>antes</em> de crearlo en CelTuc, y el agente de la notebook necesita
-      el token que CelTuc genera recién en la Parte 2.
+      <em>antes</em> de crearlo en CelTuc, y el agente de la Mac necesita el
+      token que CelTuc genera recién en la Parte 2.
     </p>
   </div>
 
@@ -62,7 +78,7 @@
     <ol>
       <li>
         <div class="t">Antes de salir</div>
-        <div class="d">Qué llevar, de dónde sale cada archivo y cómo armar el pendrive.</div>
+        <div class="d">Qué llevar, qué dejar listo en la Mac y cómo armar el paquete.</div>
       </li>
       <li>
         <div class="t">El reloj</div>
@@ -73,8 +89,8 @@
         <div class="d">Dar de alta el reloj y el agente, y bajar el <code>config.toml</code> con el token.</div>
       </li>
       <li>
-        <div class="t">La notebook</div>
-        <div class="d">Probar la conexión con el reloj e instalar el agente como servicio.</div>
+        <div class="t">La Mac</div>
+        <div class="d">Terminal, cuarentena, instalación del agente y energía.</div>
       </li>
       <li>
         <div class="t">Verificar que quedó andando</div>
@@ -90,20 +106,50 @@
   <h3 class="seccion">Cómo funciona, en una línea</h3>
   <p>
     El reloj vive en la red interna de la sucursal y <b>nunca se publica a
-    Internet</b>. La notebook lo consulta cada 20 segundos por la red local y
-    manda las fichadas a CelTuc. Todo el tráfico sale de la notebook hacia
-    afuera: no hay que abrir ningún puerto en el router.
+    Internet</b>. La Mac lo consulta cada 20 segundos por la red local y manda
+    las fichadas a CelTuc. Todo el tráfico sale de la Mac hacia afuera: no hay
+    que abrir ningún puerto en el router.
   </p>
-  <pre class="consola">Reloj Hikvision ──(red local)──▶ Notebook con el agente ──(HTTPS)──▶ celtuc.scripthouse.com.ar</pre>
+  <pre class="consola">Reloj Hikvision ──(red local)──▶ Mac con el agente ──(HTTPS)──▶ celtuc.scripthouse.com.ar</pre>
 
   <div class="caja bien">
     <div class="rotulo">Lo que esto implica</div>
     <ul style="margin-bottom:0">
-      <li>Si se corta Internet, <b>no se pierde nada</b>: el agente guarda las fichadas en la notebook y las manda cuando vuelve.</li>
-      <li>Si se apaga la notebook, tampoco: el reloj sigue registrando y el agente recupera todo al prenderse.</li>
-      <li>La contraseña del reloj queda cifrada en la notebook y nunca viaja a CelTuc.</li>
+      <li>Si se corta Internet, <b>no se pierde nada</b>: el agente guarda las fichadas en la Mac y las manda cuando vuelve.</li>
+      <li>Si se apaga la Mac, tampoco: el reloj sigue registrando y el agente recupera todo al prenderse.</li>
+      <li>La contraseña del reloj queda en la Mac, legible solo por el administrador, y nunca viaja a CelTuc.</li>
     </ul>
   </div>
+
+  <h3 class="seccion">En qué se diferencia de una PC con Windows</h3>
+  <p>
+    El agente es exactamente el mismo programa y hace lo mismo. Lo que cambia es
+    el envoltorio que lo arranca y dónde guarda sus cosas:
+  </p>
+  <table>
+    <thead><tr><th style="width:38mm">&nbsp;</th><th>Windows</th><th>macOS</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>Qué se instala</b></td>
+        <td>Un <code>.exe</code> ya compilado</td>
+        <td>El código, con su propio Python</td>
+      </tr>
+      <tr>
+        <td><b>Qué lo arranca</b></td>
+        <td>Tarea Programada</td>
+        <td>LaunchDaemon</td>
+      </tr>
+      <tr>
+        <td><b>Cuándo arranca</b></td>
+        <td colspan="2">Al prender el equipo, sin que nadie inicie sesión</td>
+      </tr>
+      <tr>
+        <td><b>La contraseña del reloj</b></td>
+        <td>Cifrada con DPAPI, atada a esa máquina</td>
+        <td>Codificada; la protegen los permisos del archivo</td>
+      </tr>
+    </tbody>
+  </table>
 </section>
 
 <!-- ====================================================================== -->
@@ -111,138 +157,134 @@
 <!-- ====================================================================== -->
 <section class="parte">
   <div class="parte-cabecera">
-    <div class="etiqueta">Parte 0 · en tu casa, antes de salir</div>
-    <h2>Qué llevar</h2>
-    <p>Esto se prepara una sola vez y sirve para todas las sucursales.</p>
+    <div class="etiqueta">Parte 0 · antes de salir</div>
+    <h2>Qué llevar y qué dejar listo</h2>
+    <p>
+      Los dos primeros puntos son los que más vale resolver de antemano: si la
+      Mac es del cliente y no la tenés a mano, al menos preguntá por ellos.
+    </p>
+  </div>
+
+  <h3 class="seccion">Lo que conviene resolver en la Mac antes de ir</h3>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">A</span><h4>Python 3.11 o mayor</h4></div>
+    <div class="cuerpo">
+      <p>
+        El que trae macOS de fábrica es más viejo y <b>no alcanza</b>: el
+        instalador lo verifica y no sigue sin eso. Para saber qué hay, abrí la
+        Terminal y escribí:
+      </p>
+      <pre class="consola"><span class="prompt">$</span> python3 --version</pre>
+      <p>
+        Si dice 3.11, 3.12 o más, ya está. Si dice 3.9 o 3.10, instalá uno:
+      </p>
+      <ul>
+        <li><b>Sin Terminal</b>: bajá el instalador de <b>python.org/downloads/macos</b>, es gráfico y tarda dos minutos.</li>
+        <li><b>Con Homebrew</b>, si la Mac ya lo tiene: <code>brew install python@3.12</code></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">B</span><h4>FileVault: la trampa más silenciosa</h4></div>
+    <div class="cuerpo">
+      <div class="caja alto">
+        <div class="rotulo">Por qué importa tanto</div>
+        <p style="margin-bottom:2mm">
+          FileVault cifra el disco. Con FileVault activado, después de un corte
+          de luz <b>la Mac no bootea sola</b>: se queda en la pantalla pidiendo
+          la contraseña del disco, y hasta que alguien la escriba <b>no corre
+          absolutamente nada</b> — tampoco el agente.
+        </p>
+        <p>
+          O sea que la sucursal deja de sincronizar y nadie se entera hasta que
+          alguien mira el panel. Es el único caso en el que «prender y
+          olvidarse» deja de ser cierto.
+        </p>
+      </div>
+      <p>Para saber cómo está:</p>
+      <pre class="consola"><span class="prompt">$</span> fdesetup status</pre>
+      <p>
+        Si dice <code>FileVault is On</code> y esa Mac va a quedar sola en la
+        sucursal, conviene desactivarlo en <b>Ajustes del Sistema ▸ Privacidad y
+        seguridad ▸ FileVault</b>. Tarda un rato en descifrar el disco, así que
+        mejor arrancarlo antes de ir y no ahí.
+      </p>
+      <div class="caja">
+        <div class="rotulo">Si no se puede desactivar</div>
+        <p>
+          Se puede instalar igual — el instalador te avisa y te deja seguir —
+          pero dejale dicho al cliente que <b>después de un corte de luz alguien
+          tiene que escribir la contraseña de la Mac</b> para que el reloj vuelva
+          a sincronizar.
+        </p>
+      </div>
+    </div>
   </div>
 
   <h3 class="seccion">Equipamiento</h3>
   <ul class="checklist">
     <li><b>El reloj DS-K1A340WX</b> con su fuente de 12 V. <span style="color:var(--muted)">No tiene puerto de red: va por Wi-Fi, y solo de 2,4 GHz.</span></li>
-    <li><b>Notebook</b> que va a quedar en la sucursal prendida: Windows 10 u 11, o una Mac. <span style="color:var(--muted)">El paquete cambia segun cual sea; ver abajo.</span></li>
-    <li><b>Pendrive</b> con la carpeta que se arma abajo.</li>
+    <li><b>La Mac</b>, que va a quedar en la sucursal prendida y enchufada.</li>
+    <li><b>Pendrive</b> con el paquete, además de mandarlo por Drive o WhatsApp.</li>
     <li><b>Tornillos / tarugos</b> y la plantilla de montaje del reloj.</li>
-    <li><b>Zapatilla o alargue</b>: el reloj y la notebook necesitan enchufe cerca.</li>
+    <li><b>Zapatilla o alargue</b>: el reloj y la Mac necesitan enchufe cerca.</li>
     <li>Un <b>celular con datos</b>, por si el Wi-Fi de la sucursal da problemas.</li>
   </ul>
 
-  <h3 class="seccion">Datos que tenés que conseguir antes o al llegar</h3>
+  <h3 class="seccion">Datos que tenés que conseguir</h3>
   <ul class="checklist">
+    <li><b>Contraseña de administrador de la Mac</b>: el instalador usa <code>sudo</code> y sin eso no se puede.</li>
     <li><b>Nombre y contraseña del Wi-Fi</b> de la sucursal (la red de 2,4 GHz).</li>
     <li><b>Usuario y contraseña del router</b>, para reservar la IP del reloj.</li>
     <li><b>Lista de empleados</b> de esa sucursal, con nombre y apellido.</li>
     <li>Tu usuario <b>superadministrador</b> de CelTuc (nadie más puede configurar Asistencia).</li>
   </ul>
 
-  <h3 class="seccion">La carpeta del pendrive</h3>
-
-  <div class="caja alto">
-    <div class="rotulo">Primero: ¿qué equipo queda en la sucursal?</div>
-    <p style="margin-bottom:2mm">
-      El paquete es distinto según el sistema, y no son intercambiables. El
-      <code>.exe</code> no corre en una Mac, y el instalador de Windows crea una
-      Tarea Programada que en macOS no existe.
-    </p>
-    <p>
-      <b>Windows</b> → seguí acá abajo y después la Parte 3.<br>
-      <b>macOS</b> → llevá la carpeta que se arma más abajo, y en la Parte 3
-      andá directo a la variante para Mac (paso 15b).
-    </p>
-  </div>
-
-  <p><b>Si la notebook es Windows</b>, armá una carpeta <code>InstalarAgente</code> con estos dos archivos:</p>
-
+  <h3 class="seccion">El paquete</h3>
+  <p>Un solo archivo:</p>
   <table>
-    <thead>
-      <tr><th style="width:42mm">Archivo</th><th>De dónde sale</th></tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td><code>hikvision-agent.exe</code></td>
-        <td>
-          Del proyecto CelTuc, en <code>hikvision-agent\dist\hikvision-agent.exe</code> (pesa unos 13 MB).
-          <br><span style="color:var(--muted)">Si esa carpeta no existe o el archivo está viejo, se genera de nuevo (ver abajo).</span>
-        </td>
-      </tr>
-      <tr>
-        <td><code>install_task.ps1</code></td>
-        <td>Del proyecto CelTuc, en <code>hikvision-agent\scripts\install_task.ps1</code>.</td>
-      </tr>
-    </tbody>
-  </table>
-
-  <p>
-    El tercer archivo, <code>config.toml</code>, <b>todavía no existe</b>: lo
-    genera CelTuc en la Parte 2, cuando crees el agente. Se descarga ahí y se
-    copia a esta misma carpeta.
-  </p>
-
-  <p style="margin-top:4mm"><b>Si el equipo es una Mac</b>, en vez del ejecutable llevá el proyecto:</p>
-  <table>
-    <thead><tr><th style="width:42mm">Qué</th><th>De dónde sale</th></tr></thead>
+    <thead><tr><th style="width:42mm">Archivo</th><th>De dónde sale</th></tr></thead>
     <tbody>
       <tr>
         <td><code>AgenteMac.zip</code></td>
         <td>
-          La carpeta <code>hikvision-agent</code> del proyecto comprimida, sin
-          <code>.venv</code>, <code>dist</code> ni <code>build</code>. En la Mac
-          no se usa un ejecutable: el instalador arma un entorno de Python propio
-          con el código.
+          La carpeta <code>hikvision-agent</code> del proyecto CelTuc comprimida,
+          sin <code>.venv</code>, <code>dist</code> ni <code>build</code>.
+          <br><span style="color:var(--muted)">En la Mac no se usa un ejecutable: el instalador arma un entorno de Python propio con el código.</span>
         </td>
       </tr>
     </tbody>
   </table>
-  <div class="caja ojo">
-    <div class="rotulo">La Mac necesita Python 3.11 o mayor</div>
-    <p>
-      El que trae macOS de fábrica es más viejo y no alcanza. Se baja de
-      <b>python.org/downloads/macos</b> (instalador gráfico, dos minutos) o con
-      <code>brew install python@3.12</code>. Si podés, dejalo instalado
-      <b>antes</b> de ir.
-    </p>
-  </div>
-
-  <div class="caja ojo">
-    <div class="rotulo">Si tenés que regenerar el ejecutable</div>
-    <p style="margin-bottom:2mm">
-      En tu máquina de desarrollo, parado en la carpeta <code>hikvision-agent</code>,
-      en PowerShell:
-    </p>
-    <pre class="consola" style="margin-bottom:2mm"><span class="prompt">PS&gt;</span> powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1</pre>
-    <p>
-      Tarda unos minutos y deja el archivo en <code>dist\hikvision-agent.exe</code>.
-      Hacelo si tocaste el código del agente desde la última vez.
-    </p>
-  </div>
-
-  <h3 class="seccion">Si los mandás por WhatsApp o Drive</h3>
   <p>
-    Sirve cualquiera de los dos, pero el sistema marca como «bajado de
-    Internet» todo lo que llega así, y eso puede frenar la instalación a mitad
-    de camino. Antes de correr nada, quitá esa marca:
+    El segundo archivo, <code>config.toml</code>, <b>todavía no existe</b>: lo
+    genera CelTuc en la Parte 2, cuando crees el agente. Se descarga ahí y se
+    copia adentro de la carpeta descomprimida.
   </p>
-  <pre class="consola"><span class="com"># En Windows, parado en la carpeta</span>
-<span class="prompt">PS&gt;</span> Unblock-File .\hikvision-agent.exe
-<span class="prompt">PS&gt;</span> Unblock-File .\install_task.ps1
-
-<span class="com"># En una Mac, sobre la carpeta ya descomprimida</span>
-<span class="prompt">$</span> xattr -dr com.apple.quarantine ~/Downloads/hikvision-agent</pre>
-  <div class="caja ojo">
-    <div class="rotulo">Llevá igual un pendrive</div>
-    <p>
-      WhatsApp y Drive dependen de que la máquina del cliente tenga Internet y
-      de poder iniciar sesión ahí. Si cualquiera de las dos cosas falla, sin el
-      pendrive no instalás nada.
-    </p>
-  </div>
 
   <div class="caja alto">
     <div class="rotulo">Un error caro</div>
     <p>
       No lleves un <code>config.toml</code> de otra sucursal «para adaptarlo».
-      Cada agente tiene un token propio y el token de otra sucursal no sirve:
-      el reloj va a figurar siempre desconectado y vas a perder media hora
-      buscando el problema en el lugar equivocado.
+      Cada agente tiene un token propio y el de otra sucursal no sirve: el reloj
+      va a figurar siempre desconectado y vas a perder media hora buscando el
+      problema en el lugar equivocado.
+    </p>
+  </div>
+
+  <h3 class="seccion">Cómo se lo mandás a la Mac</h3>
+  <p>
+    Drive, WhatsApp o pendrive, da igual. Pero macOS pone en <b>cuarentena</b>
+    todo lo que llega de Internet, y eso puede frenar la instalación. Se saca
+    con un comando, y está en el paso 13.
+  </p>
+  <div class="caja ojo">
+    <div class="rotulo">Llevá igual el pendrive</div>
+    <p>
+      Drive y WhatsApp dependen de que la Mac tenga Internet y de poder iniciar
+      sesión ahí. Si cualquiera de las dos cosas falla, sin el pendrive no
+      instalás nada.
     </p>
   </div>
 </section>
@@ -255,8 +297,9 @@
     <div class="etiqueta">Parte 1 · en la sucursal</div>
     <h2>El reloj</h2>
     <p>
-      Objetivo de esta parte: que el reloj esté colgado, en hora, conectado al
-      Wi-Fi y con una <b>IP que no se le vaya a cambiar</b>.
+      Esta parte es igual con cualquier equipo. Objetivo: que el reloj esté
+      colgado, en hora, conectado al Wi-Fi y con una <b>IP que no se le vaya a
+      cambiar</b>.
     </p>
   </div>
 
@@ -264,7 +307,7 @@
     <div class="titulo"><span class="n">1</span><h4>Elegir dónde va y colgarlo</h4></div>
     <div class="cuerpo">
       <ul>
-        <li><b>Altura</b>: el centro de la pantalla a unos <b>1,45 m</b> del piso. Si la mayoría del personal es más alto o más bajo, corregí unos centímetros.</li>
+        <li><b>Altura</b>: el centro de la pantalla a unos <b>1,45 m</b> del piso.</li>
         <li><b>Luz</b>: que no le dé el sol de frente ni tenga una ventana justo detrás. El contraluz es la causa número uno de lecturas fallidas.</li>
         <li><b>Enchufe</b>: la fuente es de 12 V y el cable es corto. Verificá que llegue antes de perforar.</li>
         <li><b>Señal Wi-Fi</b>: paralo un momento en el lugar elegido y fijate que el router llegue bien. Si el rincón es malo, es preferible moverlo medio metro que pelear después con desconexiones.</li>
@@ -276,16 +319,16 @@
     <div class="titulo"><span class="n">2</span><h4>Primer encendido y contraseña de administrador</h4></div>
     <div class="cuerpo">
       <p>
-        Enchufalo y esperá a que arranque. La primera vez pide activar el
-        equipo y crear una contraseña de administrador.
+        Enchufalo y esperá a que arranque. La primera vez pide activar el equipo
+        y crear una contraseña de administrador.
       </p>
       <div class="caja alto">
         <div class="rotulo">Anotala en el momento</div>
         <p>
-          Esa contraseña <b>no se puede recuperar</b>: si se pierde, el reloj
-          se resetea de fábrica y hay que volver a cargar todos los rostros.
-          Escribila en la ficha de la última página de este manual apenas la
-          crees, no «después».
+          Esa contraseña <b>no se puede recuperar</b>: si se pierde, el reloj se
+          resetea de fábrica y hay que volver a cargar todos los rostros.
+          Escribila en la ficha de la última página apenas la crees, no
+          «después».
         </p>
       </div>
       <p>Usá una contraseña con mayúscula, minúscula, número y símbolo. El equipo rechaza las simples.</p>
@@ -297,8 +340,8 @@
     <div class="cuerpo">
       <p>
         Esto va <b>antes</b> que todo lo demás. Si el reloj está en otra hora,
-        las fichadas entran con la hora equivocada y todo el análisis de
-        horarios queda mal — y corregirlo después es reprocesar el histórico.
+        las fichadas entran con la hora equivocada y todo el análisis de horarios
+        queda mal — y corregirlo después es reprocesar el histórico.
       </p>
       <div class="menu-reloj">
         <div class="rama">
@@ -312,9 +355,7 @@
       </div>
       <div class="caja bien">
         <div class="rotulo">Cómo verificar</div>
-        <p>
-          Comparalo con la hora de tu celular. Tienen que coincidir al minuto.
-        </p>
+        <p>Comparalo con la hora de tu celular. Tienen que coincidir al minuto.</p>
       </div>
     </div>
   </div>
@@ -352,18 +393,17 @@
       <div class="caja alto">
         <div class="rotulo">Por qué es obligatorio</div>
         <p>
-          La IP que el reloj tomó es <b>prestada</b>. El router se la puede dar
-          a otro equipo después de un corte de luz o de unos días. El día que
-          eso pase, el agente va a seguir buscando el reloj en la IP vieja y la
-          sucursal deja de sincronizar <b>sin que nadie se entere</b>, hasta que
-          alguien mire el panel. Reservarla toma dos minutos ahora y evita una
-          visita después.
+          La IP que el reloj tomó es <b>prestada</b>. El router se la puede dar a
+          otro equipo después de un corte de luz o de unos días. El día que eso
+          pase, el agente va a seguir buscando el reloj en la IP vieja y la
+          sucursal deja de sincronizar <b>sin que nadie se entere</b>. Reservarla
+          toma dos minutos ahora y evita una visita después.
         </p>
       </div>
 
       <p><b>Cómo se hace</b> (los nombres cambian según la marca del router):</p>
       <ol>
-        <li>Desde la notebook, conectada al mismo Wi-Fi, abrí el navegador y entrá a <code>192.168.1.1</code> (o <code>192.168.0.1</code>).</li>
+        <li>Desde la Mac, conectada al mismo Wi-Fi, abrí el navegador y entrá a <code>192.168.1.1</code> (o <code>192.168.0.1</code>).</li>
         <li>Ingresá con el usuario y la contraseña del router.</li>
         <li>Buscá la sección <b>LAN</b>, <b>DHCP</b> o <b>Red local</b>. Adentro hay algo llamado <b>«Reserva de DHCP»</b>, <b>«DHCP estático»</b>, <b>«Address Reservation»</b> o <b>«IP fija por MAC»</b>.</li>
         <li>Vas a ver la lista de equipos conectados. Identificá el reloj: aparece con la IP que anotaste, y su nombre suele empezar con <code>Hikvision</code> o ser el número de serie.</li>
@@ -387,23 +427,23 @@
     <div class="titulo"><span class="n">6</span><h4>Verificar entrando al panel del reloj</h4></div>
     <div class="cuerpo">
       <p>
-        Desde la notebook, en el navegador, escribí la IP del reloj:
-        <code>http://192.168.1.31</code> (con la que hayas anotado). Entrá con
-        el usuario <code>admin</code> y la contraseña del paso 2.
+        Desde la Mac, en Safari o Chrome, escribí la IP del reloj:
+        <code>http://192.168.1.31</code> (con la que hayas anotado). Entrá con el
+        usuario <code>admin</code> y la contraseña del paso 2.
       </p>
       <div class="caja bien">
         <div class="rotulo">Si entrás, esta parte está lista</div>
         <p>
-          Significa que el reloj está en la red, con la IP correcta, y que la
-          notebook lo alcanza. Es exactamente lo que va a hacer el agente.
+          Significa que el reloj está en la red, con la IP correcta, y que la Mac
+          lo alcanza. Es exactamente lo que va a hacer el agente.
         </p>
       </div>
       <div class="caja ojo">
         <div class="rotulo">Si no entrás</div>
         <ul style="margin-bottom:0">
-          <li>Verificá que la notebook esté en el <b>mismo Wi-Fi</b> que el reloj (no en el de un vecino ni en datos del celular).</li>
+          <li>Verificá que la Mac esté en el <b>mismo Wi-Fi</b> que el reloj (no en el de un vecino ni compartiendo datos del celular).</li>
           <li>Revisá que la IP sea la correcta: si la anotaste mal, mirala de nuevo en el reloj.</li>
-          <li>Probá apagar un momento el antivirus o el firewall de la notebook.</li>
+          <li>Si la Mac tiene el firewall activado, probá desactivarlo un momento en <b>Ajustes del Sistema ▸ Red ▸ Firewall</b>.</li>
         </ul>
       </div>
     </div>
@@ -427,9 +467,8 @@
         <div class="rotulo">Consejo que ahorra reclamos</div>
         <p>
           Después de registrar a cada uno, <b>pedile que fiche una vez ahí
-          mismo</b>. Si el equipo no lo reconoce, se vuelve a tomar la cara en
-          el momento. Es mucho más barato que enterarse mañana, cuando ya te
-          fuiste.
+          mismo</b>. Si el equipo no lo reconoce, se vuelve a tomar la cara en el
+          momento. Es mucho más barato que enterarse mañana, cuando ya te fuiste.
         </p>
       </div>
 
@@ -453,8 +492,8 @@
     <div class="etiqueta">Parte 2 · en el navegador</div>
     <h2>CelTuc: dar de alta el reloj y el agente</h2>
     <p>
-      Acá se genera el <code>config.toml</code> que la notebook necesita. Sin
-      este paso no se puede seguir.
+      Acá se genera el <code>config.toml</code> que la Mac necesita. Sin este
+      paso no se puede seguir.
     </p>
   </div>
 
@@ -463,7 +502,8 @@
     <div class="cuerpo">
       <p>
         Abrí <b>celtuc.scripthouse.com.ar</b> y entrá con tu usuario
-        superadministrador.
+        superadministrador. Podés hacerlo desde la Mac o desde tu propia
+        computadora, da igual.
       </p>
       <figure>
         <img src="img/01b-login.png" alt="Pantalla de ingreso a CelTuc" style="max-width:105mm;margin:0 auto">
@@ -484,15 +524,14 @@
     <div class="titulo"><span class="n">9</span><h4>Ir a Asistencia ▸ Configuración</h4></div>
     <div class="cuerpo">
       <p>
-        En el menú de la izquierda, abajo de todo, <b>Asistencia</b>. Después,
-        la pestaña <b>Configuración</b>.
+        En el menú de la izquierda, abajo de todo, <b>Asistencia</b>. Después, la
+        pestaña <b>Configuración</b>.
       </p>
       <figure>
         <img src="img/30-configuracion-marcada.png" alt="Pestaña Configuración de Asistencia">
         <figcaption>
           <b><span class="globo">1</span> Nuevo reloj</b> — se usa en el paso 10.
           <b><span class="globo">2</span> Nuevo agente</b> — en el paso 11.
-          Más abajo de esta misma pantalla hay una guía resumida siempre a mano.
         </figcaption>
       </figure>
     </div>
@@ -518,10 +557,7 @@
       </figure>
       <div class="caja">
         <div class="rotulo">La contraseña del reloj no se pide acá</div>
-        <p>
-          Y es a propósito: vive únicamente en la notebook, cifrada. CelTuc
-          nunca la conoce.
-        </p>
+        <p>Y es a propósito: vive únicamente en la Mac. CelTuc nunca la conoce.</p>
       </div>
     </div>
   </div>
@@ -530,14 +566,14 @@
     <div class="titulo"><span class="n">11</span><h4>Crear el agente y descargar el <code>config.toml</code></h4></div>
     <div class="cuerpo">
       <p>
-        El «agente» es el programita que va a correr en la notebook. Apretá
-        <b>«Nuevo agente»</b>:
+        El «agente» es el programita que va a correr en la Mac. Apretá <b>«Nuevo
+        agente»</b>:
       </p>
       <table>
         <thead><tr><th style="width:42mm">Campo</th><th>Qué poner</th></tr></thead>
         <tbody>
           <tr><td><b>Reloj que sincroniza</b></td><td>El que acabás de crear.</td></tr>
-          <tr><td><b>Nombre del agente</b></td><td>Identificá la máquina: <code>yerbabuena-notebook-01</code>.</td></tr>
+          <tr><td><b>Nombre del agente</b></td><td>Identificá la máquina: <code>yerbabuena-mac-01</code>.</td></tr>
         </tbody>
       </table>
       <figure>
@@ -556,114 +592,119 @@
         <p style="margin-bottom:2mm">
           Apretá <b>«Descargar config.toml»</b> <em>antes</em> de cerrar esta
           ventana. Ese archivo ya trae adentro la dirección de CelTuc, la IP del
-          reloj y el token: es todo lo que la notebook necesita.
+          reloj y el token: es todo lo que la Mac necesita.
         </p>
         <p>
-          Si cerrás sin descargarlo, el token <b>no se puede volver a ver</b>.
-          No es grave — se regenera con el botón de las flechas circulares en la
+          Si cerrás sin descargarlo, el token <b>no se puede volver a ver</b>. No
+          es grave — se regenera con el botón de las flechas circulares en la
           fila del agente — pero es un paso al pepe.
         </p>
       </div>
 
-      <p>
-        Copiá el <code>config.toml</code> descargado a la carpeta
-        <code>InstalarAgente</code> del pendrive, al lado del <code>.exe</code>.
-        Ahora tenés los tres archivos.
-      </p>
+      <div class="caja ojo">
+        <div class="rotulo">Si lo bajaste desde tu computadora y no desde la Mac</div>
+        <p>
+          Pasale el <code>config.toml</code> a la Mac como más te sirva. Es un
+          archivo de texto chiquito: por Drive, por WhatsApp o por AirDrop.
+        </p>
+      </div>
     </div>
   </div>
 </section>
 
 <!-- ====================================================================== -->
-<!-- PARTE 3 — LA NOTEBOOK                                                  -->
+<!-- PARTE 3 — LA MAC                                                       -->
 <!-- ====================================================================== -->
 <section class="parte">
   <div class="parte-cabecera">
-    <div class="etiqueta">Parte 3 · en la notebook de la sucursal</div>
+    <div class="etiqueta">Parte 3 · en la Mac de la sucursal</div>
     <h2>Instalar el agente</h2>
-    <p>Quince minutos. La mitad es esperar.</p>
+    <p>Quince minutos. La mitad es esperar a que descargue las dependencias.</p>
   </div>
 
   <div class="paso">
-    <div class="titulo"><span class="n">12</span><h4>Preparar la notebook</h4></div>
+    <div class="titulo"><span class="n">12</span><h4>Abrir la Terminal</h4></div>
     <div class="cuerpo">
-      <p>Antes de instalar nada, dejá la máquina lista para quedarse prendida:</p>
-      <ul>
-        <li><b>Que no se suspenda.</b> Panel de control ▸ Opciones de energía ▸ <b>Nunca</b> suspender, ni con la tapa cerrada. Si se suspende, deja de sincronizar.</li>
-        <li><b>Que se prenda sola al volver la luz</b>, si el modelo lo permite (en la BIOS, «Restore on AC power loss»).</li>
-        <li><b>Wi-Fi de la sucursal</b> conectado y marcado como red conocida.</li>
-        <li><b>Actualizaciones de Windows</b> al día, para que no reinicie sola en horario de trabajo.</li>
-      </ul>
-      <div class="caja">
-        <div class="rotulo">No hace falta dejar la sesión abierta</div>
+      <div class="terminal-tip">
+        <span class="tecla">⌘ + Espacio</span>
+        <div>
+          Escribí <b>Terminal</b> y dale Enter. También está en
+          <b>Aplicaciones ▸ Utilidades ▸ Terminal</b>.
+        </div>
+      </div>
+      <p>Antes de instalar nada, verificá lo que preparaste en la Parte 0:</p>
+      <pre class="consola"><span class="prompt">$</span> python3 --version
+<span class="com">Python 3.12.7          ← tiene que ser 3.11 o mayor</span>
+
+<span class="prompt">$</span> fdesetup status
+<span class="com">FileVault is Off.      ← lo ideal (ver Parte 0, punto B)</span></pre>
+
+      <div class="caja ojo">
+        <div class="rotulo">Cuando pida la contraseña, la pantalla no se mueve</div>
         <p>
-          El agente corre como servicio del sistema: arranca con Windows aunque
-          nadie inicie sesión, y no muestra ninguna ventana.
+          Al escribir la contraseña de administrador después de un
+          <code>sudo</code>, <b>macOS no muestra nada</b>: ni asteriscos ni
+          puntitos. No está trabado. Escribila igual y dale Enter.
         </p>
       </div>
     </div>
   </div>
 
   <div class="paso">
-    <div class="titulo"><span class="n">13</span><h4>Copiar la carpeta</h4></div>
+    <div class="titulo"><span class="n">13</span><h4>Descomprimir y quitar la cuarentena</h4></div>
     <div class="cuerpo">
       <p>
-        Copiá <code>InstalarAgente</code> del pendrive al escritorio de la
-        notebook. Adentro tienen que estar los tres archivos:
+        Hacé doble clic en <code>AgenteMac.zip</code> para descomprimirlo. Va a
+        quedar una carpeta <code>hikvision-agent</code>. <b>Metele adentro el
+        <code>config.toml</code></b> que bajaste en el paso 11, al lado de
+        <code>pyproject.toml</code>.
       </p>
-      <pre class="consola">C:\Users\...\Desktop\InstalarAgente\
-   ├── hikvision-agent.exe
-   ├── install_task.ps1
-   └── config.toml          <span class="com">← el que bajaste en el paso 11</span></pre>
+      <pre class="consola">hikvision-agent/
+   ├── pyproject.toml
+   ├── config.toml          <span class="com">← el que bajaste en el paso 11</span>
+   ├── src/
+   └── scripts/
+        ├── install_mac.sh
+        └── uninstall_mac.sh</pre>
+
+      <p>Ahora, en la Terminal, entrá a la carpeta y sacale la cuarentena:</p>
+      <pre class="consola"><span class="prompt">$</span> cd ~/Downloads/hikvision-agent
+<span class="prompt">$</span> xattr -dr com.apple.quarantine .</pre>
+
+      <div class="caja ojo">
+        <div class="rotulo">Qué es la cuarentena</div>
+        <p>
+          macOS marca todo lo que llega de Internet y después se niega a
+          ejecutarlo («no se puede abrir porque proviene de un desarrollador no
+          identificado»). Ese comando saca la marca de toda la carpeta de una.
+        </p>
+      </div>
+      <div class="caja">
+        <div class="rotulo">Truco para escribir la ruta sin equivocarte</div>
+        <p>
+          Escribí <code>cd</code>, un espacio, y <b>arrastrá la carpeta desde el
+          Finder a la ventana de la Terminal</b>: pega la ruta sola, sin errores
+          de tipeo.
+        </p>
+      </div>
     </div>
   </div>
 
   <div class="paso">
-    <div class="titulo"><span class="n">14</span><h4>Probar la conexión con el reloj</h4></div>
+    <div class="titulo"><span class="n">14</span><h4>Instalar</h4></div>
     <div class="cuerpo">
+      <pre class="consola"><span class="prompt">$</span> sudo bash scripts/install_mac.sh</pre>
       <p>
-        Este paso es opcional pero conviene: si falla, falla <em>acá</em>, donde
-        el mensaje te dice exactamente qué pasa.
+        Pide la contraseña de administrador de la Mac (recordá: no se ve
+        mientras la escribís) y después hace todo solo. En el medio te va a
+        pedir dos cosas:
       </p>
-      <p>Abrí <b>PowerShell</b>, entrá a la carpeta y corré:</p>
-      <pre class="consola"><span class="prompt">PS&gt;</span> cd $HOME\Desktop\InstalarAgente
-<span class="prompt">PS&gt;</span> .\hikvision-agent.exe diag --host 192.168.1.31 --username admin --password TU_CLAVE</pre>
-      <p>Tiene que responder algo así:</p>
-      <pre class="consola"><span class="ok">[OK]</span> Model      : DS-K1A340WX
-<span class="ok">[OK]</span> Firmware   : V1.2.7 build 240228
-<span class="ok">[OK]</span> Device time: 2026-08-27T09:14:22-03:00
-<span class="ok">[OK]</span> Events query: 128 eventos en los últimos 7 días</pre>
-
-      <div class="caja ojo">
-        <div class="rotulo">Si dice que no llega al reloj</div>
-        <p>La notebook no lo ve en la red. Repasá el paso 6: mismo Wi-Fi, IP correcta, firewall.</p>
-      </div>
-      <div class="caja ojo">
-        <div class="rotulo">Si dice que rechazó las credenciales</div>
-        <p>La contraseña está mal escrita. Ojo con los símbolos: en PowerShell conviene encerrarla entre comillas simples.</p>
-      </div>
-    </div>
-  </div>
-
-  <div class="paso">
-    <div class="titulo"><span class="n">15</span><h4>Instalar el agente como servicio</h4></div>
-    <div class="cuerpo">
-      <p>
-        Cerrá esa ventana y abrí <b>PowerShell como Administrador</b> (botón
-        derecho sobre el ícono ▸ «Ejecutar como administrador»). Es
-        imprescindible: sin permisos de administrador no puede registrar el
-        servicio.
-      </p>
-      <pre class="consola"><span class="prompt">PS&gt;</span> cd $HOME\Desktop\InstalarAgente
-<span class="prompt">PS&gt;</span> powershell -ExecutionPolicy Bypass -File install_task.ps1</pre>
-
-      <p>El instalador va a hacer todo solo y en el medio te va a pedir dos cosas:</p>
       <table>
         <thead><tr><th style="width:52mm">Cuando pregunte…</th><th>Qué escribir</th></tr></thead>
         <tbody>
           <tr>
             <td><b>Contraseña del reloj</b></td>
-            <td>La del paso 2. Queda cifrada en la notebook, atada a <em>esa</em> máquina.</td>
+            <td>La del paso 2. Queda guardada en la Mac, legible solo por el administrador.</td>
           </tr>
           <tr>
             <td><b>Token del agente</b></td>
@@ -676,48 +717,102 @@
       </table>
 
       <p>Al terminar tiene que mostrar algo así:</p>
-      <pre class="consola"><span class="ok">[OK]</span> Ejecutable en C:\Program Files\CelTuc\HikvisionAgent\hikvision-agent.exe
-<span class="ok">[OK]</span> Carpeta de datos C:\ProgramData\CelTuc\HikvisionAgent
+      <pre class="consola"><span class="ok">[OK]</span> Python: /usr/local/bin/python3.12 (Python 3.12.7)
+<span class="ok">[OK]</span> FileVault desactivado: la Mac puede bootear sola tras un corte
+<span class="ok">[OK]</span> Agente instalado en /usr/local/lib/celtuc-agente/venv/bin/hikvision-agent
+<span class="ok">[OK]</span> Carpeta de datos /usr/local/var/celtuc-agente (acceso restringido)
 <span class="ok">[OK]</span> config.toml instalado
-<span class="ok">[OK]</span> Contraseña del reloj: guardada
-<span class="warn">[..]</span> Token del agente: no guardado (viene en config.toml)
-<span class="ok">[OK]</span> Tarea programada 'CelTuc Hikvision Agent' registrada y arrancada</pre>
+<span class="ok">[OK]</span> Daemon 'ar.com.scripthouse.celtuc-agente' registrado y arrancado
+<span class="ok">[OK]</span> Suspensión desactivada y arranque automático tras un corte de luz</pre>
 
       <div class="caja alto">
-        <div class="rotulo">Si dice que el archivo está en uso</div>
-        <p style="margin-bottom:2mm">
-          Pasa cuando ya había un agente corriendo (por ejemplo, si estás
-          reinstalando). Frenalo y volvé a correr el instalador:
+        <div class="rotulo">Si avisa que FileVault está activado</div>
+        <p>
+          Te va a preguntar si querés seguir igual. Repasá la Parte 0, punto B:
+          se puede instalar, pero después de cada corte de luz alguien tiene que
+          escribir la contraseña de la Mac para que el reloj vuelva a
+          sincronizar.
         </p>
-        <pre class="consola" style="margin-bottom:0"><span class="prompt">PS&gt;</span> Stop-ScheduledTask -TaskName "CelTuc Hikvision Agent"</pre>
       </div>
 
-      <div class="caja bien">
-        <div class="rotulo">Con esto la notebook ya está</div>
+      <div class="caja ojo">
+        <div class="rotulo">Si dice que no encuentra Python 3.11</div>
         <p>
-          A partir de acá el agente arranca solo con Windows, sin ventanas y sin
-          que nadie tenga que acordarse de nada.
+          El que trae macOS es más viejo. Instalá uno de <b>python.org</b> o con
+          <code>brew install python@3.12</code> y volvé a correr el instalador.
         </p>
       </div>
     </div>
   </div>
 
-  <h3 class="seccion">Si el equipo es una Mac</h3>
-  <div class="caja alto">
-    <div class="rotulo">Este manual no sirve para eso</div>
-    <p style="margin-bottom:2mm">
-      El <code>.exe</code> no corre en macOS y la Tarea Programada no existe ahí.
-      Hay un manual aparte, completo y de punta a punta:
-    </p>
-    <p style="margin-bottom:2mm">
-      <b>«Instalación de Asistencia en una sucursal — macOS»</b><br>
-      <code>docs/Manual-Instalacion-Sucursal-Mac.pdf</code>
-    </p>
-    <p>
-      Las Partes 1 y 2 (el reloj y CelTuc) son idénticas; lo que cambia es la
-      instalación en el equipo y dos preparativos que conviene resolver antes de
-      ir: <b>Python 3.11 o mayor</b> y <b>FileVault</b>.
-    </p>
+  <div class="paso">
+    <div class="titulo"><span class="n">15</span><h4>Qué dejó instalado</h4></div>
+    <div class="cuerpo">
+      <table>
+        <thead><tr><th style="width:36mm">Qué</th><th>Dónde</th></tr></thead>
+        <tbody>
+          <tr><td><b>El agente</b></td><td><code>/usr/local/lib/celtuc-agente</code></td></tr>
+          <tr><td><b>Config, secretos, base y logs</b></td><td><code>/usr/local/var/celtuc-agente</code> <span style="color:var(--muted)">(solo root)</span></td></tr>
+          <tr><td><b>Lo que lo arranca</b></td><td><code>/Library/LaunchDaemons/ar.com.scripthouse.celtuc-agente.plist</code></td></tr>
+        </tbody>
+      </table>
+      <div class="caja bien">
+        <div class="rotulo">Es un LaunchDaemon, no un LaunchAgent</div>
+        <p>
+          La diferencia importa: un <b>LaunchDaemon</b> arranca <b>al prender la
+          Mac</b>, antes de que nadie inicie sesión, y se levanta solo si se cae.
+          Un LaunchAgent esperaría a que alguien entre con su usuario. Nadie
+          tiene que iniciar sesión para que la sucursal sincronice.
+        </p>
+      </div>
+      <div class="caja ojo">
+        <div class="rotulo">Una diferencia con Windows que conviene saber</div>
+        <p>
+          En Windows la contraseña del reloj se guarda cifrada con DPAPI, atada a
+          esa máquina. En la Mac no hay equivalente: el archivo queda codificado
+          pero <b>no cifrado</b>, y lo que lo protege son los permisos (solo root
+          puede leerlo). Es seguro mientras nadie más tenga la contraseña de
+          administrador de esa Mac.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">16</span><h4>Energía: que la Mac no se duerma ni se quede apagada</h4></div>
+    <div class="cuerpo">
+      <div class="caja alto">
+        <div class="rotulo">Esto es lo que más rompe la instalación en una Mac</div>
+        <p>
+          Una MacBook con la tapa cerrada <b>se suspende aunque esté
+          enchufada</b>, y suspendida no sincroniza nada. El instalador ya
+          desactivó la suspensión, pero conviene verificarlo y, si hay lugar,
+          <b>dejarla con la tapa abierta</b>.
+        </p>
+      </div>
+      <pre class="consola"><span class="prompt">$</span> pmset -g | grep -E "SleepDisabled|autorestart"
+<span class="com">SleepDisabled        1     ← no se suspende</span>
+<span class="com">autorestart          1     ← se prende sola cuando vuelve la luz</span></pre>
+      <p>Si alguno dice <code>0</code>, corregilo a mano:</p>
+      <pre class="consola"><span class="prompt">$</span> sudo pmset -a disablesleep 1
+<span class="prompt">$</span> sudo pmset -a autorestart 1</pre>
+
+      <div class="caja ojo">
+        <div class="rotulo">Dos cosas más para dejar dichas</div>
+        <ul style="margin-bottom:0">
+          <li>
+            <b>Una actualización de macOS puede revertir esta configuración</b> y
+            reiniciar la Mac. Si un día la sucursal deja de reportar sin motivo,
+            esto es lo primero que hay que mirar.
+          </li>
+          <li>
+            En <b>Ajustes del Sistema ▸ General ▸ Actualización de software</b>,
+            conviene desactivar la instalación automática, o al menos avisarle al
+            cliente que la Mac se puede reiniciar sola.
+          </li>
+        </ul>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -732,7 +827,7 @@
   </div>
 
   <div class="paso">
-    <div class="titulo"><span class="n">16</span><h4>Confirmar que el equipo reporta</h4></div>
+    <div class="titulo"><span class="n">17</span><h4>Confirmar que el equipo reporta</h4></div>
     <div class="cuerpo">
       <p>
         En CelTuc, <b>Asistencia ▸ Panel</b>. En uno o dos minutos la tarjeta de
@@ -741,24 +836,22 @@
       <figure>
         <img src="img/46-panel-marcado.png" alt="Panel de asistencia con el estado de cada reloj">
         <figcaption>
-          <b><span class="globo">1</span></b> El reloj con su IP y su número de serie, tal como quedaron configurados.
+          <b><span class="globo">1</span></b> El reloj con su IP y su número de serie.
           <b><span class="globo">2</span></b> El estado que tenés que ver: <b>«Notebook en línea»</b>.
-          Abajo, <b>«Última fichada»</b> dice cuándo llegó la última, y <b>«Pendientes»</b> cuántas
-          quedan sin subir en la notebook: ese número tiene que tender a cero.
-          La tarjeta de al lado es una sucursal todavía sin instalar, para que veas el contraste.
+          Abajo, <b>«Última fichada»</b> y <b>«Pendientes»</b>: ese número tiene que tender a cero.
         </figcaption>
       </figure>
       <div class="caja ojo">
-        <div class="rotulo">Si dice «Notebook apagada» pasados 5 minutos</div>
-        <p>En la notebook, en PowerShell como Administrador, mirá el estado y el log:</p>
-        <pre class="consola" style="margin-bottom:0"><span class="prompt">PS&gt;</span> Get-ScheduledTask -TaskName "CelTuc Hikvision Agent"
-<span class="prompt">PS&gt;</span> Get-Content C:\ProgramData\CelTuc\HikvisionAgent\logs\agent.log -Tail 40</pre>
+        <div class="rotulo">Si no aparece pasados 5 minutos</div>
+        <p>En la Mac, en la Terminal:</p>
+        <pre class="consola" style="margin-bottom:0"><span class="prompt">$</span> sudo launchctl print system/ar.com.scripthouse.celtuc-agente | head -20
+<span class="prompt">$</span> sudo tail -40 /usr/local/var/celtuc-agente/logs/agent.log</pre>
       </div>
     </div>
   </div>
 
   <div class="paso">
-    <div class="titulo"><span class="n">17</span><h4>Hacer una fichada de prueba</h4></div>
+    <div class="titulo"><span class="n">18</span><h4>Hacer una fichada de prueba</h4></div>
     <div class="cuerpo">
       <p>
         Pedile a alguien que fiche (o registrate vos). En menos de un minuto
@@ -772,12 +865,11 @@
   </div>
 
   <div class="paso">
-    <div class="titulo"><span class="n">18</span><h4>Vincular cada identificador con su empleado</h4></div>
+    <div class="titulo"><span class="n">19</span><h4>Vincular cada identificador con su empleado</h4></div>
     <div class="cuerpo">
       <p>
         El reloj manda un número o un nombre; CelTuc necesita saber a qué
-        empleado corresponde. Andá a <b>Asistencia ▸ Identificadores</b>: los que
-        todavía no están vinculados aparecen listados para asignar.
+        empleado corresponde. Andá a <b>Asistencia ▸ Identificadores</b>.
       </p>
       <figure>
         <img src="img/32-identificadores-marcado.png" alt="Pestaña de identificadores del reloj">
@@ -797,33 +889,35 @@
   </div>
 
   <div class="paso">
-    <div class="titulo"><span class="n">19</span><h4>La prueba de fuego</h4></div>
+    <div class="titulo"><span class="n">20</span><h4>La prueba de fuego</h4></div>
     <div class="cuerpo">
       <div class="caja alto">
         <div class="rotulo">Este es el criterio de aceptación</div>
         <p>
           Todo lo anterior puede funcionar y aun así fallar el día que se corte
-          la luz. Esta prueba es la que demuestra que la sucursal quedó en modo
-          «prender y olvidarse». <b>Hacela sí o sí antes de irte.</b>
+          la luz — que en una Mac es el escenario delicado. Esta prueba es la que
+          demuestra que la sucursal quedó en modo «prender y olvidarse».
+          <b>Hacela sí o sí antes de irte.</b>
         </p>
       </div>
       <ol>
-        <li><b>Apagá la notebook</b> del todo (no suspender: apagar).</li>
-        <li>Con la notebook apagada, hacé <b>dos o tres fichadas</b> en el reloj.</li>
-        <li><b>Prendé la notebook</b> y no toques absolutamente nada. No inicies sesión si no querés.</li>
+        <li><b>Apagá la Mac</b> del todo: <b>menú ▸ Apagar</b>. No cerrar la tapa: apagar.</li>
+        <li>Con la Mac apagada, hacé <b>dos o tres fichadas</b> en el reloj.</li>
+        <li><b>Prendé la Mac</b> y no toques absolutamente nada. <b>No inicies sesión.</b></li>
         <li>Esperá unos minutos y mirá el Panel en CelTuc desde tu celular o desde otra máquina.</li>
       </ol>
       <div class="caja bien">
         <div class="rotulo">Tiene que pasar esto</div>
         <ul style="margin-bottom:0">
-          <li>El equipo vuelve a <b>«En línea»</b> solo.</li>
-          <li>Las fichadas que se hicieron con la notebook apagada <b>aparecen todas</b>.</li>
+          <li>El equipo vuelve a <b>«En línea»</b> solo, <b>sin que nadie inicie sesión</b>.</li>
+          <li>Las fichadas que se hicieron con la Mac apagada <b>aparecen todas</b>.</li>
           <li><b>No hay duplicados</b>, aunque el agente reintente.</li>
         </ul>
       </div>
       <p style="margin-top:3mm">
-        Si eso funciona, terminaste. La sucursal no necesita que nadie haga nada
-        nunca más.
+        Que funcione <b>sin iniciar sesión</b> es justamente lo que prueba que el
+        LaunchDaemon quedó bien puesto. Si tuviste que entrar con un usuario para
+        que reportara, algo quedó mal: revisá el Anexo A.
       </p>
     </div>
   </div>
@@ -838,20 +932,21 @@
     <h2>Dejar el sistema configurado</h2>
     <p>
       Con lo anterior las fichadas ya entran. Esto es lo que convierte una lista
-      de horarios en información útil. No hace falta estar en la sucursal.
+      de horarios en información útil. No hace falta estar en la sucursal ni
+      tocar la Mac.
     </p>
   </div>
 
   <div class="paso">
-    <div class="titulo"><span class="n">20</span><h4>Cargar los turnos</h4></div>
+    <div class="titulo"><span class="n">21</span><h4>Cargar los turnos</h4></div>
     <div class="cuerpo">
       <p>
         <b>Asistencia ▸ Turnos</b>. Un turno es un horario reutilizable: se crea
         una vez y se le asigna a varias personas.
       </p>
       <ul>
-        <li><b>Semanal</b>: mismo horario todas las semanas. Dos tramos en un mismo día = jornada partida (mañana y tarde, cerrando al mediodía).</li>
-        <li><b>Rotativo</b>: un ciclo de N días (2×2, 4×2, semana A / semana B). El «desfase» pone a dos personas en fases opuestas: una entra cuando la otra descansa.</li>
+        <li><b>Semanal</b>: mismo horario todas las semanas. Dos tramos en un mismo día = jornada partida.</li>
+        <li><b>Rotativo</b>: un ciclo de N días (2×2, 4×2, semana A / semana B). El «desfase» pone a dos personas en fases opuestas.</li>
         <li><b>Tolerancias</b>: cuántos minutos de gracia hay antes de contar una llegada como tarde.</li>
       </ul>
       <figure>
@@ -869,17 +964,15 @@
   </div>
 
   <div class="paso">
-    <div class="titulo"><span class="n">21</span><h4>Si alguien rota entre sucursales</h4></div>
+    <div class="titulo"><span class="n">22</span><h4>Si alguien rota entre sucursales</h4></div>
     <div class="cuerpo">
       <p>
         En la misma pestaña Turnos, más abajo, <b>«Dónde trabaja cada uno»</b>.
-        Sirve para quien no está siempre en el mismo local.
       </p>
       <figure>
         <img src="img/44-modal-sucursal.png" alt="Asignar sucursal a un empleado por fechas y días" style="max-width:88mm;margin:0 auto">
         <figcaption>Se puede cargar por período, y limitarlo a ciertos días de la semana.</figcaption>
       </figure>
-      <p>Con esto se cubren los tres casos:</p>
       <ul>
         <li><b>Se mudó de local</b>: desde tal fecha, sin fecha de fin.</li>
         <li><b>Semana partida</b>: dos filas, una con lunes y martes en un local, otra con el resto en el otro.</li>
@@ -889,16 +982,15 @@
         <div class="rotulo">Las excepciones se deshacen solas</div>
         <p>
           Las asignaciones se pueden superponer a propósito: <b>gana siempre la
-          más puntual</b>. Un reemplazo de tres días le gana a la regla
-          permanente y, al terminar, todo vuelve a como estaba sin que tengas
-          que acordarte de nada.
+          más puntual</b>. Un reemplazo de tres días le gana a la regla permanente
+          y, al terminar, todo vuelve a como estaba.
         </p>
       </div>
     </div>
   </div>
 
   <div class="paso">
-    <div class="titulo"><span class="n">22</span><h4>Feriados y licencias</h4></div>
+    <div class="titulo"><span class="n">23</span><h4>Feriados y licencias</h4></div>
     <div class="cuerpo">
       <p><b>Asistencia ▸ Calendario</b>.</p>
       <figure>
@@ -910,8 +1002,7 @@
         <p>
           Sin feriados cargados, <b>cada feriado aparece como una ausencia de
           todo el equipo</b>. El botón «Cargar nacionales» pone de una los de
-          fecha fija; los que se trasladan (Carnaval, Viernes Santo, 17/8, 12/10
-          y 20/11) cambian cada año y se cargan a mano.
+          fecha fija; los que se trasladan cambian cada año y se cargan a mano.
         </p>
       </div>
       <p>
@@ -923,46 +1014,21 @@
   </div>
 
   <div class="paso">
-    <div class="titulo"><span class="n">23</span><h4>Ajustar qué se considera una inconsistencia</h4></div>
+    <div class="titulo"><span class="n">24</span><h4>Inconsistencias: qué se reporta y cómo se cierra</h4></div>
     <div class="cuerpo">
       <p>
-        <b>Asistencia ▸ Inconsistencias ▸ Configurar reglas</b>. Vienen once
-        tipos cargados de fábrica, con valores razonables. Se pueden apagar,
-        cambiarles el umbral y decidir si piden justificación.
-      </p>
-      <figure>
-        <img src="img/20-reglas.png" alt="Catálogo de reglas de inconsistencia">
-        <figcaption>Cada regla con su interruptor, su umbral y su severidad.</figcaption>
-      </figure>
-      <div class="caja">
-        <div class="rotulo">Apagar una regla la apaga de verdad</div>
-        <p>
-          Si desactivás «llegó tarde», el día tampoco queda pintado como
-          <em>Llegó tarde</em>: pasa a <em>Presente</em>. Un interruptor que
-          apaga el reporte pero deja el cartel no serviría de nada.
-        </p>
-      </div>
-    </div>
-  </div>
-
-  <div class="paso">
-    <div class="titulo"><span class="n">24</span><h4>Revisar y justificar</h4></div>
-    <div class="cuerpo">
-      <p>
-        La pestaña <b>Inconsistencias</b> junta todo lo que pide una mirada:
-        llegadas tarde, marcas faltantes, ausencias, salidas largas.
+        <b>Asistencia ▸ Inconsistencias</b> junta todo lo que pide una mirada:
+        llegadas tarde, marcas faltantes, ausencias, salidas largas. Con
+        <b>«Configurar reglas»</b> se ajusta qué se considera un problema: once
+        tipos que se pueden apagar, con su umbral y su severidad.
       </p>
       <figure>
         <img src="img/26-inconsistencias-vista.png" alt="Pantalla de inconsistencias">
         <figcaption>Filtrable por período, estado, tipo, severidad, empleado y sucursal.</figcaption>
       </figure>
-      <p>
-        Cada una se revisa con un motivo, que queda en el historial con el
-        nombre de quien la resolvió:
-      </p>
       <figure>
         <img src="img/43-modal-justificar.png" alt="Ventana para justificar una inconsistencia" style="max-width:125mm;margin:0 auto">
-        <figcaption>Se puede <b>justificar</b> con motivo, marcarla <b>sin justificación</b>, o volverla a dejar pendiente.</figcaption>
+        <figcaption>Cada una se <b>justifica</b> con un motivo, se marca <b>sin justificación</b>, o vuelve a quedar pendiente.</figcaption>
       </figure>
     </div>
   </div>
@@ -978,10 +1044,6 @@
         <img src="img/24-legajo-vista.png" alt="Legajo de asistencia de un empleado">
         <figcaption>Horas trabajadas contra esperadas, saldo del período, días trabajados y lo que queda por revisar.</figcaption>
       </figure>
-      <figure>
-        <img src="img/25-legajo-calendario.png" alt="Calendario mensual del legajo">
-        <figcaption>El mes completo: cada día con su color y sus horas. Haciendo clic en un día se abre el detalle.</figcaption>
-      </figure>
     </div>
   </div>
 </section>
@@ -993,7 +1055,7 @@
   <div class="parte-cabecera">
     <div class="etiqueta">Anexo A</div>
     <h2>Si algo no funciona</h2>
-    <p>Los problemas que aparecen de verdad, y qué mirar en cada caso.</p>
+    <p>Los problemas que aparecen de verdad en una Mac, y qué mirar en cada caso.</p>
   </div>
 
   <table>
@@ -1002,28 +1064,58 @@
     </thead>
     <tbody>
       <tr>
-        <td><b>«Asistencia» no aparece en el menú</b></td>
-        <td>Estás con un usuario que no es superadministrador. Todo el módulo es exclusivo del superadmin.</td>
+        <td><b>Dejó de reportar y nadie tocó nada</b></td>
+        <td>
+          Casi seguro se durmió. Verificá con <code>pmset -g | grep SleepDisabled</code>:
+          tiene que decir 1. Si dice 0, una actualización de macOS lo revirtió:
+          <code>sudo pmset -a disablesleep 1</code>.
+        </td>
       </tr>
       <tr>
-        <td><b>El reloj no ve el Wi-Fi</b></td>
-        <td>Casi siempre es que la red es de 5 GHz. Verificá en el router que la banda de 2,4 GHz esté habilitada y con nombre propio.</td>
+        <td><b>Hubo un corte de luz y no volvió solo</b></td>
+        <td>
+          Dos causas: o <b>FileVault</b> está activado y la Mac quedó esperando la
+          contraseña del disco (ver Parte 0, punto B), o falta el arranque
+          automático: <code>sudo pmset -a autorestart 1</code>.
+        </td>
       </tr>
       <tr>
-        <td><b>«Notebook apagada» en el Panel</b></td>
-        <td>El agente no está reportando. Verificá que la notebook esté prendida y con Internet, y mirá el log (Anexo C). Si se suspendió, revisá las opciones de energía.</td>
+        <td><b>Solo reporta cuando alguien inicia sesión</b></td>
+        <td>
+          Quedó instalado como LaunchAgent en vez de LaunchDaemon. Verificá que el
+          archivo esté en <code>/Library/LaunchDaemons/</code> y no en
+          <code>~/Library/LaunchAgents/</code>. Reinstalá con
+          <code>sudo bash scripts/install_mac.sh</code>.
+        </td>
+      </tr>
+      <tr>
+        <td><b>«No se puede abrir porque proviene de un desarrollador no identificado»</b></td>
+        <td>Es la cuarentena de Gatekeeper. <code>xattr -dr com.apple.quarantine .</code> sobre la carpeta descomprimida.</td>
+      </tr>
+      <tr>
+        <td><b>El instalador dice que no encuentra Python 3.11</b></td>
+        <td>El que trae macOS es más viejo. Instalá uno de python.org o con <code>brew install python@3.12</code>.</td>
       </tr>
       <tr>
         <td><b>«Reloj sin conexión»</b></td>
-        <td>La notebook llega a CelTuc pero no al reloj. Suele ser que la IP cambió: si no hiciste la reserva DHCP del paso 5, es exactamente esto. Mirá la IP actual en el reloj y corregila en Configuración, o mejor, reservala.</td>
+        <td>
+          La Mac llega a CelTuc pero no al reloj. Suele ser que la IP cambió: si
+          no hiciste la reserva DHCP del paso 5, es exactamente esto. También
+          puede ser el firewall de macOS.
+        </td>
       </tr>
       <tr>
         <td><b>«El reloj bloqueó el acceso por intentos fallidos»</b></td>
-        <td>Es la protección antifuerza-bruta del equipo, no una contraseña mal puesta. El mensaje dice cuántos minutos faltan. <b>No insistas</b>: cada intento durante el bloqueo reinicia el contador. El agente ya espera solo el tiempo correcto.</td>
+        <td>
+          Es la protección antifuerza-bruta del equipo, no una contraseña mal
+          puesta. El mensaje dice cuántos minutos faltan. <b>No insistas</b>: cada
+          intento durante el bloqueo reinicia el contador. El agente ya espera
+          solo el tiempo correcto.
+        </td>
       </tr>
       <tr>
         <td><b>Fichadas que no aparecen</b></td>
-        <td>Mirá «Pendientes» en el Panel. Si es mayor que cero y no baja, la notebook no está llegando a CelTuc: revisá Internet en la sucursal.</td>
+        <td>Mirá «Pendientes» en el Panel. Si es mayor que cero y no baja, la Mac no está llegando a CelTuc: revisá Internet en la sucursal.</td>
       </tr>
       <tr>
         <td><b>Fichadas «sin asignar»</b></td>
@@ -1035,52 +1127,42 @@
       </tr>
       <tr>
         <td><b>Alguien figura ausente y estuvo trabajando</b></td>
-        <td>Puede ser que ese día le tocara otra sucursal. Cargalo en «Dónde trabaja cada uno» y el sistema deja de reclamarlo.</td>
-      </tr>
-      <tr>
-        <td><b>Mac: dejó de reportar y nadie tocó nada</b></td>
-        <td>Casi seguro se durmió. Verificá con <code>pmset -g | grep SleepDisabled</code>: tiene que decir 1. Si dice 0, una actualización de macOS revirtió la configuración: <code>sudo pmset -a disablesleep 1</code>.</td>
-      </tr>
-      <tr>
-        <td><b>Mac: «no se puede abrir porque proviene de un desarrollador no identificado»</b></td>
-        <td>Es la cuarentena de Gatekeeper por haberlo bajado de Internet. <code>xattr -dr com.apple.quarantine .</code> sobre la carpeta descomprimida.</td>
-      </tr>
-      <tr>
-        <td><b>Mac: el instalador dice que no encuentra Python 3.11</b></td>
-        <td>El que trae macOS es más viejo. Instalá uno de python.org o con <code>brew install python@3.12</code> y volvé a correrlo.</td>
-      </tr>
-      <tr>
-        <td><b>El instalador dice «archivo en uso»</b></td>
-        <td>Ya había un agente corriendo. <code>Stop-ScheduledTask -TaskName "CelTuc Hikvision Agent"</code> y volvé a correrlo.</td>
+        <td>Puede ser que ese día le tocara otra sucursal. Cargalo en «Dónde trabaja cada uno».</td>
       </tr>
     </tbody>
   </table>
 
-  <h3 class="seccion">Anexo B · Comandos útiles en la notebook</h3>
-  <p>Todos en <b>PowerShell como Administrador</b>.</p>
-  <pre class="consola"><span class="com"># Ver si el servicio está corriendo</span>
-<span class="prompt">PS&gt;</span> Get-ScheduledTask -TaskName "CelTuc Hikvision Agent"
+  <h3 class="seccion">Anexo B · Comandos de Terminal</h3>
+  <pre class="consola"><span class="com"># Ver si está corriendo</span>
+<span class="prompt">$</span> sudo launchctl print system/ar.com.scripthouse.celtuc-agente | head -20
 
-<span class="com"># Ver las últimas líneas del log (lo primero que hay que mirar)</span>
-<span class="prompt">PS&gt;</span> Get-Content C:\ProgramData\CelTuc\HikvisionAgent\logs\agent.log -Tail 40
+<span class="com"># Ver el log (lo primero que hay que mirar)</span>
+<span class="prompt">$</span> sudo tail -40 /usr/local/var/celtuc-agente/logs/agent.log
 
 <span class="com"># Frenarlo y arrancarlo</span>
-<span class="prompt">PS&gt;</span> Stop-ScheduledTask  -TaskName "CelTuc Hikvision Agent"
-<span class="prompt">PS&gt;</span> Start-ScheduledTask -TaskName "CelTuc Hikvision Agent"
+<span class="prompt">$</span> sudo launchctl bootout   system/ar.com.scripthouse.celtuc-agente
+<span class="prompt">$</span> sudo launchctl bootstrap system /Library/LaunchDaemons/ar.com.scripthouse.celtuc-agente.plist
 
 <span class="com"># Probar la conexión con el reloj</span>
-<span class="prompt">PS&gt;</span> &amp; 'C:\Program Files\CelTuc\HikvisionAgent\hikvision-agent.exe' diag
+<span class="prompt">$</span> sudo HIKAGENT_HOME=/usr/local/var/celtuc-agente /usr/local/lib/celtuc-agente/venv/bin/hikvision-agent diag
 
 <span class="com"># Volver a cargar la contraseña del reloj (si la cambiaste)</span>
-<span class="prompt">PS&gt;</span> &amp; 'C:\Program Files\CelTuc\HikvisionAgent\hikvision-agent.exe' secrets set</pre>
+<span class="prompt">$</span> sudo HIKAGENT_HOME=/usr/local/var/celtuc-agente /usr/local/lib/celtuc-agente/venv/bin/hikvision-agent secrets set
+
+<span class="com"># Verificar energía y cifrado de disco</span>
+<span class="prompt">$</span> pmset -g | grep -E "SleepDisabled|autorestart"
+<span class="prompt">$</span> fdesetup status
+
+<span class="com"># Desinstalar (conserva los datos; con --todo borra todo)</span>
+<span class="prompt">$</span> sudo bash scripts/uninstall_mac.sh</pre>
 
   <div class="caja">
     <div class="rotulo">Casi todo se cambia desde la web</div>
     <p>
       La IP del reloj, cada cuánto consulta, cuántos días recupera: todo eso se
-      edita en <b>Asistencia ▸ Configuración</b> y el agente lo toma solo en
-      menos de un minuto. <b>No hace falta volver a la sucursal</b> ni tocar la
-      notebook. Lo único que vive únicamente ahí es la contraseña del reloj.
+      edita en <b>Asistencia ▸ Configuración</b> y el agente lo toma solo en menos
+      de un minuto. <b>No hace falta volver a la sucursal</b> ni tocar la Mac. Lo
+      único que vive únicamente ahí es la contraseña del reloj.
     </p>
   </div>
 </section>
@@ -1104,7 +1186,9 @@
     <div class="fila"><div class="rot">Contraseña del reloj</div><div class="val">&nbsp;</div></div>
     <div class="fila"><div class="rot">IP y clave del router</div><div class="val">&nbsp;</div></div>
     <div class="fila"><div class="rot">Nombre del agente en CelTuc</div><div class="val">&nbsp;</div></div>
-    <div class="fila"><div class="rot">Notebook (marca / usuario)</div><div class="val">&nbsp;</div></div>
+    <div class="fila"><div class="rot">Usuario admin de la Mac</div><div class="val">&nbsp;</div></div>
+    <div class="fila"><div class="rot">¿FileVault activado?</div><div class="val">&nbsp;</div></div>
+    <div class="fila"><div class="rot">Versión de Python instalada</div><div class="val">&nbsp;</div></div>
     <div class="fila"><div class="rot">¿Prueba de fuego superada?</div><div class="val">&nbsp;</div></div>
   </div>
 
@@ -1129,8 +1213,6 @@
       <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
       <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
       <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
-      <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
-      <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
     </tbody>
   </table>
 
@@ -1141,8 +1223,9 @@
     <li>Todos los empleados están registrados y <b>fichó cada uno al menos una vez</b>.</li>
     <li>El equipo figura <b>«En línea»</b> en el Panel de CelTuc.</li>
     <li>Todos los identificadores están vinculados a su empleado.</li>
-    <li>La <b>prueba de fuego</b> pasó: notebook apagada, fichadas, y aparecieron solas.</li>
-    <li>La notebook está configurada para <b>no suspenderse</b>.</li>
+    <li>La <b>prueba de fuego</b> pasó <b>sin iniciar sesión</b> en la Mac.</li>
+    <li><code>pmset -g</code> muestra <b>SleepDisabled 1</b> y <b>autorestart 1</b>.</li>
+    <li>Si FileVault quedó activado, <b>el cliente está avisado</b> de qué hacer tras un corte de luz.</li>
     <li>Esta ficha está completa y la contraseña del reloj está anotada.</li>
   </ul>
 
@@ -1150,7 +1233,9 @@
     Las capturas de este manual son de una sucursal de ejemplo con datos de
     prueba. Los menús del reloj pueden variar levemente según la versión de
     firmware; si un nombre no coincide exactamente, buscá la opción equivalente
-    en el mismo submenú. · ScriptHouse · CelTuc Asistencia · agosto 2026
+    en el mismo submenú. Para una notebook con Windows, usá el manual
+    «Instalación de Asistencia en una sucursal» (versión Windows). ·
+    ScriptHouse · CelTuc Asistencia · agosto 2026
   </p>
 </section>
 
