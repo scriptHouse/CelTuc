@@ -331,7 +331,7 @@
   <h3 class="seccion">Equipamiento</h3>
   <ul class="checklist">
     <li><b>El reloj DS-K1A340WX</b> con su fuente de 12 V. <span style="color:var(--muted)">No tiene puerto de red: va por Wi-Fi, y solo de 2,4 GHz.</span></li>
-    <li><b>Notebook</b> con Windows 10 u 11, que va a quedar en la sucursal prendida.</li>
+    <li><b>Notebook</b> que va a quedar en la sucursal prendida: Windows 10 u 11, o una Mac. <span style="color:var(--muted)">El paquete cambia segun cual sea; ver abajo.</span></li>
     <li><b>Pendrive</b> con la carpeta que se arma abajo.</li>
     <li><b>Tornillos / tarugos</b> y la plantilla de montaje del reloj.</li>
     <li><b>Zapatilla o alargue</b>: el reloj y la notebook necesitan enchufe cerca.</li>
@@ -347,7 +347,22 @@
   </ul>
 
   <h3 class="seccion">La carpeta del pendrive</h3>
-  <p>Armá una carpeta llamada <code>InstalarAgente</code> con estos dos archivos:</p>
+
+  <div class="caja alto">
+    <div class="rotulo">Primero: ¿qué equipo queda en la sucursal?</div>
+    <p style="margin-bottom:2mm">
+      El paquete es distinto según el sistema, y no son intercambiables. El
+      <code>.exe</code> no corre en una Mac, y el instalador de Windows crea una
+      Tarea Programada que en macOS no existe.
+    </p>
+    <p>
+      <b>Windows</b> → seguí acá abajo y después la Parte 3.<br>
+      <b>macOS</b> → llevá la carpeta que se arma más abajo, y en la Parte 3
+      andá directo a la variante para Mac (paso 15b).
+    </p>
+  </div>
+
+  <p><b>Si la notebook es Windows</b>, armá una carpeta <code>InstalarAgente</code> con estos dos archivos:</p>
 
   <table>
     <thead>
@@ -374,6 +389,31 @@
     copia a esta misma carpeta.
   </p>
 
+  <p style="margin-top:4mm"><b>Si el equipo es una Mac</b>, en vez del ejecutable llevá el proyecto:</p>
+  <table>
+    <thead><tr><th style="width:42mm">Qué</th><th>De dónde sale</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>AgenteMac.zip</code></td>
+        <td>
+          La carpeta <code>hikvision-agent</code> del proyecto comprimida, sin
+          <code>.venv</code>, <code>dist</code> ni <code>build</code>. En la Mac
+          no se usa un ejecutable: el instalador arma un entorno de Python propio
+          con el código.
+        </td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="caja ojo">
+    <div class="rotulo">La Mac necesita Python 3.11 o mayor</div>
+    <p>
+      El que trae macOS de fábrica es más viejo y no alcanza. Se baja de
+      <b>python.org/downloads/macos</b> (instalador gráfico, dos minutos) o con
+      <code>brew install python@3.12</code>. Si podés, dejalo instalado
+      <b>antes</b> de ir.
+    </p>
+  </div>
+
   <div class="caja ojo">
     <div class="rotulo">Si tenés que regenerar el ejecutable</div>
     <p style="margin-bottom:2mm">
@@ -384,6 +424,27 @@
     <p>
       Tarda unos minutos y deja el archivo en <code>dist\hikvision-agent.exe</code>.
       Hacelo si tocaste el código del agente desde la última vez.
+    </p>
+  </div>
+
+  <h3 class="seccion">Si los mandás por WhatsApp o Drive</h3>
+  <p>
+    Sirve cualquiera de los dos, pero el sistema marca como «bajado de
+    Internet» todo lo que llega así, y eso puede frenar la instalación a mitad
+    de camino. Antes de correr nada, quitá esa marca:
+  </p>
+  <pre class="consola"><span class="com"># En Windows, parado en la carpeta</span>
+<span class="prompt">PS&gt;</span> Unblock-File .\hikvision-agent.exe
+<span class="prompt">PS&gt;</span> Unblock-File .\install_task.ps1
+
+<span class="com"># En una Mac, sobre la carpeta ya descomprimida</span>
+<span class="prompt">$</span> xattr -dr com.apple.quarantine ~/Downloads/hikvision-agent</pre>
+  <div class="caja ojo">
+    <div class="rotulo">Llevá igual un pendrive</div>
+    <p>
+      WhatsApp y Drive dependen de que la máquina del cliente tenga Internet y
+      de poder iniciar sesión ahí. Si cualquiera de las dos cosas falla, sin el
+      pendrive no instalás nada.
     </p>
   </div>
 
@@ -852,6 +913,112 @@
       </div>
     </div>
   </div>
+
+  <h3 class="seccion">Variante: si el equipo es una Mac</h3>
+  <p>
+    Los pasos 12 a 15 de arriba son para Windows. En macOS cambia el envoltorio
+    —no hay ejecutable ni Tarea Programada— pero el agente es el mismo y hace
+    exactamente lo mismo.
+  </p>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">12b</span><h4>Preparar la Mac</h4></div>
+    <div class="cuerpo">
+      <div class="caja alto">
+        <div class="rotulo">Esto es lo que más rompe la instalación en una Mac</div>
+        <p>
+          Una MacBook con la tapa cerrada <b>se suspende aunque esté
+          enchufada</b>, y suspendida no sincroniza. El instalador desactiva la
+          suspensión, pero conviene además <b>dejarla con la tapa abierta</b> si
+          hay lugar. Una actualización de macOS puede revertir la configuración
+          de energía, así que si la sucursal deja de reportar sin motivo, esto es
+          lo primero que hay que mirar.
+        </p>
+      </div>
+      <ul>
+        <li>Necesitás la <b>contraseña de administrador</b> de la Mac: el instalador usa <code>sudo</code>.</li>
+        <li><b>Python 3.11 o mayor</b> instalado (ver Parte 0). El instalador lo verifica y no sigue sin eso.</li>
+        <li><b>Wi-Fi de la sucursal</b> conectado, y con Internet: la instalación descarga las dependencias.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">13b</span><h4>Descomprimir y quitar la cuarentena</h4></div>
+    <div class="cuerpo">
+      <p>
+        Descomprimí <code>AgenteMac.zip</code> y dejá el <code>config.toml</code>
+        que bajaste en el paso 11 <b>adentro de la carpeta</b>, al lado de
+        <code>pyproject.toml</code>. Después, en la Terminal:
+      </p>
+      <pre class="consola"><span class="prompt">$</span> cd ~/Downloads/hikvision-agent
+<span class="prompt">$</span> xattr -dr com.apple.quarantine .</pre>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">14b</span><h4>Instalar</h4></div>
+    <div class="cuerpo">
+      <pre class="consola"><span class="prompt">$</span> sudo bash scripts/install_mac.sh</pre>
+      <p>
+        Te va a pedir la contraseña de la Mac y, más adelante, los mismos dos
+        secretos que en Windows: la <b>contraseña del reloj</b>, y un
+        <code>-</code> para el token (que ya viene en el <code>config.toml</code>).
+      </p>
+      <p>Al terminar tiene que mostrar:</p>
+      <pre class="consola"><span class="ok">[OK]</span> Python: /usr/local/bin/python3.12 (Python 3.12.7)
+<span class="ok">[OK]</span> Agente instalado en /usr/local/lib/celtuc-agente/venv/bin/hikvision-agent
+<span class="ok">[OK]</span> Carpeta de datos /usr/local/var/celtuc-agente (acceso restringido)
+<span class="ok">[OK]</span> config.toml instalado
+<span class="ok">[OK]</span> Daemon 'ar.com.scripthouse.celtuc-agente' registrado y arrancado
+<span class="ok">[OK]</span> Suspensión desactivada (con la Mac enchufada)</pre>
+
+      <div class="caja bien">
+        <div class="rotulo">Qué dejó instalado</div>
+        <p>
+          Un <b>LaunchDaemon</b>, que es el equivalente de la Tarea Programada de
+          Windows: arranca <b>al prender la Mac</b>, antes de que nadie inicie
+          sesión, y se levanta solo si se cae. De acá en adelante la Parte 4
+          (verificar) es idéntica.
+        </p>
+      </div>
+
+      <div class="caja ojo">
+        <div class="rotulo">Una diferencia que conviene saber</div>
+        <p>
+          En Windows la contraseña del reloj se guarda cifrada con DPAPI, atada a
+          esa máquina. En la Mac no hay equivalente: el archivo queda codificado
+          pero <b>no cifrado</b>, y lo que lo protege son los permisos (solo root
+          puede leerlo). Es seguro mientras nadie más tenga la clave de
+          administrador de esa Mac.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="paso">
+    <div class="titulo"><span class="n">15b</span><h4>Comandos de la Mac</h4></div>
+    <div class="cuerpo">
+      <pre class="consola"><span class="com"># Ver si está corriendo</span>
+<span class="prompt">$</span> sudo launchctl print system/ar.com.scripthouse.celtuc-agente | head -20
+
+<span class="com"># Ver el log (lo primero que hay que mirar)</span>
+<span class="prompt">$</span> sudo tail -40 /usr/local/var/celtuc-agente/logs/agent.log
+
+<span class="com"># Frenarlo y arrancarlo</span>
+<span class="prompt">$</span> sudo launchctl bootout   system/ar.com.scripthouse.celtuc-agente
+<span class="prompt">$</span> sudo launchctl bootstrap system /Library/LaunchDaemons/ar.com.scripthouse.celtuc-agente.plist
+
+<span class="com"># Probar la conexión con el reloj</span>
+<span class="prompt">$</span> sudo HIKAGENT_HOME=/usr/local/var/celtuc-agente /usr/local/lib/celtuc-agente/venv/bin/hikvision-agent diag
+
+<span class="com"># Verificar que no se vaya a dormir</span>
+<span class="prompt">$</span> pmset -g | grep -E "sleep|SleepDisabled"
+
+<span class="com"># Desinstalar</span>
+<span class="prompt">$</span> sudo bash scripts/uninstall_mac.sh</pre>
+    </div>
+  </div>
 </section>
 
 <!-- ====================================================================== -->
@@ -1169,6 +1336,18 @@
       <tr>
         <td><b>Alguien figura ausente y estuvo trabajando</b></td>
         <td>Puede ser que ese día le tocara otra sucursal. Cargalo en «Dónde trabaja cada uno» y el sistema deja de reclamarlo.</td>
+      </tr>
+      <tr>
+        <td><b>Mac: dejó de reportar y nadie tocó nada</b></td>
+        <td>Casi seguro se durmió. Verificá con <code>pmset -g | grep SleepDisabled</code>: tiene que decir 1. Si dice 0, una actualización de macOS revirtió la configuración: <code>sudo pmset -a disablesleep 1</code>.</td>
+      </tr>
+      <tr>
+        <td><b>Mac: «no se puede abrir porque proviene de un desarrollador no identificado»</b></td>
+        <td>Es la cuarentena de Gatekeeper por haberlo bajado de Internet. <code>xattr -dr com.apple.quarantine .</code> sobre la carpeta descomprimida.</td>
+      </tr>
+      <tr>
+        <td><b>Mac: el instalador dice que no encuentra Python 3.11</b></td>
+        <td>El que trae macOS es más viejo. Instalá uno de python.org o con <code>brew install python@3.12</code> y volvé a correrlo.</td>
       </tr>
       <tr>
         <td><b>El instalador dice «archivo en uso»</b></td>

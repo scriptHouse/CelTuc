@@ -1,8 +1,13 @@
 # Agente de Asistencia CelTuc (Hikvision DS-K1A340WX)
 
-Servicio para Windows que corre en la notebook de la sucursal y sincroniza las
-fichadas del reloj Hikvision con el backend de CelTuc, sin intervención de
-nadie: **prender la notebook y olvidarse**.
+Servicio que corre en la máquina de la sucursal y sincroniza las fichadas del
+reloj Hikvision con el backend de CelTuc, sin intervención de nadie:
+**prender el equipo y olvidarse**.
+
+Corre en **Windows** (empaquetado como `.exe`, con Tarea Programada) y en
+**macOS** (desde el código, con un LaunchDaemon). El agente es el mismo: lo
+único que cambia es el envoltorio que lo arranca al prender y dónde guarda sus
+datos.
 
 ```text
 Hikvision DS-K1A340WX ──ISAPI/LAN──> Agente (esta app) ──HTTPS──> CelTuc (Django) ──> PostgreSQL
@@ -96,6 +101,37 @@ powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1
    CelTuc → Asistencia → Panel.
 
 Desinstalar: `uninstall_task.ps1` (con `-PurgeData` borra datos y logs).
+
+### En una Mac
+
+No se usa el `.exe`: el instalador arma un entorno de Python propio con el
+código y registra un **LaunchDaemon**, que es el equivalente de la Tarea
+Programada (arranca al bootear, antes de que nadie inicie sesión).
+
+```bash
+# Requiere Python 3.11+ (el que trae macOS es más viejo) y el config.toml al lado
+sudo bash scripts/install_mac.sh
+```
+
+| | Windows | macOS |
+|---|---|---|
+| Código | `C:\Program Files\CelTuc\HikvisionAgent` | `/usr/local/lib/celtuc-agente` |
+| Datos | `C:\ProgramData\CelTuc\HikvisionAgent` | `/usr/local/var/celtuc-agente` |
+| Arranque | Tarea Programada (SYSTEM) | LaunchDaemon (root) |
+| Secretos | DPAPI, atados al equipo | codificados; los protegen los permisos (600, root) |
+
+El daemon recibe `HIKAGENT_HOME` para que el agente no escriba en el home de
+root. Dos advertencias propias de macOS:
+
+- **Una MacBook con la tapa cerrada se suspende aunque esté enchufada**, y
+  suspendida no sincroniza. El instalador corre `pmset -a disablesleep 1`, pero
+  una actualización de macOS puede revertirlo: es lo primero a revisar si una
+  sucursal deja de reportar sin motivo.
+- Lo bajado de Internet llega en cuarentena: `xattr -dr com.apple.quarantine .`
+  sobre la carpeta descomprimida.
+
+Desinstalar: `sudo bash scripts/uninstall_mac.sh` (con `--todo` borra también
+los datos).
 
 ## Operación y diagnóstico en la notebook
 
