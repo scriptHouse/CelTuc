@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 from ..config import ConfigHolder, Secrets
 from ..hikvision import parser
-from ..hikvision.client import HikvisionClient
+from ..hikvision.client import DeviceLocked, HikvisionClient
 from ..storage.repository import Repository
 from .status import StatusBoard
 
@@ -59,6 +59,12 @@ class DeviceSync:
             # gris, sin motivo— en vez de decir qué le falta.
             cliente = HikvisionClient(config.device, self._secrets.hikvision_password)
             return self._sincronizar(cliente, config)
+        except DeviceLocked as exc:
+            # Se anota aparte de las demas fallas: durante un bloqueo, insistir
+            # reinicia el contador del equipo. El panel necesita saberlo para no
+            # ofrecer un reintento que dejaria al reloj cerrado otros 30 minutos.
+            self._status.device_locked(str(exc), exc.segundos)
+            raise
         except Exception as exc:
             self._status.device_fail(str(exc))
             raise

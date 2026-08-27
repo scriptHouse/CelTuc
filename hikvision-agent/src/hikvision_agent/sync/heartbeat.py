@@ -70,6 +70,10 @@ class Heartbeat:
             "started_at": estado["started_at"],
             "device_reachable": estado["device_reachable"],
             "device_error": estado["device_error"],
+            # Segundos que faltan para que el reloj se desbloquee solo, o None.
+            # Va aparte del texto del error porque cambia lo que el panel puede
+            # OFRECER: durante un bloqueo, reintentar lo empeora.
+            "device_locked_seconds": estado["device_locked_seconds"],
             "device_info": estado["device_info"],
             "pending_events": conteo["PENDING"],
             "error_events": conteo["ERROR"],

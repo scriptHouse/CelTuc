@@ -189,3 +189,135 @@ class ReintentarConexionTests(TestCase):
         self.assertEqual(respuesta.status_code, 403)
         self.dispositivo.refresh_from_db()
         self.assertIsNone(self.dispositivo.reintento_pedido)
+
+
+class RelojBloqueadoTests(TestCase):
+    """El reloj bloqueado NO se puede apurar, y el panel no debe ofrecerlo.
+
+    Esto se agrego despues de romperlo en produccion: el boton desperto al
+    agente mientras el reloj estaba bloqueado, el reloj rechazo el intento y
+    REINICIO su contador de 30 minutos. Se cierra por dos lados —el servidor no
+    guarda el pedido y el agente lo ignoraria igual— porque el costo del error
+    es media hora de sucursal sin fichar.
+    """
+
+    def setUp(self):
+        self.superadmin = Usuario.objects.create_superuser(
+            email='duenio@celtuc.test', username='duenio', password='clave123'
+        )
+        self.cliente = APIClient()
+        self.cliente.force_authenticate(self.superadmin)
+
+        self.sucursal = Sucursal.objects.get_or_create(nombre='Salta')[0]
+        self.dispositivo = Dispositivo.objects.create(
+            sucursal=self.sucursal, nombre='Reloj Salta', host='192.168.1.31'
+        )
+        self.agente = Agente(dispositivo=self.dispositivo, nombre='salta-notebook-01')
+        self.agente.asignar_token()
+        self.agente.ultimo_heartbeat = timezone.now()
+        self.agente.save()
+
+    def _bloquear(self, minutos=30):
+        self.agente.reloj_alcanzable = False
+        self.agente.reloj_bloqueado_hasta = timezone.now() + timedelta(minutes=minutos)
+        self.agente.save()
+
+    def _reintentar(self):
+        return self.cliente.post(
+            reverse('asistencia:dispositivo-reintentar', args=[self.dispositivo.id])
+        )
+
+    def test_durante_el_bloqueo_el_pedido_no_se_guarda(self):
+        self._bloquear()
+
+        respuesta = self._reintentar()
+
+        self.assertEqual(respuesta.status_code, 409)
+        self.assertTrue(respuesta.data['bloqueado'])
+        self.dispositivo.refresh_from_db()
+        self.assertIsNone(
+            self.dispositivo.reintento_pedido,
+            'se guardo el pedido: el agente reintentaria y alargaria el bloqueo',
+        )
+
+    def test_explica_por_que_no_y_cuanto_falta(self):
+        self._bloquear(minutos=12)
+
+        datos = self._reintentar().data
+
+        self.assertIn('reinicia', datos['detalle'])
+        self.assertGreater(datos['segundos_de_bloqueo'], 60)
+
+    def test_cuando_se_libera_el_boton_vuelve_a_funcionar(self):
+        self.agente.reloj_bloqueado_hasta = timezone.now() - timedelta(minutes=1)
+        self.agente.save()
+
+        respuesta = self._reintentar()
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertFalse(respuesta.data['bloqueado'])
+        self.dispositivo.refresh_from_db()
+        self.assertIsNotNone(self.dispositivo.reintento_pedido)
+
+    def test_el_panel_avisa_del_bloqueo(self):
+        self._bloquear()
+
+        panel = self.cliente.get(reverse('asistencia:panel')).data
+        fila = next(d for d in panel['dispositivos'] if d['id'] == self.dispositivo.id)
+
+        self.assertTrue(fila['reloj_bloqueado'])
+        self.assertGreater(fila['segundos_de_bloqueo'], 0)
+
+    def test_sin_bloqueo_el_panel_no_lo_reporta(self):
+        panel = self.cliente.get(reverse('asistencia:panel')).data
+        fila = next(d for d in panel['dispositivos'] if d['id'] == self.dispositivo.id)
+
+        self.assertFalse(fila['reloj_bloqueado'])
+        self.assertEqual(fila['segundos_de_bloqueo'], 0)
+
+    def test_el_heartbeat_guarda_el_bloqueo_que_informa_el_agente(self):
+        cliente = APIClient()
+        token = self.agente.asignar_token()
+        self.agente.save()
+        cliente.credentials(HTTP_AUTHORIZATION=f'Bearer {token}')
+
+        cliente.post(reverse('asistencia:agente-heartbeat'), {
+            'device_reachable': False,
+            'device_error': 'El reloj bloqueo el acceso',
+            'device_locked_seconds': 1500,
+        }, format='json')
+
+        self.agente.refresh_from_db()
+        self.assertTrue(self.agente.reloj_bloqueado)
+        self.assertGreater(self.agente.segundos_de_bloqueo, 1400)
+
+    def test_un_agente_viejo_que_no_manda_el_dato_sigue_latiendo(self):
+        """Compatibilidad: el campo es opcional a proposito."""
+        cliente = APIClient()
+        token = self.agente.asignar_token()
+        self.agente.save()
+        cliente.credentials(HTTP_AUTHORIZATION=f'Bearer {token}')
+
+        respuesta = cliente.post(reverse('asistencia:agente-heartbeat'), {
+            'device_reachable': False,
+            'device_error': 'algo paso',
+        }, format='json')
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.agente.refresh_from_db()
+        self.assertFalse(self.agente.reloj_bloqueado)
+
+    def test_cuando_el_reloj_vuelve_el_bloqueo_se_limpia(self):
+        self._bloquear()
+        cliente = APIClient()
+        token = self.agente.asignar_token()
+        self.agente.save()
+        cliente.credentials(HTTP_AUTHORIZATION=f'Bearer {token}')
+
+        cliente.post(reverse('asistencia:agente-heartbeat'), {
+            'device_reachable': True,
+            'device_locked_seconds': None,
+        }, format='json')
+
+        self.agente.refresh_from_db()
+        self.assertFalse(self.agente.reloj_bloqueado)

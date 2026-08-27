@@ -6,6 +6,7 @@ import {
   CalendarClock,
   CalendarRange,
   Fingerprint,
+  Hourglass,
   LayoutDashboard,
   ListChecks,
   Loader2,
@@ -293,8 +294,40 @@ function TarjetaReloj({ reloj, indice }: { reloj: RelojPanelAsistencia; indice: 
         </p>
       )}
 
-      {relojOnline === false && <BotonReintentar reloj={reloj} />}
+      {relojOnline === false &&
+        (reloj.reloj_bloqueado ? (
+          <EsperandoDesbloqueo segundos={reloj.segundos_de_bloqueo} />
+        ) : (
+          <BotonReintentar reloj={reloj} />
+        ))}
     </Card>
+  )
+}
+
+/**
+ * Durante un bloqueo del reloj no se ofrece reintentar, y se dice por qué.
+ *
+ * El equipo cierra el acceso tras varios intentos fallidos, y cada intento
+ * nuevo durante ese lapso **reinicia su contador**: insistir no adelanta nada,
+ * lo alarga. El agente ya lo espera solo, así que lo único correcto acá es
+ * explicar y mostrar cuánto falta.
+ */
+function EsperandoDesbloqueo({ segundos }: { segundos: number }) {
+  const minutos = Math.floor(segundos / 60)
+  const resto = segundos % 60
+
+  return (
+    <div className="mt-3 flex items-start gap-2 border-t border-line pt-3 text-xs text-ink-500">
+      <Hourglass className="mt-0.5 h-4 w-4 shrink-0 text-ink-400" strokeWidth={1.9} aria-hidden />
+      <p>
+        <span className="font-medium text-ink-700">
+          Se libera solo en {minutos > 0 ? `${minutos} min ` : ''}
+          {resto} s.
+        </span>{' '}
+        No se puede apurar: mientras dura el bloqueo, cada intento nuevo reinicia
+        ese contador y lo alargaría. El agente se reconecta apenas se libere.
+      </p>
+    </div>
   )
 }
 
@@ -318,7 +351,12 @@ function BotonReintentar({ reloj }: { reloj: RelojPanelAsistencia }) {
       if (r.hay_agente_en_linea) toast.success('Pedido enviado', r.detalle)
       else toast.info('Pedido guardado', r.detalle)
     },
-    onError: (e: Error) => toast.error('No se pudo pedir el reintento', e.message),
+    onError: (e: Error) => {
+      // El backend contesta 409 si el reloj se bloqueó entre que se dibujó el
+      // botón y se apretó. No es una falla: es la respuesta correcta.
+      queryClient.invalidateQueries({ queryKey: ['asistencia', 'panel'] })
+      toast.info('No hace falta reintentar', e.message)
+    },
   })
 
   return (

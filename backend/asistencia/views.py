@@ -303,6 +303,14 @@ class AgenteHeartbeatView(_BaseAgenteView):
         serializer.is_valid(raise_exception=True)
         datos = serializer.validated_data
 
+        # El agente informa cuantos segundos faltan; se guarda el MOMENTO en que
+        # se libera, que es lo que sigue teniendo sentido dentro de un minuto,
+        # cuando el panel lo lea.
+        faltan = datos.get('device_locked_seconds')
+        bloqueado_hasta = (
+            timezone.now() + timedelta(seconds=faltan) if faltan else None
+        )
+
         Agente.todos.filter(pk=agente.pk).update(
             ultimo_heartbeat=timezone.now(),
             version=datos['agent_version'][:20],
@@ -310,6 +318,7 @@ class AgenteHeartbeatView(_BaseAgenteView):
             iniciado_en=datos['started_at'],
             reloj_alcanzable=datos['device_reachable'],
             reloj_error=(datos['device_error'] or '')[:300],
+            reloj_bloqueado_hasta=bloqueado_hasta,
             eventos_pendientes=datos['pending_events'],
             eventos_error=datos['error_events'],
             ultima_sync_reloj=datos['last_device_sync_at'],
@@ -381,12 +390,36 @@ class DispositivoReintentarView(_BaseGestion, APIView):
 
     def post(self, request, pk):
         dispositivo = get_object_or_404(Dispositivo, pk=pk)
+        agentes = [a for a in dispositivo.agentes.all() if a.activo and not a.borrado]
+        en_linea = [a for a in agentes if a.en_linea]
+
+        # Si el reloj se bloqueó a sí mismo, insistir es contraproducente: cada
+        # intento reinicia su contador y estira el bloqueo. Acá NO se guarda el
+        # pedido, y el agente además lo ignoraría: dos cerrojos para el mismo
+        # error, porque se cometió una vez y costó media hora de sucursal.
+        bloqueados = [a for a in agentes if a.reloj_bloqueado]
+        if bloqueados:
+            faltan = max(a.segundos_de_bloqueo for a in bloqueados)
+            minutos, segundos = divmod(faltan, 60)
+            return Response({
+                'reintento_pedido': (
+                    dispositivo.reintento_pedido.isoformat()
+                    if dispositivo.reintento_pedido else None
+                ),
+                'hay_agente_en_linea': bool(en_linea),
+                'bloqueado': True,
+                'segundos_de_bloqueo': faltan,
+                'detalle': (
+                    f'El reloj tiene el acceso cerrado por su propia protección y se '
+                    f'libera en {minutos} min {segundos} s. No se pidió el reintento a '
+                    f'propósito: cada intento durante el bloqueo reinicia ese contador '
+                    f'y lo alargaría. El agente vuelve a conectarse solo apenas se libere.'
+                ),
+            }, status=status.HTTP_409_CONFLICT)
+
         dispositivo.reintento_pedido = timezone.now()
         dispositivo.actualizado_por = request.user
         dispositivo.save(update_fields=['reintento_pedido', 'actualizado_por'])
-
-        agentes = [a for a in dispositivo.agentes.all() if a.activo and not a.borrado]
-        en_linea = [a for a in agentes if a.en_linea]
 
         if not agentes:
             detalle = (
@@ -408,6 +441,8 @@ class DispositivoReintentarView(_BaseGestion, APIView):
         return Response({
             'reintento_pedido': dispositivo.reintento_pedido.isoformat(),
             'hay_agente_en_linea': bool(en_linea),
+            'bloqueado': False,
+            'segundos_de_bloqueo': 0,
             'detalle': detalle,
         })
 
@@ -653,6 +688,8 @@ class PanelAsistenciaView(_BaseGestion, APIView):
                         'hostname': a.hostname,
                         'reloj_alcanzable': a.reloj_alcanzable,
                         'reloj_error': a.reloj_error,
+                        'reloj_bloqueado': a.reloj_bloqueado,
+                        'segundos_de_bloqueo': a.segundos_de_bloqueo,
                         'eventos_pendientes': a.eventos_pendientes,
                         'eventos_error': a.eventos_error,
                         'ultima_sync_reloj': a.ultima_sync_reloj.isoformat() if a.ultima_sync_reloj else None,
@@ -677,6 +714,12 @@ class PanelAsistenciaView(_BaseGestion, APIView):
                     'sin_mapear': propias.get('sin_mapear', 0),
                     'reintento_pedido': (
                         d.reintento_pedido.isoformat() if d.reintento_pedido else None
+                    ),
+                    # Si el reloj está bloqueado por sí mismo, reintentar lo
+                    # empeora: el panel lo usa para no ofrecer el botón.
+                    'reloj_bloqueado': any(a['reloj_bloqueado'] for a in agentes),
+                    'segundos_de_bloqueo': max(
+                        (a['segundos_de_bloqueo'] for a in agentes), default=0
                     ),
                 }
             )

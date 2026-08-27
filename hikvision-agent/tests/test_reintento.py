@@ -152,3 +152,83 @@ def test_un_loop_sin_evento_se_comporta_como_siempre():
     """Los otros dos loops (backend y heartbeat) no reciben evento: nada cambia."""
     loop = _loop()  # sin despertar
     assert loop._dormir(0.3) is False
+
+
+# --- 4. El bloqueo del reloj no se puede apurar ------------------------------
+#
+# Esto se agrego despues de romperlo en produccion: el boton de reintentar
+# desperto al agente mientras el reloj estaba bloqueado, el reloj rechazo el
+# intento Y REINICIO su contador de 30 minutos. El pedido no adelanto nada;
+# alargo el bloqueo.
+
+def test_durante_un_bloqueo_el_pedido_se_ignora():
+    """La espera de un bloqueo no se corta ni aunque la pidan."""
+    despertar = threading.Event()
+    loop = _loop(despertar)
+    despertar.set()
+
+    corto = loop._dormir(0.6, interrumpible=False)
+
+    assert corto is False, 'cortó la espera del bloqueo: eso reinicia el contador del reloj'
+
+
+def test_el_pedido_ignorado_no_queda_esperando_para_despues():
+    """Si quedara pendiente, se dispararía apenas termine el bloqueo.
+
+    No serviría de nada —el loop ya reintenta solo al liberarse— y encima
+    dispararía un intento extra justo en el peor momento.
+    """
+    despertar = threading.Event()
+    loop = _loop(despertar)
+    despertar.set()
+
+    loop._dormir(0.6, interrumpible=False)
+
+    assert not despertar.is_set(), 'el pedido quedó armado para el próximo ciclo'
+
+
+def test_fuera_de_un_bloqueo_el_pedido_se_sigue_respetando():
+    """La contraprueba: apagar el atajo solo durante el bloqueo, no siempre."""
+    despertar = threading.Event()
+    loop = _loop(despertar)
+    despertar.set()
+
+    assert loop._dormir(30, interrumpible=True) is True
+
+
+# --- 5. El bloqueo se informa hacia arriba -----------------------------------
+
+def test_el_bloqueo_se_reporta_con_los_segundos_que_faltan():
+    """El panel necesita el dato estructurado, no adivinarlo del texto."""
+    from hikvision_agent.sync.status import StatusBoard
+
+    pizarra = StatusBoard()
+    pizarra.device_locked("El reloj bloqueo el acceso", 1500)
+
+    estado = pizarra.snapshot()
+    assert estado["device_reachable"] is False
+    assert 1490 <= estado["device_locked_seconds"] <= 1500
+
+
+def test_una_falla_comun_no_dice_que_este_bloqueado():
+    from hikvision_agent.sync.status import StatusBoard
+
+    pizarra = StatusBoard()
+    pizarra.device_fail("Sin conexion con el reloj")
+
+    assert pizarra.snapshot()["device_locked_seconds"] is None
+
+
+def test_al_conectar_bien_el_bloqueo_se_borra():
+    """Si no se limpiara, el panel seguiria sin ofrecer el reintento."""
+    from datetime import datetime, timezone
+
+    from hikvision_agent.sync.status import StatusBoard
+
+    pizarra = StatusBoard()
+    pizarra.device_locked("bloqueado", 1500)
+    pizarra.device_ok(None, datetime.now(timezone.utc))
+
+    estado = pizarra.snapshot()
+    assert estado["device_locked_seconds"] is None
+    assert estado["device_reachable"] is True

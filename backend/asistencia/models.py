@@ -120,6 +120,13 @@ class Agente(ModeloBase):
     iniciado_en = models.DateTimeField('agente iniciado', null=True, blank=True)
     reloj_alcanzable = models.BooleanField('reloj alcanzable', null=True, blank=True)
     reloj_error = models.CharField('último error con el reloj', max_length=300, blank=True)
+    # Hasta cuándo el propio reloj tiene cerrado el acceso por su protección
+    # antifuerza-bruta. Se guarda aparte del texto del error porque cambia lo
+    # que se puede ofrecer: durante un bloqueo, cada intento nuevo reinicia el
+    # contador del equipo, así que el panel no debe proponer un reintento.
+    reloj_bloqueado_hasta = models.DateTimeField(
+        'reloj bloqueado hasta', null=True, blank=True
+    )
     eventos_pendientes = models.PositiveIntegerField('fichadas pendientes de subir', default=0)
     eventos_error = models.PositiveIntegerField('fichadas con error local', default=0)
     ultima_sync_reloj = models.DateTimeField('última lectura del reloj', null=True, blank=True)
@@ -140,6 +147,24 @@ class Agente(ModeloBase):
             return False
         ventana = max(self.heartbeat_seconds * 3, 180)
         return timezone.now() - self.ultimo_heartbeat <= timedelta(seconds=ventana)
+
+    @property
+    def reloj_bloqueado(self) -> bool:
+        """El reloj tiene el acceso cerrado por su propia protección.
+
+        Mientras sea True no hay que pedirle nada: cada intento reinicia el
+        contador del equipo y alarga el bloqueo en vez de resolverlo.
+        """
+        if not self.reloj_bloqueado_hasta:
+            return False
+        return self.reloj_bloqueado_hasta > timezone.now()
+
+    @property
+    def segundos_de_bloqueo(self) -> int:
+        """Cuánto falta para que el reloj se libere solo (0 si no está bloqueado)."""
+        if not self.reloj_bloqueado:
+            return 0
+        return int((self.reloj_bloqueado_hasta - timezone.now()).total_seconds())
 
     def asignar_token(self) -> str:
         """Genera y asigna un token nuevo; devuelve el valor en claro."""

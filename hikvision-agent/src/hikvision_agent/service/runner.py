@@ -54,6 +54,9 @@ class Loop(threading.Thread):
     def run(self) -> None:
         while not self._stop.is_set():
             espera = self._interval()
+            # Un bloqueo del reloj es la unica espera que NO se puede acortar:
+            # ver `_dormir`.
+            bloqueado = False
             try:
                 self._task()
                 self._fallas = 0
@@ -65,6 +68,7 @@ class Loop(threading.Thread):
                 # intento durante el bloqueo puede reiniciar su contador y
                 # dejar al reloj inaccesible indefinidamente.
                 espera = max(exc.segundos + 30, 60)
+                bloqueado = True
                 log.warning("[%s] %s — esperando %ss", self.name, exc, espera)
             except (DeviceAuthError, BackendAuthError) as exc:
                 espera = _AUTH_BACKOFF
@@ -76,20 +80,26 @@ class Loop(threading.Thread):
                 espera = self._backoff()
                 log.exception("[%s] error inesperado — reintento en %ss", self.name, espera)
             # Jitter ±10% para no sincronizar los reintentos entre hilos.
-            if self._dormir(espera * random.uniform(0.9, 1.1)):
+            if self._dormir(espera * random.uniform(0.9, 1.1), interrumpible=not bloqueado):
                 # Lo pidieron desde CelTuc: se tira el backoff acumulado para
                 # que el proximo intento arranque limpio, sin arrastrar la
                 # espera larga que venia de los fallos anteriores.
                 self._fallas = 0
                 log.info("[%s] reintento pedido desde CelTuc: probando ahora", self.name)
 
-    def _dormir(self, segundos: float) -> bool:
+    def _dormir(self, segundos: float, interrumpible: bool = True) -> bool:
         """Espera, y devuelve True si la cortaron para reintentar ahora.
 
         Se mira `_despertar` en tramos cortos en vez de esperar de una: asi un
         pedido manual no tiene que aguantar los cinco minutos del backoff. El
         `wait` sigue siendo sobre `_stop`, para que apagar el agente sea tan
         inmediato como antes.
+
+        `interrumpible=False` es el caso del reloj bloqueado, y es la razon de
+        ser de este parametro: durante un bloqueo, CADA intento nuevo reinicia
+        el contador del equipo. Un pedido de reintento ahi no adelantaria nada
+        — dejaria al reloj cerrado otros treinta minutos. Se descarta el pedido
+        (y se deja constancia en el log) en vez de obedecerlo.
         """
         limite = time.monotonic() + segundos
         while True:
@@ -100,7 +110,13 @@ class Loop(threading.Thread):
                 return False
             if self._despertar.is_set():
                 self._despertar.clear()
-                return True
+                if interrumpible:
+                    return True
+                log.warning(
+                    "[%s] pedido de reintento ignorado: el reloj esta bloqueado y "
+                    "volver a intentar reiniciaria su contador. Se espera a que se libere.",
+                    self.name,
+                )
 
     def _backoff(self) -> int:
         paso = min(self._fallas, len(_BACKOFF_STEPS) - 1)

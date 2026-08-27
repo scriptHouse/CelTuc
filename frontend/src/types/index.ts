@@ -1038,6 +1038,10 @@ export interface RelojPanelAsistencia {
   sin_mapear: number
   /** Cuándo se pidió por última vez que el agente reintente la conexión. */
   reintento_pedido: string | null
+  /** El reloj cerró el acceso por su propia protección antifuerza-bruta. */
+  reloj_bloqueado: boolean
+  /** Cuánto falta para que se libere solo. Cero si no está bloqueado. */
+  segundos_de_bloqueo: number
 }
 
 export interface PanelAsistencia {

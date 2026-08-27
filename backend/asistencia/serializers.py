@@ -175,6 +175,12 @@ class HeartbeatSerializer(serializers.Serializer):
     error_events = serializers.IntegerField(required=False, min_value=0, default=0)
     last_device_sync_at = serializers.DateTimeField(required=False, allow_null=True, default=None)
     config_version = serializers.IntegerField(required=False, default=0)
+    # Segundos que faltan para que el reloj se desbloquee solo. Opcional a
+    # proposito: un agente anterior a esta funcion no lo manda y tiene que
+    # seguir latiendo igual.
+    device_locked_seconds = serializers.IntegerField(
+        required=False, min_value=0, allow_null=True, default=None
+    )
 
 
 # --- Horarios y licencias ----------------------------------------------------
