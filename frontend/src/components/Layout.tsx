@@ -80,12 +80,17 @@ export function Layout() {
           impersonando && 'lg:top-11 lg:h-[calc(100dvh-2.75rem)]',
         )}
       >
-        <div className="flex h-20 items-center justify-center gap-2.5 px-3 xl:justify-start xl:px-6">
+        <div className="flex h-20 shrink-0 items-center justify-center gap-2.5 px-3 xl:justify-start xl:px-6">
           <BrandMark className="h-9 w-9 shrink-0 xl:hidden" />
           <BrandWordmark className="hidden text-[1.75rem] xl:inline-flex" />
         </div>
 
-        <nav className="flex-1 space-y-1.5 px-3 py-2" aria-label="Principal">
+        {/* Con muchos módulos (o pantallas bajas, ej. laptops) el nav scrollea
+            solo; la marca y el footer quedan siempre visibles. */}
+        <nav
+          className="min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain px-3 py-2"
+          aria-label="Principal"
+        >
           {items.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
@@ -120,7 +125,7 @@ export function Layout() {
         </nav>
 
         {/* Footer: usuario + tema + cerrar sesión */}
-        <div className="border-t border-line p-3">
+        <div className="shrink-0 border-t border-line p-3">
           <div className="flex items-center gap-3 rounded-2xl px-1 py-1 xl:px-2">
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-ink-100 text-sm font-bold text-ink-900">
               {inicial}
