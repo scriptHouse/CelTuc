@@ -71,6 +71,14 @@ class Dispositivo(ModeloBase):
     numero_serie = models.CharField('número de serie', max_length=60, blank=True)
     firmware = models.CharField('firmware', max_length=120, blank=True)
 
+    # Pedido de reintento inmediato hecho desde el panel. El servidor no puede
+    # hablarle al reloj —vive en la LAN de la sucursal—, así que lo único que
+    # puede hacer es dejar la marca acá: viaja en la config del heartbeat y el
+    # agente, al verla cambiar, descarta su espera y vuelve a intentar ya.
+    reintento_pedido = models.DateTimeField(
+        'último pedido de reintento', null=True, blank=True, editable=False
+    )
+
     class Meta:
         db_table = 'asistencia_dispositivos'
         verbose_name = 'reloj de asistencia'
@@ -164,6 +172,14 @@ class Agente(ModeloBase):
                 'heartbeat_seconds': self.heartbeat_seconds,
             },
             'logging': {'level': self.nivel_log},
+            # Marca de tiempo del último «reintentar ahora» pedido desde el
+            # panel. Va suelta y no adentro de `device` a propósito: el agente
+            # filtra ese bloque por una lista de claves conocidas, así que una
+            # clave nueva ahí adentro la descartaría. Un agente viejo la ignora
+            # sin romperse; uno nuevo la usa para saltarse la espera.
+            'reintento_pedido': (
+                int(d.reintento_pedido.timestamp()) if d.reintento_pedido else 0
+            ),
         }
 
 

@@ -14,6 +14,7 @@ import logging
 import random
 import signal
 import threading
+import time
 
 from .. import AGENT_VERSION
 from ..backend.client import BackendAuthError, BackendPayloadError, BackendTransientError
@@ -39,11 +40,15 @@ _AUTH_BACKOFF = 300
 class Loop(threading.Thread):
     """Ejecuta ``task()`` cada ``interval()`` segundos, con backoff ante fallas."""
 
-    def __init__(self, nombre: str, interval, task, stop_event: threading.Event):
+    def __init__(self, nombre: str, interval, task, stop_event: threading.Event,
+                 despertar: threading.Event | None = None):
         super().__init__(name=nombre, daemon=True)
         self._interval = interval
         self._task = task
         self._stop = stop_event
+        # Permite cortar la espera desde afuera. Sin este evento el loop se
+        # comporta igual que siempre: nadie lo activa nunca.
+        self._despertar = despertar or threading.Event()
         self._fallas = 0
 
     def run(self) -> None:
@@ -71,7 +76,31 @@ class Loop(threading.Thread):
                 espera = self._backoff()
                 log.exception("[%s] error inesperado — reintento en %ss", self.name, espera)
             # Jitter ±10% para no sincronizar los reintentos entre hilos.
-            self._stop.wait(espera * random.uniform(0.9, 1.1))
+            if self._dormir(espera * random.uniform(0.9, 1.1)):
+                # Lo pidieron desde CelTuc: se tira el backoff acumulado para
+                # que el proximo intento arranque limpio, sin arrastrar la
+                # espera larga que venia de los fallos anteriores.
+                self._fallas = 0
+                log.info("[%s] reintento pedido desde CelTuc: probando ahora", self.name)
+
+    def _dormir(self, segundos: float) -> bool:
+        """Espera, y devuelve True si la cortaron para reintentar ahora.
+
+        Se mira `_despertar` en tramos cortos en vez de esperar de una: asi un
+        pedido manual no tiene que aguantar los cinco minutos del backoff. El
+        `wait` sigue siendo sobre `_stop`, para que apagar el agente sea tan
+        inmediato como antes.
+        """
+        limite = time.monotonic() + segundos
+        while True:
+            resto = limite - time.monotonic()
+            if resto <= 0:
+                return False
+            if self._stop.wait(min(resto, 0.25)):
+                return False
+            if self._despertar.is_set():
+                self._despertar.clear()
+                return True
 
     def _backoff(self) -> int:
         paso = min(self._fallas, len(_BACKOFF_STEPS) - 1)
@@ -119,12 +148,17 @@ def run_agent(holder: ConfigHolder, secrets: Secrets) -> None:
     # Una conexión SQLite por hilo: se les pasa la RUTA, no un Repository ya
     # abierto. Cada uno abre la suya la primera vez que la usa, que ocurre ya
     # dentro de su propio hilo (sqlite3 no deja compartirlas entre hilos).
+    # Le permite al heartbeat cortarle la espera al loop del reloj cuando
+    # desde CelTuc aprietan "reintentar".
+    despertar_reloj = threading.Event()
+
     device_sync = DeviceSync(holder, secrets, status, db)
     backend_sync = BackendSync(holder, secrets, db)
-    heartbeat = Heartbeat(holder, secrets, status, db)
+    heartbeat = Heartbeat(holder, secrets, status, db, despertar_reloj)
 
     loops = [
-        Loop("reloj", lambda: holder.current.device.poll_seconds, device_sync.run_once, stop_event),
+        Loop("reloj", lambda: holder.current.device.poll_seconds, device_sync.run_once,
+             stop_event, despertar_reloj),
         Loop("backend", lambda: holder.current.backend.sync_seconds, backend_sync.run_once, stop_event),
         Loop("heartbeat", lambda: holder.current.backend.heartbeat_seconds, heartbeat.run_once, stop_event),
     ]

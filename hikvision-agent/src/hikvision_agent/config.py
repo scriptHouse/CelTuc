@@ -226,6 +226,19 @@ class ConfigHolder:
         with self._lock:
             return self._current
 
+    @property
+    def reintento_pedido(self) -> int:
+        """Marca de tiempo del ultimo «reintentar ahora» pedido desde CelTuc.
+
+        Viaja suelta en la config remota (no dentro de `device`, que se filtra
+        por claves conocidas). Cero significa que nunca se pidio ninguno.
+        """
+        with self._lock:
+            try:
+                return int(self._remote.get("reintento_pedido") or 0)
+            except (TypeError, ValueError):
+                return 0
+
     def apply_remote(self, remota: dict) -> bool:
         """Aplica una config remota nueva. Devuelve True si cambió algo."""
         if not isinstance(remota, dict) or not remota:

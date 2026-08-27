@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import socket
+import threading
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -30,12 +31,19 @@ class Heartbeat:
         secrets: Secrets,
         status: StatusBoard,
         db_path: Path,
+        despertar_reloj: threading.Event | None = None,
     ):
         self._holder = holder
         self._secrets = secrets
         self._status = status
         self._db_path = db_path
         self._repositorio: Repository | None = None
+        # Con qué avisarle al loop del reloj que lo pidieron desde CelTuc.
+        self._despertar_reloj = despertar_reloj
+        # None = todavía no se miró ninguna config. La primera vez solo se
+        # anota el valor: si no, cada arranque del agente dispararía un
+        # reintento por un pedido viejo que ya se cumplió hace rato.
+        self._ultimo_reintento: int | None = None
 
     @property
     def _repo(self) -> Repository:
@@ -72,6 +80,24 @@ class Heartbeat:
 
         self._chequear_reloj_servidor(respuesta.get("server_time"))
         self._aplicar_config(respuesta.get("config"))
+        self._mirar_pedido_de_reintento()
+
+    def _mirar_pedido_de_reintento(self) -> None:
+        """Si desde CelTuc apretaron «reintentar», despierta al loop del reloj.
+
+        El servidor no puede probar el reloj —está en la LAN de la sucursal—,
+        así que deja la marca en la config y esto es lo que la convierte en
+        acción: el loop descarta su espera y vuelve a intentar enseguida, en vez
+        de aguantar los cinco minutos del reintento automático.
+        """
+        pedido = self._holder.reintento_pedido
+        anterior, self._ultimo_reintento = self._ultimo_reintento, pedido
+
+        if anterior is None or pedido <= anterior:
+            return
+        if self._despertar_reloj is not None:
+            self._despertar_reloj.set()
+            log.info("Reintento pedido desde CelTuc: despertando el loop del reloj")
 
     def _aplicar_config(self, remota) -> None:
         if not isinstance(remota, dict) or not remota:

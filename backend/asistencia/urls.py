@@ -18,6 +18,8 @@ urlpatterns = [
     path('numeros-sin-mapear/', views.NumerosSinMapearView.as_view(), name='numeros-sin-mapear'),
     path('dispositivos/', views.DispositivoListCreateView.as_view(), name='dispositivos'),
     path('dispositivos/<int:pk>/', views.DispositivoDetailView.as_view(), name='dispositivo'),
+    path('dispositivos/<int:pk>/reintentar/', views.DispositivoReintentarView.as_view(),
+         name='dispositivo-reintentar'),
     path('agentes/', views.AgenteListCreateView.as_view(), name='agentes'),
     path('agentes/<int:pk>/', views.AgenteDetailView.as_view(), name='agente'),
     path('agentes/<int:pk>/regenerar-token/', views.AgenteRegenerarTokenView.as_view(), name='agente-regenerar-token'),

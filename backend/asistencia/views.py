@@ -367,6 +367,51 @@ class DispositivoDetailView(_BaseGestion, AuditoriaMixin, generics.RetrieveUpdat
     serializer_class = DispositivoSerializer
 
 
+class DispositivoReintentarView(_BaseGestion, APIView):
+    """Pedirle al agente que vuelva a intentar la conexión con el reloj, ya.
+
+    El servidor no puede probar el reloj: vive en la LAN de la sucursal y solo
+    la notebook lo alcanza. Lo único que se puede hacer desde acá es dejar la
+    marca en la config; el agente la ve en su próximo heartbeat, descarta el
+    backoff que venía acumulando y reintenta enseguida en vez de esperar los
+    cinco minutos del reintento automático.
+
+    Por eso la respuesta dice CUÁNDO va a pasar y no promete que ya pasó.
+    """
+
+    def post(self, request, pk):
+        dispositivo = get_object_or_404(Dispositivo, pk=pk)
+        dispositivo.reintento_pedido = timezone.now()
+        dispositivo.actualizado_por = request.user
+        dispositivo.save(update_fields=['reintento_pedido', 'actualizado_por'])
+
+        agentes = [a for a in dispositivo.agentes.all() if a.activo and not a.borrado]
+        en_linea = [a for a in agentes if a.en_linea]
+
+        if not agentes:
+            detalle = (
+                'Este reloj todavía no tiene una notebook asignada: creale un '
+                'agente en Configuración para que alguien pueda consultarlo.'
+            )
+        elif not en_linea:
+            detalle = (
+                'La notebook de la sucursal no está reportando. El pedido queda '
+                'guardado y se aplica solo en cuanto vuelva a prenderse.'
+            )
+        else:
+            segundos = max(a.heartbeat_seconds for a in en_linea)
+            detalle = (
+                f'Pedido enviado. La notebook lo va a tomar en los próximos '
+                f'{segundos} segundos y va a reintentar la conexión.'
+            )
+
+        return Response({
+            'reintento_pedido': dispositivo.reintento_pedido.isoformat(),
+            'hay_agente_en_linea': bool(en_linea),
+            'detalle': detalle,
+        })
+
+
 class AgenteListCreateView(_BaseGestion, AuditoriaMixin, generics.ListCreateAPIView):
     queryset = Agente.objects.select_related('dispositivo', 'dispositivo__sucursal')
     serializer_class = AgenteSerializer
@@ -630,6 +675,9 @@ class PanelAsistenciaView(_BaseGestion, APIView):
                     'ultima_fichada': propias['ultima'].isoformat() if propias.get('ultima') else None,
                     'fichadas_hoy': propias.get('de_hoy', 0),
                     'sin_mapear': propias.get('sin_mapear', 0),
+                    'reintento_pedido': (
+                        d.reintento_pedido.isoformat() if d.reintento_pedido else None
+                    ),
                 }
             )
 

@@ -1036,6 +1036,8 @@ export interface RelojPanelAsistencia {
   ultima_fichada: string | null
   fichadas_hoy: number
   sin_mapear: number
+  /** Cuándo se pidió por última vez que el agente reintente la conexión. */
+  reintento_pedido: string | null
 }
 
 export interface PanelAsistencia {

@@ -49,6 +49,22 @@ export function panelAsistencia(): Promise<PanelAsistencia> {
   return api.get<PanelAsistencia>('/asistencia/panel/', token())
 }
 
+/**
+ * Le pide al agente de la sucursal que reintente la conexion con el reloj.
+ *
+ * CelTuc no puede probar el reloj: vive en la LAN de la sucursal y solo la
+ * notebook lo alcanza. Esto deja el pedido en la config; el agente lo toma en
+ * su proximo heartbeat y reintenta enseguida, en vez de esperar los cinco
+ * minutos del reintento automatico.
+ */
+export function reintentarConexionReloj(id: number): Promise<{
+  reintento_pedido: string
+  hay_agente_en_linea: boolean
+  detalle: string
+}> {
+  return api.post(`/asistencia/dispositivos/${id}/reintentar/`, {}, token())
+}
+
 // --- Fichadas ----------------------------------------------------------------
 
 export interface FiltrosFichadas {

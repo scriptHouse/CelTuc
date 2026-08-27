@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Activity,
   AlertTriangle,
@@ -8,8 +8,10 @@ import {
   Fingerprint,
   LayoutDashboard,
   ListChecks,
+  Loader2,
   MonitorSmartphone,
   Palmtree,
+  RefreshCw,
   Settings2,
   UserRoundSearch,
   Watch,
@@ -17,7 +19,9 @@ import {
   WifiOff,
 } from 'lucide-react'
 import type { RelojPanelAsistencia } from '@/types'
-import { panelAsistencia } from '@/services/asistencia'
+import { panelAsistencia, reintentarConexionReloj } from '@/services/asistencia'
+import { useToast } from '@/components/ToastProvider'
+import { Button } from '@/components/ui/Button'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { StatCard } from '@/components/ui/StatCard'
@@ -288,6 +292,55 @@ function TarjetaReloj({ reloj, indice }: { reloj: RelojPanelAsistencia; indice: 
           {agente.reloj_error}
         </p>
       )}
+
+      {relojOnline === false && <BotonReintentar reloj={reloj} />}
     </Card>
+  )
+}
+
+/**
+ * «Reintentar ahora» cuando el reloj figura caído.
+ *
+ * CelTuc no puede probarlo por su cuenta: el reloj está en la red de la
+ * sucursal y solo la notebook lo alcanza. Lo que hace el botón es dejarle el
+ * pedido al agente, que lo toma en su próximo heartbeat y saltea la espera del
+ * reintento automático. Por eso el mensaje dice cuándo va a pasar y no promete
+ * que ya pasó — y si la notebook está apagada, lo dice también.
+ */
+function BotonReintentar({ reloj }: { reloj: RelojPanelAsistencia }) {
+  const toast = useToast()
+  const queryClient = useQueryClient()
+
+  const reintentar = useMutation({
+    mutationFn: () => reintentarConexionReloj(reloj.id),
+    onSuccess: (r) => {
+      queryClient.invalidateQueries({ queryKey: ['asistencia', 'panel'] })
+      if (r.hay_agente_en_linea) toast.success('Pedido enviado', r.detalle)
+      else toast.info('Pedido guardado', r.detalle)
+    },
+    onError: (e: Error) => toast.error('No se pudo pedir el reintento', e.message),
+  })
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-line pt-3">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => reintentar.mutate()}
+        disabled={reintentar.isPending}
+      >
+        {reintentar.isPending ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <RefreshCw className="h-4 w-4" />
+        )}
+        Reintentar conexión
+      </Button>
+      <span className="text-xs text-ink-400">
+        {reloj.reintento_pedido
+          ? `Último pedido: ${tiempoRelativo(reloj.reintento_pedido)}`
+          : 'Le pide a la notebook que vuelva a probar el reloj ahora.'}
+      </span>
+    </div>
   )
 }
