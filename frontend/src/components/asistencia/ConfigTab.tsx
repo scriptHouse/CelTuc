@@ -35,6 +35,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { CampoBooleano } from '@/components/ui/CampoBooleano'
 import { Card } from '@/components/ui/Card'
+import { ControlSucursalesSeccion } from '@/components/asistencia/ControlSucursalesSeccion'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { EnLineaDot } from '@/components/ui/StatusBadge'
 import { Input } from '@/components/ui/Input'
@@ -298,6 +299,8 @@ export function ConfigTab() {
           </Card>
         )}
       </section>
+
+      <ControlSucursalesSeccion />
 
       <GuiaInstalacion />
 

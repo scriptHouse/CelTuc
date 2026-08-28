@@ -71,7 +71,10 @@ class EstadoJornada(models.TextChoices):
     FERIADO = 'feriado', 'Feriado'
     NO_LABORABLE = 'no_laborable', 'No laborable'
     SIN_TURNO = 'sin_turno', 'Sin turno asignado'
-    SIN_RELOJ = 'sin_reloj', 'Sucursal sin reloj'
+    # El valor sigue diciendo 'sin_reloj' por compatibilidad, pero la sucursal
+    # puede estar fuera del control por dos motivos: no tiene reloj, o alguien
+    # la apagó a mano. La etiqueta no promete cuál de los dos.
+    SIN_RELOJ = 'sin_reloj', 'Sucursal sin control'
 
 
 @dataclass
@@ -451,7 +454,8 @@ def calcular(
         jornada.entrada_esperada = esperados[0][0]
         jornada.salida_esperada = esperados[-1][1]
 
-    # 4) Sucursal sin reloj: se muestra el día, no se juzga.
+    # 4) Sucursal fuera del control (sin reloj, o apagada a mano): se muestra
+    #    el día, no se juzga.
     if not evaluar:
         jornada.estado = EstadoJornada.SIN_RELOJ
         return _cerrar(jornada, reglas)

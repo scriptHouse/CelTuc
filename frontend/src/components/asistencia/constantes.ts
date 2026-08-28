@@ -129,7 +129,7 @@ export const ESTADO_JORNADA: Record<
     punto: 'bg-ink-300',
   },
   sin_reloj: {
-    label: 'Sucursal sin reloj',
+    label: 'Sucursal sin control',
     icon: MapPinOff,
     tono: 'border-line bg-surface text-ink-500',
     punto: 'bg-ink-300',

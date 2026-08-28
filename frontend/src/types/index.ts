@@ -1001,7 +1001,13 @@ export interface PaginaFichadas {
   resultados: FichadaAsistencia[]
   /** Solo en la primera página. */
   resumen?: { hoy: number; sin_mapear: number }
-  dispositivos?: { id: number; nombre: string; sucursal: string }[]
+  dispositivos?: {
+    id: number
+    nombre: string
+    sucursal: string
+    sucursal_id: number
+  }[]
+  /** Solo las que tienen algun reloj: son las unicas que pueden tener fichadas. */
   sucursales?: { id: number; nombre: string }[]
 }
 
@@ -1370,6 +1376,24 @@ export interface RespuestaInconsistencias {
   }
 }
 
+// --- Control de asistencia por sucursal ---------------------------------------
+
+/**
+ * Si a una sucursal se le controla la asistencia.
+ *
+ * Hay dos motivos distintos para que no se controle, y se arreglan distinto:
+ * no tiene reloj (`tiene_reloj: false`, se resuelve instalando uno) o alguien
+ * la apago a mano (`controla: false`, se resuelve con el interruptor).
+ */
+export interface ControlSucursal {
+  sucursal: number
+  nombre: string
+  controla: boolean
+  motivo: string
+  tiene_reloj: boolean
+  relojes: string[]
+}
+
 // --- Calendario mensual -------------------------------------------------------
 
 /**
@@ -1501,6 +1525,8 @@ export interface CatalogoInconsistencias {
   }[]
   severidades: { value: SeveridadInconsistencia; label: string }[]
   estados: { value: EstadoInconsistencia; label: string }[]
-  /** Sucursales sin reloj activo: esas jornadas no se evalúan. */
+  /** Sin reloj activo: no se les puede exigir una marca. Se arregla instalándolo. */
   sucursales_sin_reloj: { id: number; nombre: string }[]
+  /** Apagadas a mano desde Configuración. Se arregla con el interruptor. */
+  sucursales_sin_control: { id: number; nombre: string }[]
 }

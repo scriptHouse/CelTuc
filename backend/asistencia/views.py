@@ -32,6 +32,7 @@ from .models import (
     Agente,
     AsignacionSucursal,
     AsignacionTurno,
+    ControlSucursal,
     Dispositivo,
     EstadoInconsistencia,
     EstadoMapeo,
@@ -54,6 +55,8 @@ from .models import (
     resolver_reglas,
     sembrar_reglas,
     sucursales_con_reloj,
+    sucursales_controladas,
+    sucursales_sin_control,
 )
 from .serializers import (
     AgenteSerializer,
@@ -115,16 +118,20 @@ def _es_de_la_sucursal(jornada, sucursal_id):
     return any(s['id'] == sucursal_id for s in jornada.get('sucursales_fichadas', ()))
 
 
-def _hay_reloj(esperada, con_reloj) -> bool:
-    """Si la sucursal donde se espera a alguien tiene con que fichar.
+def _se_controla(esperada, controladas) -> bool:
+    """Si a esa sucursal se le exige fichar ese dia.
 
-    Sin reloj no se puede exigir una marca: ese dia no se evalua (ni ausencia,
-    ni tarde, ni inconsistencias). Cuando no se sabe donde le tocaba estar, se
-    evalua igual, que es como venia funcionando.
+    Son dos motivos distintos para no evaluar un dia, y se arreglan distinto:
+    la sucursal no tiene reloj (no se le puede pedir una marca a quien no tiene
+    donde marcarla) o alguien la excluyo a mano desde Configuracion. En los dos
+    casos el dia se muestra pero no se juzga.
+
+    Cuando no se sabe donde le tocaba estar a la persona, se evalua igual: es
+    como venia funcionando y no hay motivo para dejar de mirar.
     """
     if not esperada:
         return True
-    return esperada['id'] in con_reloj
+    return esperada['id'] in controladas
 
 
 def _aplicar_justificaciones(resultados, desde, hasta):
@@ -560,12 +567,24 @@ class FichadasListView(_BaseGestion, APIView):
                 'hoy': Fichada.objects.filter(ocurrida_en__gte=hoy).count(),
                 'sin_mapear': Fichada.objects.filter(estado_mapeo=EstadoMapeo.SIN_MAPEAR).count(),
             }
+            relojes = list(Dispositivo.objects.select_related('sucursal'))
             respuesta['dispositivos'] = [
-                {'id': d.id, 'nombre': d.nombre, 'sucursal': d.sucursal.nombre}
-                for d in Dispositivo.objects.select_related('sucursal')
+                {
+                    'id': d.id,
+                    'nombre': d.nombre,
+                    'sucursal': d.sucursal.nombre,
+                    'sucursal_id': d.sucursal_id,
+                }
+                for d in relojes
             ]
+            # Solo las sucursales que tienen algun reloj: una fichada nace en
+            # un reloj, asi que filtrar por una sucursal sin ninguno siempre
+            # daria vacio. Se incluyen los relojes dados de baja para no
+            # esconder el historico de una sucursal que dejo de usarse.
+            con_relojes = {d.sucursal_id: d.sucursal.nombre for d in relojes}
             respuesta['sucursales'] = [
-                {'id': s.id, 'nombre': s.nombre} for s in Sucursal.objects.all()
+                {'id': sid, 'nombre': nombre}
+                for sid, nombre in sorted(con_relojes.items(), key=lambda p: p[1])
             ]
         return Response(respuesta)
 
@@ -804,7 +823,7 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
 
         ctx = cls._contexto(desde, hasta, empleado_id)
         (turno_en, licencia_en, feriado_en, sucursal_en,
-         reglas_en, con_reloj, empleados_seguidos) = ctx
+         reglas_en, controladas, empleados_seguidos) = ctx
 
         # 1) Agrupar las fichadas por (dia, persona).
         grupos = {}
@@ -852,7 +871,7 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
                     licencia=licencia_en(meta['empleado_id'], dia),
                     feriado=feriado_en(dia, esperada['id'] if esperada else None),
                     reglas=reglas_en(turno.id if turno else None),
-                    evaluar=_hay_reloj(esperada, con_reloj),
+                    evaluar=_se_controla(esperada, controladas),
                     sucursal_esperada=esperada,
                     sucursales_fichadas=[
                         {'id': sid, 'nombre': nombre}
@@ -872,7 +891,7 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
                 esperada = sucursal_en(emp_id, dia, datos_emp['sucursal_id'])
                 # Sin reloj en su sucursal no se le puede pedir que fiche: no
                 # es una ausencia, es que no hay donde marcar.
-                if not _hay_reloj(esperada, con_reloj):
+                if not _se_controla(esperada, controladas):
                     continue
                 turno, desfase = turno_en(emp_id, dia)
                 licencia = licencia_en(emp_id, dia)
@@ -961,7 +980,7 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
         # de una vez por jornada (el periodo puede tener cientos).
         todas_las_reglas = list(ReglaInconsistencia.objects.all())
         cache_reglas: dict = {}
-        con_reloj = sucursales_con_reloj()
+        controladas = sucursales_controladas()
 
         feriados = list(Feriado.objects.filter(fecha__gte=desde, fecha__lte=hasta))
 
@@ -1012,7 +1031,7 @@ class ResumenAsistenciaView(_BaseGestion, APIView):
 
         return (
             turno_en, licencia_en, feriado_en, sucursal_en,
-            reglas_en, con_reloj, seguidos,
+            reglas_en, controladas, seguidos,
         )
 
 
@@ -1205,9 +1224,15 @@ class CatalogoInconsistenciasView(_BaseGestion, APIView):
             'severidades': [{'value': v, 'label': l} for v, l in Severidad.choices],
             'estados': [{'value': v, 'label': l} for v, l in EstadoInconsistencia.choices],
             # Sin esto, que alguien no aparezca en el resumen es un misterio.
+            # Van separadas a proposito: no tener reloj se arregla instalandolo;
+            # estar apagada se arregla con el interruptor de Configuracion.
             'sucursales_sin_reloj': [
                 {'id': s.id, 'nombre': s.nombre}
                 for s in Sucursal.objects.exclude(id__in=sucursales_con_reloj())
+            ],
+            'sucursales_sin_control': [
+                {'id': s.id, 'nombre': s.nombre}
+                for s in Sucursal.objects.filter(id__in=sucursales_sin_control())
             ],
         })
 
@@ -1648,3 +1673,84 @@ class CalendarioAsistenciaView(_BaseGestion, APIView):
             'feriado': feriado,
             'es_hoy': dia == hoy,
         }
+
+
+# --- Qué sucursales se controlan ---------------------------------------------
+
+class ControlSucursalListView(_BaseGestion, APIView):
+    """Todas las sucursales y si se les controla la asistencia.
+
+    Devuelve la lista COMPLETA, no solo las que tienen fila: una sucursal sin
+    configurar se controla, y esconderla haría que el interruptor pareciera no
+    existir hasta que alguien lo tocara una primera vez.
+    """
+
+    def get(self, request):
+        con_reloj = sucursales_con_reloj()
+        configs = {c.sucursal_id: c for c in ControlSucursal.objects.all()}
+        relojes = {}
+        for d in Dispositivo.objects.filter(activo=True):
+            relojes.setdefault(d.sucursal_id, []).append(d.nombre)
+
+        return Response([
+            {
+                'sucursal': s.id,
+                'nombre': s.nombre,
+                # Sin fila, se controla: el silencio es lo de siempre.
+                'controla': configs[s.id].controla if s.id in configs else True,
+                'motivo': configs[s.id].motivo if s.id in configs else '',
+                'tiene_reloj': s.id in con_reloj,
+                'relojes': relojes.get(s.id, []),
+            }
+            for s in Sucursal.objects.all()
+        ])
+
+
+class ControlSucursalDetailView(_BaseGestion, APIView):
+    """Prende o apaga el control de una sucursal.
+
+    Es un upsert: la mayoría de las sucursales no tiene fila porque el valor por
+    defecto ya es el correcto. La fila aparece recién cuando alguien decide algo
+    distinto (o vuelve a prenderlo, para que quede el motivo y la auditoría).
+    """
+
+    def patch(self, request, pk):
+        sucursal = get_object_or_404(Sucursal, pk=pk)
+
+        control, creado = ControlSucursal.objects.get_or_create(
+            sucursal=sucursal,
+            defaults={'creado_por': request.user, 'actualizado_por': request.user},
+        )
+        if 'controla' in request.data:
+            control.controla = bool(request.data['controla'])
+        if 'motivo' in request.data:
+            control.motivo = str(request.data['motivo'] or '')[:200]
+        control.actualizado_por = request.user
+        control.save()
+
+        if control.controla:
+            detalle = (
+                f'{sucursal.nombre} vuelve a controlarse: sus jornadas se evalúan '
+                'de nuevo (ausencias, llegadas tarde e inconsistencias).'
+            )
+            if sucursal.id not in sucursales_con_reloj():
+                detalle += (
+                    ' Ojo: todavía no tiene ningún reloj activo, así que hasta '
+                    'que se le cargue uno el control no va a poder aplicarse.'
+                )
+        else:
+            detalle = (
+                f'{sucursal.nombre} deja de controlarse. Las fichadas se siguen '
+                'registrando y se pueden consultar; lo que se apaga es el juicio: '
+                'no van a figurar ausencias, ni tarde, ni inconsistencias.'
+            )
+
+        return Response({
+            'sucursal': sucursal.id,
+            'nombre': sucursal.nombre,
+            'controla': control.controla,
+            'motivo': control.motivo,
+            'tiene_reloj': sucursal.id in sucursales_con_reloj(),
+            'creado': creado,
+            'detalle': detalle,
+        })

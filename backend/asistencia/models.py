@@ -1128,3 +1128,59 @@ def sucursales_con_reloj() -> set:
         .values_list('sucursal_id', flat=True)
         .distinct()
     )
+
+
+class ControlSucursal(ModeloBase):
+    """Si una sucursal entra o no en el control de asistencia.
+
+    Hay dos razones distintas por las que una sucursal puede no controlarse, y
+    conviene no confundirlas porque se arreglan distinto:
+
+    - **No tiene reloj.** Se deduce del equipamiento (`sucursales_con_reloj`):
+      no se le puede exigir una marca a quien no tiene dónde marcarla. Se
+      resuelve dando de alta el reloj.
+    - **Alguien la excluyó a mano.** Es lo que guarda esta tabla: la sucursal
+      tiene reloj, o podría tenerlo, pero se decidió no controlarla. Un depósito
+      donde el horario no importa, un local que recién abre, una sucursal en
+      obra. Se resuelve volviendo a prender el interruptor.
+
+    Sin fila, la sucursal se controla: el silencio es el comportamiento de
+    siempre, así agregar esta tabla no cambió nada de lo que ya venía andando.
+    """
+
+    sucursal = models.OneToOneField(
+        'inventario.Sucursal', on_delete=models.CASCADE,
+        related_name='control_asistencia', verbose_name='sucursal',
+    )
+    controla = models.BooleanField(
+        'controlar la asistencia', default=True,
+        help_text='Apagado: sus jornadas no se evalúan (ni ausencias, ni tarde, '
+                  'ni inconsistencias). Las fichadas se siguen registrando.',
+    )
+    motivo = models.CharField('motivo', max_length=200, blank=True)
+
+    class Meta:
+        db_table = 'asistencia_control_sucursal'
+        verbose_name = 'control de asistencia por sucursal'
+        verbose_name_plural = 'control de asistencia por sucursal'
+        ordering = ('sucursal__orden', 'sucursal__nombre')
+
+    def __str__(self):
+        estado = 'se controla' if self.controla else 'sin control'
+        return f'{self.sucursal}: {estado}'
+
+
+def sucursales_sin_control() -> set:
+    """Ids de las sucursales que alguien apagó a mano."""
+    return set(
+        ControlSucursal.objects.filter(controla=False).values_list('sucursal_id', flat=True)
+    )
+
+
+def sucursales_controladas() -> set:
+    """Ids de las sucursales donde SÍ se evalúa la asistencia.
+
+    Hacen falta las dos condiciones: que haya con qué fichar y que nadie la
+    haya excluido. Cualquiera de las dos que falte deja el día sin juzgar.
+    """
+    return sucursales_con_reloj() - sucursales_sin_control()

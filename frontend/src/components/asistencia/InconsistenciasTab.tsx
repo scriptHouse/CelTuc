@@ -5,6 +5,7 @@ import {
   CircleSlash,
   Loader2,
   MapPinOff,
+  PowerOff,
   ShieldCheck,
   SlidersHorizontal,
   TriangleAlert,
@@ -202,18 +203,39 @@ export function InconsistenciasTab() {
         </div>
       </Card>
 
-      {(catalogo?.sucursales_sin_reloj.length ?? 0) > 0 && (
-        <Card className="mb-5 flex items-start gap-3 border-dashed p-4">
-          <MapPinOff className="mt-0.5 h-4 w-4 shrink-0 text-ink-400" strokeWidth={1.9} />
-          <p className="text-xs text-ink-500">
-            <span className="font-medium text-ink-700">
-              {catalogo?.sucursales_sin_reloj.map((s) => s.nombre).join(', ')}
-            </span>{' '}
-            {catalogo!.sucursales_sin_reloj.length === 1 ? 'no tiene' : 'no tienen'} reloj
-            cargado, así que a quien trabaje ahí no se le exige fichar: no figura ausente ni
-            genera inconsistencias. Se controla solo en cuanto des de alta el reloj en
-            Configuración.
-          </p>
+      {((catalogo?.sucursales_sin_reloj.length ?? 0) > 0 ||
+        (catalogo?.sucursales_sin_control.length ?? 0) > 0) && (
+        <Card className="mb-5 space-y-2 border-dashed p-4">
+          {/* Los dos motivos van separados porque se arreglan distinto: uno se
+              resuelve instalando el reloj, el otro con el interruptor. */}
+          {(catalogo?.sucursales_sin_reloj.length ?? 0) > 0 && (
+            <div className="flex items-start gap-3">
+              <MapPinOff className="mt-0.5 h-4 w-4 shrink-0 text-ink-400" strokeWidth={1.9} />
+              <p className="text-xs text-ink-500">
+                <span className="font-medium text-ink-700">
+                  {catalogo?.sucursales_sin_reloj.map((s) => s.nombre).join(', ')}
+                </span>{' '}
+                {catalogo!.sucursales_sin_reloj.length === 1 ? 'no tiene' : 'no tienen'} reloj
+                cargado, así que a quien trabaje ahí no se le exige fichar. Se controla solo
+                en cuanto des de alta el reloj en Configuración.
+              </p>
+            </div>
+          )}
+          {(catalogo?.sucursales_sin_control.length ?? 0) > 0 && (
+            <div className="flex items-start gap-3">
+              <PowerOff className="mt-0.5 h-4 w-4 shrink-0 text-ink-400" strokeWidth={1.9} />
+              <p className="text-xs text-ink-500">
+                <span className="font-medium text-ink-700">
+                  {catalogo?.sucursales_sin_control.map((s) => s.nombre).join(', ')}
+                </span>{' '}
+                {catalogo!.sucursales_sin_control.length === 1
+                  ? 'está apagada'
+                  : 'están apagadas'}{' '}
+                a propósito: sus fichadas se registran pero no se juzgan. El interruptor
+                está en Configuración.
+              </p>
+            </div>
+          )}
         </Card>
       )}
 

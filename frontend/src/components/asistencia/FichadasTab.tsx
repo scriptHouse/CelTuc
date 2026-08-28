@@ -78,6 +78,7 @@ export function FichadasTab() {
     return () => clearTimeout(timer)
   }, [busqueda])
 
+  const [sucursal, setSucursal] = useState('')
   const [dispositivo, setDispositivo] = useState('')
   const [tipo, setTipo] = useState('')
   const [mapeo, setMapeo] = useState('')
@@ -87,10 +88,11 @@ export function FichadasTab() {
 
   const { data, isLoading, isFetching, isFetchingNextPage, fetchNextPage, hasNextPage } =
     useInfiniteQuery({
-      queryKey: ['asistencia', 'fichadas', q, dispositivo, tipo, mapeo, rango],
+      queryKey: ['asistencia', 'fichadas', q, sucursal, dispositivo, tipo, mapeo, rango],
       queryFn: ({ pageParam }) =>
         listarFichadas({
           q,
+          sucursal: sucursal ? Number(sucursal) : '',
           dispositivo: dispositivo ? Number(dispositivo) : '',
           tipo,
           mapeo,
@@ -109,6 +111,13 @@ export function FichadasTab() {
   const primera = data?.pages[0]
   const fichadas = useMemo(() => data?.pages.flatMap((p) => p.resultados) ?? [], [data])
   const relojes = primera?.dispositivos ?? []
+  const sucursales = primera?.sucursales ?? []
+
+  // Elegida una sucursal, la lista de relojes se acota a los suyos: ofrecer
+  // relojes de otra sucursal solo lleva a combinaciones que no devuelven nada.
+  const relojesVisibles = sucursal
+    ? relojes.filter((r) => String(r.sucursal_id) === sucursal)
+    : relojes
 
   const porDia = useMemo(() => {
     const grupos: { dia: string; filas: FichadaAsistencia[] }[] = []
@@ -124,7 +133,7 @@ export function FichadasTab() {
   return (
     <div>
       <Card className="mb-5 p-4">
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,1fr))]">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.4fr)_repeat(4,minmax(0,1fr))]">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
             <Input
@@ -135,12 +144,29 @@ export function FichadasTab() {
             />
           </div>
           <Select
+            placeholder="Todas las sucursales"
+            value={sucursal}
+            onChange={(v) => {
+              setSucursal(v)
+              // El reloj elegido puede ser de otra sucursal: los dos filtros
+              // juntos darian una lista vacia sin explicar por que.
+              setDispositivo('')
+            }}
+            options={[
+              { value: '', label: 'Todas las sucursales' },
+              ...sucursales.map((s) => ({ value: String(s.id), label: s.nombre })),
+            ]}
+          />
+          <Select
             placeholder="Todos los relojes"
             value={dispositivo}
             onChange={setDispositivo}
             options={[
               { value: '', label: 'Todos los relojes' },
-              ...relojes.map((r) => ({ value: String(r.id), label: `${r.nombre} · ${r.sucursal}` })),
+              ...relojesVisibles.map((r) => ({
+                value: String(r.id),
+                label: `${r.nombre} · ${r.sucursal}`,
+              })),
             ]}
           />
           <Select placeholder="Todos los tipos" value={tipo} onChange={setTipo} options={TIPOS_FILTRO} />

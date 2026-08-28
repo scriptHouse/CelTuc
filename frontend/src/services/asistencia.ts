@@ -4,6 +4,7 @@ import type {
   AsignacionSucursal,
   AsignacionTurno,
   CatalogoInconsistencias,
+  ControlSucursal,
   EstadoInconsistencia,
   FeriadoAsistencia,
   FichadaDetalle,
@@ -306,6 +307,30 @@ export function actualizarAsignacionSucursal(
 
 export function eliminarAsignacionSucursal(id: number): Promise<void> {
   return api.del<void>(`/asistencia/sucursales-empleado/${id}/`, token())
+}
+
+// --- Control de asistencia por sucursal ---------------------------------------
+
+/** Todas las sucursales y si se les controla la asistencia. */
+export function listarControlSucursales(): Promise<ControlSucursal[]> {
+  return api.get<ControlSucursal[]>('/asistencia/control-sucursales/', token())
+}
+
+/**
+ * Prende o apaga el control de una sucursal.
+ *
+ * Apagarlo NO deja de registrar fichadas: lo que se apaga es el juicio (no se
+ * reportan ausencias, ni llegadas tarde, ni inconsistencias).
+ */
+export function actualizarControlSucursal(
+  sucursalId: number,
+  cambios: { controla?: boolean; motivo?: string },
+): Promise<ControlSucursal & { detalle: string }> {
+  return api.patch<ControlSucursal & { detalle: string }>(
+    `/asistencia/control-sucursales/${sucursalId}/`,
+    cambios,
+    token(),
+  )
 }
 
 // --- Calendario mensual -------------------------------------------------------
