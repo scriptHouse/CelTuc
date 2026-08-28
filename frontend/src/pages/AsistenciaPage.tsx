@@ -4,6 +4,7 @@ import {
   Activity,
   AlertTriangle,
   CalendarClock,
+  CalendarDays,
   CalendarRange,
   Fingerprint,
   Hourglass,
@@ -29,6 +30,7 @@ import { StatCard } from '@/components/ui/StatCard'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Badge } from '@/components/ui/Badge'
+import { CalendarioTab } from '@/components/asistencia/CalendarioTab'
 import { EmpleadoTab } from '@/components/asistencia/EmpleadoTab'
 import { FichadasTab } from '@/components/asistencia/FichadasTab'
 import { InconsistenciasTab } from '@/components/asistencia/InconsistenciasTab'
@@ -46,6 +48,7 @@ type Tab =
   | 'inconsistencias'
   | 'fichadas'
   | 'turnos'
+  | 'calendario'
   | 'licencias'
   | 'empleados'
   | 'identificadores'
@@ -57,7 +60,8 @@ const TABS: { id: Tab; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'inconsistencias', label: 'Inconsistencias', icon: AlertTriangle },
   { id: 'fichadas', label: 'Fichadas', icon: ListChecks },
   { id: 'turnos', label: 'Turnos', icon: CalendarClock },
-  { id: 'licencias', label: 'Calendario', icon: Palmtree },
+  { id: 'calendario', label: 'Calendario', icon: CalendarDays },
+  { id: 'licencias', label: 'Licencias', icon: Palmtree },
   { id: 'empleados', label: 'Empleados', icon: UserRoundSearch },
   { id: 'identificadores', label: 'Identificadores', icon: Fingerprint },
   { id: 'config', label: 'Configuración', icon: Settings2 },
@@ -111,6 +115,7 @@ export function AsistenciaPage() {
       {tab === 'inconsistencias' && <InconsistenciasTab />}
       {tab === 'fichadas' && <FichadasTab />}
       {tab === 'turnos' && <TurnosTab />}
+      {tab === 'calendario' && <CalendarioTab />}
       {tab === 'licencias' && <LicenciasTab />}
       {tab === 'empleados' && <EmpleadoTab />}
       {tab === 'identificadores' && <MapeoTab />}

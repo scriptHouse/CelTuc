@@ -15,6 +15,7 @@ urlpatterns = [
     path('fichadas/', views.FichadasListView.as_view(), name='fichadas'),
     path('fichadas/<int:pk>/', views.FichadaDetailView.as_view(), name='fichada'),
     path('resumen/', views.ResumenAsistenciaView.as_view(), name='resumen'),
+    path('calendario/', views.CalendarioAsistenciaView.as_view(), name='calendario'),
     path('numeros-sin-mapear/', views.NumerosSinMapearView.as_view(), name='numeros-sin-mapear'),
     path('dispositivos/', views.DispositivoListCreateView.as_view(), name='dispositivos'),
     path('dispositivos/<int:pk>/', views.DispositivoDetailView.as_view(), name='dispositivo'),

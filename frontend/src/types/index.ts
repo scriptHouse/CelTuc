@@ -1370,6 +1370,55 @@ export interface RespuestaInconsistencias {
   }
 }
 
+// --- Calendario mensual -------------------------------------------------------
+
+/**
+ * El semaforo de un dia.
+ *
+ * Son estados de bien/mal, no categorias. La interfaz los acompania SIEMPRE con
+ * un icono y una etiqueta: rojo y verde son justo el par que no distingue el
+ * daltonismo mas comun, asi que el color no puede ser lo unico que lleva el dato.
+ */
+export type EstadoDiaCalendario =
+  | 'verde'
+  | 'amarillo'
+  | 'rojo'
+  | 'sin_actividad'
+  | 'futuro'
+
+export interface DiaCalendario {
+  fecha: string
+  estado: EstadoDiaCalendario
+  /** Cuanta gente se esperaba: los que ficharon mas los ausentes. */
+  esperados: number
+  presentes: number
+  ausentes: number
+  /** Personas con al menos una inconsistencia sin justificar. */
+  con_novedad: number
+  licencias: number
+  inconsistencias: number
+  pendientes: number
+  minutos_trabajados: number
+  minutos_esperados: number
+  feriado: { nombre: string; tipo: TipoFeriado; tipo_display: string } | null
+  es_hoy: boolean
+}
+
+export interface RespuestaCalendario {
+  /** `2026-08`. */
+  mes: string
+  desde: string
+  hasta: string
+  dias: DiaCalendario[]
+  resumen: {
+    perfectos: number
+    con_novedades: number
+    sin_marcaciones: number
+    pendientes: number
+    minutos_trabajados: number
+  }
+}
+
 // --- Legajo de asistencia de un empleado --------------------------------------
 
 /** Los números de un conjunto de jornadas: sirven igual para un mes o un año. */

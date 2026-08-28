@@ -7,6 +7,7 @@ import {
   Hourglass,
   MapPinOff,
   CircleCheck,
+  CircleX,
   Coffee,
   CreditCard,
   Fingerprint,
@@ -26,6 +27,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type {
+  EstadoDiaCalendario,
   EstadoJornada,
   MetodoFichada,
   SeveridadInconsistencia,
@@ -266,4 +268,71 @@ export function etiquetaFecha(iso: string): string {
     month: 'long',
   })
   return texto.charAt(0).toUpperCase() + texto.slice(1)
+}
+
+/**
+ * El semáforo del calendario mensual.
+ *
+ * Cada estado trae SIEMPRE un ícono además del color. No es adorno: rojo y
+ * verde son justo el par que el daltonismo más común no distingue, así que el
+ * color no puede ser lo único que lleva el dato. La forma sí se ve siempre.
+ */
+export const ESTADO_DIA: Record<
+  EstadoDiaCalendario,
+  { label: string; ayuda: string; icon: LucideIcon; celda: string; punto: string }
+> = {
+  verde: {
+    label: 'Todo en orden',
+    ayuda: 'Fichó todo el mundo y no quedó nada por revisar.',
+    icon: CircleCheck,
+    celda:
+      'border-emerald-200 bg-emerald-50/70 hover:border-emerald-300 dark:border-emerald-900 dark:bg-emerald-950/40',
+    punto: 'bg-emerald-500',
+  },
+  amarillo: {
+    label: 'Con novedades',
+    ayuda: 'Hubo ausencias o inconsistencias sin justificar.',
+    icon: TriangleAlert,
+    celda:
+      'border-amber-200 bg-amber-50/70 hover:border-amber-300 dark:border-amber-900 dark:bg-amber-950/40',
+    punto: 'bg-amber-500',
+  },
+  rojo: {
+    label: 'Sin marcaciones',
+    ayuda: 'Se esperaba gente y no fichó nadie. Suele ser el reloj, no el equipo.',
+    icon: CircleX,
+    celda:
+      'border-red-200 bg-red-50/70 hover:border-red-300 dark:border-red-900 dark:bg-red-950/40',
+    punto: 'bg-red-500',
+  },
+  sin_actividad: {
+    label: 'Sin actividad',
+    ayuda: 'Nadie tenía que trabajar y nadie fichó.',
+    icon: CalendarOff,
+    celda: 'border-line bg-surface hover:border-line-strong',
+    punto: 'bg-ink-300',
+  },
+  futuro: {
+    label: 'Todavía no pasó',
+    ayuda: 'Es un día que no llegó: no hay nada que juzgar.',
+    icon: CalendarOff,
+    celda: 'border-dashed border-line bg-transparent',
+    punto: 'bg-ink-200',
+  },
+}
+
+export function estadoDiaDe(valor: string) {
+  return ESTADO_DIA[
+    (valor as EstadoDiaCalendario) in ESTADO_DIA
+      ? (valor as EstadoDiaCalendario)
+      : 'sin_actividad'
+  ]
+}
+
+/** `"2026-08-17"` → `"Lunes 17"`. Para el encabezado del día elegido. */
+export function diaYNumero(iso: string): string {
+  const [anio, mes, dia] = iso.split('-').map(Number)
+  const fecha = new Date(anio, mes - 1, dia)
+  const nombre = fecha.toLocaleDateString('es-AR', { weekday: 'long' })
+  return `${nombre.charAt(0).toUpperCase()}${nombre.slice(1)} ${dia}`
 }

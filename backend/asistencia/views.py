@@ -7,6 +7,7 @@ Dos APIs bien separadas:
   remota que administra el superadmin desde la interfaz.
 - **Gestión** (todo lo demás): SOLO superadministrador, como Auditoría.
 """
+import calendar
 from collections import Counter
 from datetime import date, datetime, timedelta
 
@@ -1476,3 +1477,174 @@ class LegajoEmpleadoView(_BaseGestion, APIView):
             'inconsistencias': inconsistencias,
             'licencias': LicenciaSerializer(licencias, many=True).data,
         })
+
+
+# --- Calendario mensual ------------------------------------------------------
+
+class EstadoDiaCalendario:
+    """Cómo se pinta un día del calendario.
+
+    Son estados de SEMÁFORO, no categorías: el color significa bien/mal. Por eso
+    la interfaz los acompaña siempre con un ícono y una etiqueta — rojo y verde
+    son justo el par que no distingue el daltonismo más común, y el color solo
+    no puede ser el que lleva el dato.
+    """
+
+    VERDE = 'verde'                  # todos presentes y sin novedades
+    AMARILLO = 'amarillo'            # hubo ausencias o inconsistencias
+    ROJO = 'rojo'                    # se esperaba gente y NADIE fichó
+    SIN_ACTIVIDAD = 'sin_actividad'  # nadie esperado y nadie fichó (franco, cerrado)
+    FUTURO = 'futuro'                # todavía no pasó: no se juzga
+
+
+class CalendarioAsistenciaView(_BaseGestion, APIView):
+    """El mes de un vistazo: un semáforo por día, y el detalle al tocarlo.
+
+    Reusa `ResumenAsistenciaView.analizar`, que es el único lugar donde se arma
+    el análisis de un período. Así el color de un día y lo que se ve al abrirlo
+    no pueden contradecirse: salen del mismo cálculo.
+
+    El detalle de un día NO viaja acá: lo pide la pantalla al resumen filtrando
+    por esa fecha. Traer el mes entero con sus tramos serían cientos de jornadas
+    para mostrar una.
+    """
+
+    def get(self, request):
+        mes = self._mes_pedido(request.query_params.get('mes'))
+        if mes is None:
+            return Response(
+                {'detail': 'Indicá el mes como aaaa-mm (por ejemplo 2026-08).'},
+                status=400,
+            )
+
+        primero = mes
+        ultimo = date(
+            mes.year, mes.month, calendar.monthrange(mes.year, mes.month)[1]
+        )
+
+        params = request.query_params.copy()
+        params['desde'] = primero.isoformat()
+        params['hasta'] = ultimo.isoformat()
+        desde, hasta, jornadas = ResumenAsistenciaView.analizar(params)
+
+        por_dia = {}
+        for jornada in jornadas:
+            por_dia.setdefault(jornada['fecha'], []).append(jornada)
+
+        # Los feriados se traen aparte a propósito: un feriado en el que no
+        # trabajó nadie no genera ninguna jornada —el resumen lo omite porque no
+        # es noticia— pero el calendario igual tiene que mostrarlo. Si no, un
+        # 25 de diciembre aparecería como un día en blanco sin explicación.
+        feriados = self._feriados_del_mes(primero, ultimo, _id(request.query_params, 'sucursal'))
+
+        hoy = timezone.localtime().date()
+        dias = []
+        dia = primero
+        while dia <= ultimo:
+            dias.append(self._armar_dia(
+                dia, por_dia.get(dia.isoformat(), []), hoy, feriados.get(dia)
+            ))
+            dia += timedelta(days=1)
+
+        return Response({
+            'mes': f'{mes.year:04d}-{mes.month:02d}',
+            'desde': primero.isoformat(),
+            'hasta': ultimo.isoformat(),
+            'dias': dias,
+            'resumen': {
+                'perfectos': sum(1 for d in dias if d['estado'] == EstadoDiaCalendario.VERDE),
+                'con_novedades': sum(
+                    1 for d in dias if d['estado'] == EstadoDiaCalendario.AMARILLO
+                ),
+                'sin_marcaciones': sum(
+                    1 for d in dias if d['estado'] == EstadoDiaCalendario.ROJO
+                ),
+                'pendientes': sum(d['pendientes'] for d in dias),
+                'minutos_trabajados': sum(d['minutos_trabajados'] for d in dias),
+            },
+        })
+
+    @staticmethod
+    def _mes_pedido(texto):
+        """`2026-08` → el día 1 de ese mes. Sin parámetro, el mes en curso."""
+        if not texto:
+            hoy = timezone.localtime().date()
+            return date(hoy.year, hoy.month, 1)
+        try:
+            anio, mes = str(texto).split('-')
+            return date(int(anio), int(mes), 1)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _feriados_del_mes(desde, hasta, sucursal_id=None):
+        """`{fecha: {...}}` con el feriado que aplica; el de la sucursal manda."""
+        elegidos = {}
+        for f in Feriado.objects.filter(fecha__gte=desde, fecha__lte=hasta):
+            if f.sucursal_id is not None and f.sucursal_id != sucursal_id:
+                continue
+            previo = elegidos.get(f.fecha)
+            # Uno de la sucursal le gana al general, igual que en el resumen.
+            if previo is None or f.sucursal_id is not None:
+                elegidos[f.fecha] = {
+                    'nombre': f.nombre,
+                    'tipo': f.tipo,
+                    'tipo_display': f.get_tipo_display(),
+                }
+        return elegidos
+
+    @staticmethod
+    def _armar_dia(dia, jornadas, hoy, feriado_del_dia=None):
+        """El semáforo de un día y los números que lo explican."""
+        # Una jornada «cuenta» si esa persona fichó o si se la esperaba. Las que
+        # no aportan (licencia, feriado sin trabajo, franco) quedan afuera del
+        # semáforo pero se informan igual.
+        presentes = [j for j in jornadas if j['fichadas'] > 0]
+        ausentes = [j for j in jornadas if j['estado'] == 'ausente']
+        licencias = [j for j in jornadas if j['estado'] == 'licencia']
+
+        # Una novedad es una inconsistencia que nadie resolvió todavía. Las ya
+        # justificadas se muestran, pero no vuelven amarillo un día: para eso
+        # sirve justificarlas.
+        #
+        # Se cuentan solo entre los PRESENTES: una ausencia ya genera su propia
+        # inconsistencia, así que sin este filtro la misma persona sumaría en
+        # `ausentes` y en `con_novedad` a la vez y la barra del calendario
+        # pasaría del 100 %. Con esto vale siempre
+        # `esperados = (presentes - con_novedad) + con_novedad + ausentes`.
+        con_novedad = [
+            j for j in presentes
+            if any(i['estado'] != 'justificada' for i in j['inconsistencias'])
+        ]
+
+        esperados = len(presentes) + len(ausentes)
+        if dia > hoy:
+            estado = EstadoDiaCalendario.FUTURO
+        elif esperados == 0:
+            estado = EstadoDiaCalendario.SIN_ACTIVIDAD
+        elif not presentes:
+            # Se esperaba gente y no ficho nadie: es lo mas grave que puede
+            # decir un dia. Suele ser el reloj caido, no el equipo ausente.
+            estado = EstadoDiaCalendario.ROJO
+        elif ausentes or con_novedad:
+            estado = EstadoDiaCalendario.AMARILLO
+        else:
+            estado = EstadoDiaCalendario.VERDE
+
+        feriado = next((j['feriado'] for j in jornadas if j['feriado']), feriado_del_dia)
+
+        return {
+            'fecha': dia.isoformat(),
+            'estado': estado,
+            'esperados': esperados,
+            'presentes': len(presentes),
+            'ausentes': len(ausentes),
+            'con_novedad': len(con_novedad),
+            'licencias': len(licencias),
+            'inconsistencias': sum(len(j['inconsistencias']) for j in jornadas),
+            'pendientes': sum(j['pendientes'] for j in jornadas),
+            'minutos_trabajados': sum(j['minutos_trabajados'] for j in jornadas),
+            'minutos_esperados': sum(j['minutos_esperados'] for j in jornadas),
+            'feriado': feriado,
+            'es_hoy': dia == hoy,
+        }

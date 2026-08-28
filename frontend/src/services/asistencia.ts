@@ -17,6 +17,7 @@ import type {
   RelojAsistencia,
   RelojAsistenciaInput,
   ReglaInconsistencia,
+  RespuestaCalendario,
   RespuestaInconsistencias,
   RespuestaResumenAsistencia,
   SeveridadInconsistencia,
@@ -305,6 +306,28 @@ export function actualizarAsignacionSucursal(
 
 export function eliminarAsignacionSucursal(id: number): Promise<void> {
   return api.del<void>(`/asistencia/sucursales-empleado/${id}/`, token())
+}
+
+// --- Calendario mensual -------------------------------------------------------
+
+export interface FiltrosCalendario {
+  /** `2026-08`. Sin esto, el mes en curso. */
+  mes?: string
+  sucursal?: number | ''
+  empleado?: number | ''
+}
+
+/**
+ * El semaforo del mes, un dia por fila.
+ *
+ * El detalle de un dia NO viene aca: lo pide la pantalla al resumen filtrando
+ * por esa fecha. Traer el mes entero con sus tramos serian cientos de jornadas
+ * para mostrar una.
+ */
+export function calendarioAsistencia(
+  filtros: FiltrosCalendario = {},
+): Promise<RespuestaCalendario> {
+  return api.get<RespuestaCalendario>(`/asistencia/calendario/${query(filtros)}`, token())
 }
 
 // --- Legajo de un empleado ---------------------------------------------------
