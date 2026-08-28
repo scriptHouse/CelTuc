@@ -11,6 +11,8 @@ export interface UsuarioCreateInput {
   email: string
   password: string
   is_staff: boolean
+  /** Rol que define qué módulos ve la cuenta (null/omitido = sin acceso). */
+  rol?: number | null
   /** Si viene, crea también el empleado vinculado a esta cuenta. */
   empleado?: { nombre: string; apellido?: string } | null
 }
@@ -20,6 +22,8 @@ export interface UsuarioUpdateInput {
   email?: string
   is_active?: boolean
   is_staff?: boolean
+  /** Rol que define qué módulos ve la cuenta (null = quitárselo). Omitido = no cambia. */
+  rol?: number | null
   /** Vacío/omitido = no cambia la contraseña. */
   password?: string
 }

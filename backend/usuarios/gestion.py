@@ -11,7 +11,7 @@ from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Usuario, username_validator
+from .models import Rol, Usuario, username_validator
 from .permissions import EsAdministrador
 
 
@@ -21,6 +21,7 @@ class UsuarioAdminSerializer(serializers.ModelSerializer):
     """Vista de una cuenta para el panel de administración del front."""
 
     empleado = serializers.SerializerMethodField()
+    rol = serializers.SerializerMethodField()
     en_linea = serializers.BooleanField(read_only=True)
     es_administrador = serializers.BooleanField(read_only=True)
     es_superadministrador = serializers.BooleanField(read_only=True)
@@ -30,9 +31,15 @@ class UsuarioAdminSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'username', 'email',
             'is_active', 'is_staff', 'is_superuser', 'date_joined', 'empleado',
-            'last_login', 'ultima_actividad', 'en_linea',
+            'rol', 'last_login', 'ultima_actividad', 'en_linea',
             'es_administrador', 'es_superadministrador',
         )
+
+    def get_rol(self, obj):
+        # Mismo formato breve que usa el modulo de empleados (UsuarioBreveSerializer).
+        if not obj.rol_id:
+            return None
+        return {'id': obj.rol_id, 'nombre': obj.rol.nombre, 'es_admin': obj.rol.es_admin}
 
     def get_empleado(self, obj):
         # Relación inversa OneToOne: puede no existir (cuenta sin empleado).
@@ -64,6 +71,10 @@ class UsuarioCreateSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
     is_staff = serializers.BooleanField(default=False)
+    # Rol que define a que modulos entra la cuenta (opcional: sin rol = sin acceso).
+    rol = serializers.PrimaryKeyRelatedField(
+        queryset=Rol.objects.all(), required=False, allow_null=True,
+    )
     empleado = _EmpleadoMiniSerializer(required=False, allow_null=True)
 
     def validate_username(self, value):
@@ -90,6 +101,7 @@ class UsuarioCreateSerializer(serializers.Serializer):
             email=validated_data['email'],
             is_staff=validated_data.get('is_staff', False),
             is_superuser=False,
+            rol=validated_data.get('rol'),
         )
         user.set_password(validated_data['password'])
         user.save()
@@ -111,6 +123,9 @@ class UsuarioUpdateSerializer(serializers.Serializer):
     email = serializers.EmailField(required=False)
     is_active = serializers.BooleanField(required=False)
     is_staff = serializers.BooleanField(required=False)
+    rol = serializers.PrimaryKeyRelatedField(
+        queryset=Rol.objects.all(), required=False, allow_null=True,
+    )
     password = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     def validate_username(self, value):
@@ -129,6 +144,8 @@ class UsuarioUpdateSerializer(serializers.Serializer):
         for field in ('username', 'email', 'is_active', 'is_staff'):
             if field in validated_data:
                 setattr(instance, field, validated_data[field])
+        if 'rol' in validated_data:
+            instance.rol = validated_data['rol']
         if validated_data.get('password'):
             instance.set_password(validated_data['password'])
         instance.save()
@@ -142,7 +159,7 @@ class UsuarioListCreateView(APIView):
 
     def get(self, request):
         # `objects` ya excluye las cuentas borradas logicamente (ver UsuarioManager).
-        usuarios = Usuario.objects.select_related('empleado').order_by('username')
+        usuarios = Usuario.objects.select_related('empleado', 'rol').order_by('username')
         return Response(UsuarioAdminSerializer(usuarios, many=True).data)
 
     def post(self, request):
@@ -177,6 +194,13 @@ class UsuarioDetailView(APIView):
             if request.data.get('is_staff') is False:
                 return Response(
                     {'detail': 'No podés quitarte tu propio acceso de administrador.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            # Mismo espíritu que lo anterior: cambiarse el propio rol puede dejarlo
+            # sin administración (si le viene del rol) o sin módulos, por accidente.
+            if 'rol' in request.data:
+                return Response(
+                    {'detail': 'No podés cambiar tu propio rol.'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
         serializer = UsuarioUpdateSerializer(user, data=request.data, partial=True)

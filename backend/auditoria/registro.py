@@ -212,7 +212,9 @@ def _procesar_guardado(sender, instance, created):
     clave = (sender._meta.label, instance.pk)
     if created:
         ctx.creados.add(clave)
-        _escribir('crear', usuario, ctx.request, instancia=instance)
+        registro = _escribir('crear', usuario, ctx.request, instancia=instance)
+        if registro is not None:
+            ctx.registros_creacion[clave] = registro.pk
         return
     if clave in ctx.creados:
         return  # retoque posterior a la creacion, en esta misma peticion
@@ -264,7 +266,17 @@ def _m2m_permisos(sender, instance, action, reverse, **kwargs):
             return
         clave = (instance._meta.label, instance.pk)
         if clave in ctx.creados:
-            return  # el alta del rol ya quedo registrada con su foto
+            # El alta ya tiene su registro "crear": se lo completa con los
+            # permisos con los que nace el rol (se asignan despues del INSERT).
+            if action in ('post_add', 'post_remove', 'post_clear'):
+                registro_id = ctx.registros_creacion.get(clave)
+                despues = _nombres_permisos(instance)
+                if registro_id is not None and despues:
+                    from .models import RegistroAuditoria
+                    RegistroAuditoria.objects.filter(pk=registro_id).update(
+                        cambios={'permisos': {'antes': [], 'despues': despues}},
+                    )
+            return
         if action in ('pre_add', 'pre_remove', 'pre_clear'):
             if clave not in ctx.m2m_antes:
                 ctx.m2m_antes[clave] = _nombres_permisos(instance)

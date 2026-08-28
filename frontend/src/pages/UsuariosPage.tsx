@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -27,6 +28,7 @@ import {
   eliminarUsuario,
   listarUsuarios,
 } from '@/services/usuarios'
+import { listarRoles } from '@/services/roles'
 import { useAuth } from '@/store/auth'
 import { ApiError } from '@/lib/api'
 import { fecha, fechaHora } from '@/lib/format'
@@ -38,6 +40,7 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
+import { Select } from '@/components/ui/Select'
 import { Modal } from '@/components/ui/Modal'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -55,6 +58,8 @@ const schema = z
     password: z.string(),
     isStaff: z.boolean(),
     activo: z.boolean(),
+    /** Id del rol como string ('' = sin rol), para el Select. */
+    rolId: z.string(),
     crearEmpleado: z.boolean(),
     empNombre: z.string().trim(),
     empApellido: z.string().trim(),
@@ -72,6 +77,7 @@ function esAdmin(u: UsuarioAdmin): boolean {
 
 export function UsuariosPage() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const toast = useToast()
   const confirm = useConfirm()
   const yo = useAuth((s) => s.usuario)
@@ -150,6 +156,7 @@ export function UsuariosPage() {
   }
 
   async function handleGuardar(values: FormData) {
+    const rol = values.rolId ? Number(values.rolId) : null
     try {
       if (editando) {
         await actualizar.mutateAsync({
@@ -159,6 +166,8 @@ export function UsuariosPage() {
             email: values.email,
             is_active: values.activo,
             is_staff: values.isStaff,
+            // El backend no deja tocarse el propio rol: no se manda ni el actual.
+            ...(editando.id === yo?.id ? {} : { rol }),
             password: values.password || undefined,
           },
         })
@@ -168,6 +177,7 @@ export function UsuariosPage() {
           email: values.email,
           password: values.password,
           is_staff: values.isStaff,
+          rol,
           empleado: values.crearEmpleado
             ? { nombre: values.empNombre, apellido: values.empApellido }
             : null,
@@ -188,10 +198,16 @@ export function UsuariosPage() {
         subtitle="Cuentas que pueden iniciar sesión en el sistema."
         className="ct-rise"
         actions={
-          <Button onClick={abrirNuevo}>
-            <Plus className="h-4 w-4" />
-            Nuevo usuario
-          </Button>
+          <>
+            <Button variant="outline" onClick={() => navigate('/usuarios/roles')}>
+              <ShieldCheck className="h-4 w-4" />
+              Roles y permisos
+            </Button>
+            <Button onClick={abrirNuevo}>
+              <Plus className="h-4 w-4" />
+              Nuevo usuario
+            </Button>
+          </>
         }
       />
 
@@ -260,6 +276,13 @@ export function UsuariosPage() {
                   ) : (
                     <span className="text-ink-400">Sin empleado vinculado</span>
                   )}
+                  {/* Rol solo en cuentas comunes: a los admins no los limita. */}
+                  {!esAdmin(u) &&
+                    (u.rol ? (
+                      <Badge tone="outline">{u.rol.nombre}</Badge>
+                    ) : (
+                      <Badge tone="outline" className="text-ink-400">Sin rol</Badge>
+                    ))}
                   {!u.is_active && <Badge tone="soft">Inactivo</Badge>}
                 </div>
 
@@ -323,6 +346,13 @@ function UsuarioFormModal({
   const esEdicion = Boolean(usuario)
   const [showPassword, setShowPassword] = useState(false)
 
+  // Catálogo de roles para el selector (define qué módulos ve la cuenta).
+  const { data: roles = [] } = useQuery({
+    queryKey: ['roles'],
+    queryFn: listarRoles,
+    enabled: open,
+  })
+
   const {
     register,
     handleSubmit,
@@ -339,6 +369,7 @@ function UsuarioFormModal({
       password: '',
       isStaff: false,
       activo: true,
+      rolId: '',
       crearEmpleado: false,
       empNombre: '',
       empApellido: '',
@@ -354,6 +385,7 @@ function UsuarioFormModal({
       password: '',
       isStaff: usuario?.is_staff ?? false,
       activo: usuario?.is_active ?? true,
+      rolId: usuario?.rol ? String(usuario.rol.id) : '',
       crearEmpleado: false,
       empNombre: '',
       empApellido: '',
@@ -362,6 +394,7 @@ function UsuarioFormModal({
 
   const isStaff = watch('isStaff')
   const activo = watch('activo')
+  const rolId = watch('rolId')
   const crearEmpleado = watch('crearEmpleado')
 
   const internalSubmit = (values: FormData) => {
@@ -434,7 +467,30 @@ function UsuarioFormModal({
         </div>
 
         {/* Permisos */}
-        <div className="space-y-2 rounded-2xl border border-line bg-canvas/40 p-4">
+        <div className="space-y-3 rounded-2xl border border-line bg-canvas/40 p-4">
+          <div>
+            <Select
+              label="Rol (módulos que ve la cuenta)"
+              placeholder="Sin rol — sin acceso a módulos"
+              searchable
+              searchPlaceholder="Buscar rol"
+              disabled={esYoMismo}
+              value={rolId}
+              onChange={(v) => setValue('rolId', v)}
+              options={[
+                { value: '', label: 'Sin rol — sin acceso a módulos' },
+                ...roles.map((r) => ({
+                  value: String(r.id),
+                  label: r.es_admin ? `${r.nombre} (admin: ve todo)` : r.nombre,
+                })),
+              ]}
+            />
+            {isStaff && !esYoMismo && (
+              <p className="mt-1.5 text-xs text-ink-400">
+                Esta cuenta administra: ve todos los módulos, el rol no la limita.
+              </p>
+            )}
+          </div>
           <Check
             label="Puede administrar (gestiona empleados y usuarios)"
             checked={isStaff}
@@ -450,7 +506,9 @@ function UsuarioFormModal({
             />
           )}
           {esYoMismo && (
-            <p className="text-xs text-ink-400">No podés cambiar tus propios permisos ni desactivarte.</p>
+            <p className="text-xs text-ink-400">
+              No podés cambiar tu propio rol ni tus permisos, ni desactivarte.
+            </p>
           )}
         </div>
 

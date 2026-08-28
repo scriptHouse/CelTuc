@@ -9,7 +9,7 @@ from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Permiso, Rol
+from .models import Permiso, Rol, Usuario
 from .permissions import EsAdministrador
 
 
@@ -28,17 +28,31 @@ class RolSerializer(serializers.ModelSerializer):
         slug_field='codigo', queryset=Permiso.objects.all(), many=True, required=False,
     )
     cantidad_usuarios = serializers.SerializerMethodField()
+    # Rastro visible en el editor: quien creo el rol y quien lo toco por ultima
+    # vez (el historial completo, cambio por cambio, vive en /auditoria).
+    creado_por = serializers.SerializerMethodField()
+    actualizado_por = serializers.SerializerMethodField()
 
     class Meta:
         model = Rol
         fields = (
             'id', 'nombre', 'descripcion', 'es_admin', 'es_sistema',
-            'permisos', 'cantidad_usuarios', 'creado',
+            'permisos', 'cantidad_usuarios',
+            'creado', 'creado_por', 'actualizado', 'actualizado_por',
         )
-        read_only_fields = ('id', 'es_sistema', 'cantidad_usuarios', 'creado')
+        read_only_fields = (
+            'id', 'es_sistema', 'cantidad_usuarios',
+            'creado', 'creado_por', 'actualizado', 'actualizado_por',
+        )
 
     def get_cantidad_usuarios(self, obj):
         return obj.usuarios.count()
+
+    def get_creado_por(self, obj):
+        return obj.creado_por.username if obj.creado_por_id else None
+
+    def get_actualizado_por(self, obj):
+        return obj.actualizado_por.username if obj.actualizado_por_id else None
 
     def validate_nombre(self, value):
         value = value.strip()
@@ -67,7 +81,11 @@ class RolListCreateView(APIView):
     permission_classes = [EsAdministrador]
 
     def get(self, request):
-        roles = Rol.objects.prefetch_related('permisos').all()
+        roles = (
+            Rol.objects.select_related('creado_por', 'actualizado_por')
+            .prefetch_related('permisos')
+            .all()
+        )
         return Response(RolSerializer(roles, many=True).data)
 
     def post(self, request):
@@ -80,7 +98,9 @@ class RolListCreateView(APIView):
                 {'detail': 'Solo un superadministrador puede crear roles de administrador.'},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        serializer.save()
+        # `creado_por`/`actualizado_por` dejan rastro de quien armo el rol (el
+        # detalle de cada cambio queda ademas en la auditoria, via señales).
+        serializer.save(creado_por=request.user, actualizado_por=request.user)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
@@ -97,7 +117,7 @@ class RolDetailView(APIView):
             )
         serializer = RolSerializer(rol, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        serializer.save(actualizado_por=request.user)
         return Response(serializer.data)
 
     def delete(self, request, pk):
@@ -112,8 +132,12 @@ class RolDetailView(APIView):
                 {'detail': 'Solo un superadministrador puede eliminar roles de administrador.'},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        # Las cuentas con este rol quedan sin rol (Usuario.rol = SET_NULL).
-        rol.delete()
+        # Las cuentas quedan sin rol (= sin acceso a modulos). Hay que hacerlo a
+        # mano: el borrado es logico, asi que el SET_NULL del FK (que solo actua
+        # en borrados fisicos) no corre, y el acceso `usuario.rol` resuelve con
+        # `_base_manager`, que si ve filas borradas logicamente.
+        Usuario.todos.filter(rol=rol).update(rol=None)
+        rol.delete(usuario=request.user)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

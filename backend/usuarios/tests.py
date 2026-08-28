@@ -203,6 +203,44 @@ class GestionUsuariosTests(TestCase):
         emp.refresh_from_db()
         self.assertIsNone(emp.usuario)
 
+    def test_crear_usuario_con_rol(self):
+        rol = Rol.objects.get(nombre='Empleado')
+        r = self.client.post(
+            reverse('usuarios_gestion:list'),
+            {'username': 'conrol', 'email': 'cr@celtuc.ar', 'password': 'clave-123', 'rol': rol.id},
+            format='json',
+        )
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.data['rol']['nombre'], 'Empleado')
+        self.assertEqual(Usuario.objects.get(username='conrol').rol_id, rol.id)
+
+    def test_asignar_y_quitar_rol(self):
+        rol = Rol.objects.get(nombre='Empleado')
+        u = Usuario.objects.create_user(email='v@celtuc.ar', username='vende', password='x')
+        r = self.client.patch(
+            reverse('usuarios_gestion:detail', args=[u.id]), {'rol': rol.id}, format='json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['rol']['nombre'], 'Empleado')
+        u.refresh_from_db()
+        self.assertEqual(u.rol_id, rol.id)
+        r = self.client.patch(
+            reverse('usuarios_gestion:detail', args=[u.id]), {'rol': None}, format='json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertIsNone(r.data['rol'])
+        u.refresh_from_db()
+        self.assertIsNone(u.rol_id)
+
+    def test_no_puedo_cambiar_mi_propio_rol(self):
+        rol = Rol.objects.get(nombre='Empleado')
+        r = self.client.patch(
+            reverse('usuarios_gestion:detail', args=[self.admin.id]), {'rol': rol.id}, format='json',
+        )
+        self.assertEqual(r.status_code, 400)
+        self.admin.refresh_from_db()
+        self.assertIsNone(self.admin.rol_id)
+
 
 class RolesModelTests(TestCase):
     """Helpers de autorizacion en el modelo Usuario (es_administrador/permisos)."""
@@ -314,6 +352,31 @@ class RolesAPITests(TestCase):
             format='json',
         )
         self.assertEqual(r.status_code, 400)
+
+    def test_rol_registra_quien_lo_crea_y_edita(self):
+        r = self.client.post(
+            reverse('roles:list'), {'nombre': 'Cajero', 'permisos': []}, format='json',
+        )
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.data['creado_por'], 'admin')
+        self.assertEqual(r.data['actualizado_por'], 'admin')
+        rol = Rol.objects.get(pk=r.data['id'])
+        self.assertEqual(rol.creado_por, self.admin)
+        self.assertEqual(rol.actualizado_por, self.admin)
+
+    def test_eliminar_rol_desvincula_a_las_cuentas(self):
+        # El borrado es logico: sin la desvinculacion explicita, las cuentas
+        # seguirian viendo los modulos del rol borrado.
+        rol = Rol.objects.create(nombre='Cajero')
+        rol.permisos.set(Permiso.objects.filter(codigo='ver_caja'))
+        u = Usuario.objects.create_user(
+            email='caja1@celtuc.ar', username='caja1', password='x', rol=rol,
+        )
+        r = self.client.delete(reverse('roles:detail', args=[rol.id]))
+        self.assertEqual(r.status_code, 204)
+        u.refresh_from_db()
+        self.assertIsNone(u.rol_id)
+        self.assertEqual(u.codigos_permisos(), [])
 
 
 class JerarquiaSuperadminTests(TestCase):

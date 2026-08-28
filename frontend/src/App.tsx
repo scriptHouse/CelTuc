@@ -18,6 +18,7 @@ import { ProductosPage } from '@/pages/ProductosPage'
 import { FichaEquipoPage } from '@/pages/FichaEquipoPage'
 import { DocumentosPage } from '@/pages/DocumentosPage'
 import { UsuariosPage } from '@/pages/UsuariosPage'
+import { RolesPage } from '@/pages/RolesPage'
 import { AuditoriaPage } from '@/pages/AuditoriaPage'
 import { AsistenciaPage } from '@/pages/AsistenciaPage'
 
@@ -47,6 +48,7 @@ const router = createBrowserRouter([
       { path: '/equipos', element: <RequirePermiso permiso="ver_equipos"><FichaEquipoPage /></RequirePermiso> },
       { path: '/documentos', element: <RequirePermiso><DocumentosPage /></RequirePermiso> },
       { path: '/usuarios', element: <RequirePermiso soloAdmin><UsuariosPage /></RequirePermiso> },
+      { path: '/usuarios/roles', element: <RequirePermiso soloAdmin><RolesPage /></RequirePermiso> },
       { path: '/auditoria', element: <RequirePermiso soloSuper><AuditoriaPage /></RequirePermiso> },
       { path: '/asistencia', element: <RequirePermiso soloSuper><AsistenciaPage /></RequirePermiso> },
       { path: '*', element: <Navigate to="/" replace /> },

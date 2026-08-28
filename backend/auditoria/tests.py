@@ -153,6 +153,20 @@ class EscrituraAuditoriaTests(TestCase):
         self.assertEqual(reg.cambios['permisos']['antes'], [])
         self.assertEqual(len(reg.cambios['permisos']['despues']), 1)
 
+    def test_crear_rol_registra_sus_permisos_iniciales(self):
+        r = self.client.post(
+            reverse('roles:list'),
+            {'nombre': 'Cajero', 'permisos': ['ver_panel', 'ver_caja']}, format='json',
+        )
+        self.assertEqual(r.status_code, 201)
+        reg = RegistroAuditoria.objects.get(accion='crear', modelo='rol')
+        self.assertEqual(reg.cambios['permisos']['antes'], [])
+        self.assertEqual(len(reg.cambios['permisos']['despues']), 2)
+        # La asignacion M2M posterior al INSERT no genera "ediciones" fantasma.
+        self.assertEqual(
+            RegistroAuditoria.objects.filter(accion='editar', modelo='rol').count(), 0,
+        )
+
     def test_filtros_por_accion_y_usuario(self):
         self.client.post(
             reverse('usuarios_gestion:list'),

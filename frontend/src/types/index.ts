@@ -54,7 +54,7 @@ export interface Permiso {
   orden: number
 }
 
-/** Rol completo, tal como lo administra el panel de Empleados. */
+/** Rol completo, tal como lo administran las pantallas de Roles y Empleados. */
 export interface Rol {
   id: number
   nombre: string
@@ -65,6 +65,10 @@ export interface Rol {
   permisos: string[]
   cantidad_usuarios: number
   creado: string
+  /** Rastro de auditoría: quién lo creó y quién lo editó por última vez. */
+  creado_por: string | null
+  actualizado: string
+  actualizado_por: string | null
 }
 
 // ===== Inventario =====
@@ -429,6 +433,8 @@ export interface UsuarioAdmin {
   es_superadministrador?: boolean
   date_joined: string
   empleado: EmpleadoBreve | null
+  /** Rol asignado a la cuenta (define qué módulos ve), o null si no tiene. */
+  rol: RolBreve | null
   /** Auditoría de presencia. */
   last_login: string | null
   ultima_actividad: string | null

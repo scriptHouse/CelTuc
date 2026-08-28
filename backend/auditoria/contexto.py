@@ -20,6 +20,10 @@ class ContextoPeticion:
         self.m2m_antes = {}
         # Registro ya emitido por un cambio M2M en esta peticion: {(label, pk): id}.
         self.registros_m2m = {}
+        # Registro "crear" emitido en esta peticion: {(label, pk): id}. Permite
+        # completar el alta con datos que llegan despues (ej: los permisos M2M
+        # de un rol recien creado, que se asignan tras el INSERT).
+        self.registros_creacion = {}
 
 
 def activar(request):
