@@ -91,10 +91,11 @@ export function DocumentosPage() {
     setEstados((s) => ({ ...s, [active.id]: { ...(s[active.id] as object), ...p } }))
 
   /* --- Cupón correlativo -------------------------------------------------
-   * Para las plantillas que lo declaran (`cuponAuto`, hoy Garantía/Reparación)
-   * el N° de cupón lo asigna el sistema: el backend calcula el próximo mirando
-   * el historial (arranca en 0 y nunca repite) y acá se precarga cuando el
-   * campo está vacío. El campo sigue editable como válvula de escape. */
+   * Para las plantillas que lo declaran (`cuponAuto`: todas las que tienen
+   * CUPON N°) el N° lo asigna el sistema: el backend calcula el próximo mirando
+   * el historial DE ESE TIPO (cada documento lleva su propio contador, arranca
+   * en 0 y nunca repite) y acá se precarga cuando el campo está vacío. El campo
+   * sigue editable como válvula de escape. */
   const cuponAuto = active.cuponAuto as string | undefined
   const cuponActual = cuponAuto
     ? String((datos as Record<string, unknown>)[cuponAuto] ?? '')
