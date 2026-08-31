@@ -57,6 +57,18 @@ function leerSucursal(sucursalUsuario?: string | null): string {
 }
 
 /** "nombre, DNI y teléfono": qué datos del cliente completa esta plantilla. */
+/** Borradores de los papeles, por tipo, para sobrevivir a una recarga. */
+const CLAVE_BORRADORES = 'celtuc-documentos-borradores'
+
+function leerBorradores(): Record<string, Record<string, unknown>> | null {
+  try {
+    const crudo = sessionStorage.getItem(CLAVE_BORRADORES)
+    return crudo ? JSON.parse(crudo) : null
+  } catch {
+    return null
+  }
+}
+
 function listaDeCampos(campos: { documento?: string; telefono?: string; email?: string }): string {
   const partes = ['nombre']
   if (campos.documento) partes.push('DNI')
@@ -75,10 +87,27 @@ export function DocumentosPage() {
   // Tipo con el que llega prefiltrado el Historial (desde "ver anteriores").
   const [historialTipo, setHistorialTipo] = useState('')
   const [activeId, setActiveId] = useState(DOC_MODULES[0].id)
-  // Estado por documento: se preserva al cambiar de pestaña dentro de la sesión.
-  const [estados, setEstados] = useState<Record<string, unknown>>(() =>
-    Object.fromEntries(DOC_MODULES.map((m) => [m.id, m.crearVacio()])),
-  )
+  // Estado por documento: se preserva al cambiar de pestaña y sobrevive a una
+  // recarga de la página (sessionStorage): si la pestaña se recarga —a mano o
+  // sola, tras un deploy que dejó chunks viejos— el papel a medio llenar vuelve.
+  const [estados, setEstados] = useState<Record<string, unknown>>(() => {
+    const guardados = leerBorradores()
+    return Object.fromEntries(
+      DOC_MODULES.map((m) => {
+        const previo = guardados?.[m.id]
+        // Merge sobre el vacío: si la plantilla sumó campos, ninguno queda sin clave.
+        const base = m.crearVacio() as Record<string, unknown>
+        return [m.id, previo && typeof previo === 'object' ? { ...base, ...previo } : base]
+      }),
+    )
+  })
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(CLAVE_BORRADORES, JSON.stringify(estados))
+    } catch {
+      /* storage lleno o bloqueado: el borrador solo vive en memoria */
+    }
+  }, [estados])
   const [busy, setBusy] = useState<'pdf' | 'xlsx' | 'pos80' | null>(null)
   const usuario = useAuth((s) => s.usuario)
   // Sucursal del encabezado; la dirección impresa se deriva de ella.
