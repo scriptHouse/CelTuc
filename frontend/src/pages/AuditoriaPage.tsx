@@ -5,6 +5,7 @@ import {
   Activity,
   CalendarDays,
   ChevronDown,
+  Download,
   History,
   Loader2,
   LogIn,
@@ -31,6 +32,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { ExportarTablaModal, type GestorExport } from '@/components/exportar/ExportarTablaModal'
 
 const LIMITE = 40
 
@@ -143,6 +145,56 @@ function valorLegible(valor: unknown): string {
   return String(valor)
 }
 
+/** Qué se puede exportar del historial (botón «Exportar»: lo cargado en pantalla). */
+const GESTOR_EXPORT_AUDITORIA: GestorExport<RegistroAuditoria> = {
+  id: 'auditoria',
+  titulo: 'Auditoría',
+  nombreArchivo: 'auditoria-{fecha}',
+  columnas: [
+    { id: 'creado', label: 'Fecha y hora', corto: 'Fecha', tipo: 'fechahora', peso: 17, valor: (r) => r.creado },
+    {
+      id: 'usuario',
+      label: 'Usuario',
+      tipo: 'texto',
+      peso: 14,
+      valor: (r) => r.usuario_username || r.usuario?.username || 'sistema',
+    },
+    { id: 'accion', label: 'Acción', tipo: 'texto', peso: 12, valor: (r) => r.accion_display },
+    { id: 'modulo', label: 'Módulo', tipo: 'texto', peso: 13, valor: (r) => r.modulo },
+    { id: 'modelo', label: 'Qué se tocó', corto: 'Qué', tipo: 'texto', peso: 13, valor: (r) => r.modelo },
+    { id: 'objeto', label: 'Objeto', tipo: 'texto', peso: 30, valor: (r) => r.objeto },
+    {
+      id: 'cambios',
+      label: 'Cambios',
+      tipo: 'texto',
+      peso: 40,
+      opcional: true,
+      ayuda: 'Campo por campo: antes → después.',
+      valor: (r) =>
+        Object.entries(r.cambios ?? {})
+          .map(([campo, c]) => `${campo}: ${valorLegible(c.antes)} → ${valorLegible(c.despues)}`)
+          .join(' · '),
+    },
+    {
+      id: 'via',
+      label: 'Vía (impersonación)',
+      corto: 'Vía',
+      tipo: 'texto',
+      peso: 12,
+      opcional: true,
+      ayuda: 'El superadmin real detrás, si la acción se hizo impersonando.',
+      valor: (r) => r.actor_username || '',
+    },
+    { id: 'ip', label: 'IP', tipo: 'texto', peso: 13, opcional: true, valor: (r) => r.ip ?? '' },
+    { id: 'id', label: 'ID interno', corto: 'ID', tipo: 'entero', peso: 8, opcional: true, valor: (r) => r.id },
+  ],
+  grupos: [
+    { id: 'modulo', label: 'Módulo', valor: (r) => r.modulo },
+    { id: 'accion', label: 'Acción', valor: (r) => r.accion_display },
+    { id: 'usuario', label: 'Usuario', valor: (r) => r.usuario_username || r.usuario?.username || 'sistema' },
+  ],
+}
+
 export function AuditoriaPage() {
   // Búsqueda con un pequeño debounce para no consultar en cada tecla.
   const [busqueda, setBusqueda] = useState('')
@@ -156,6 +208,7 @@ export function AuditoriaPage() {
   const [accion, setAccion] = useState('')
   const [app, setApp] = useState('')
   const [rango, setRango] = useState<Rango>('7d')
+  const [exportarAbierto, setExportarAbierto] = useState(false)
 
   const { data, isLoading, isFetching, isFetchingNextPage, fetchNextPage, hasNextPage } =
     useInfiniteQuery({
@@ -194,6 +247,20 @@ export function AuditoriaPage() {
 
   const hayFiltros = Boolean(q || usuario || accion || app || rango !== 'todo')
 
+  // Cómo describir en el archivo exportado lo que se estaba viendo.
+  const contextoExport = useMemo(() => {
+    const partes: string[] = []
+    if (q) partes.push(`Búsqueda: «${q}»`)
+    if (usuario) partes.push(`Usuario: @${usuario}`)
+    if (accion) partes.push(ACCIONES.find((a) => a.value === accion)?.label ?? accion)
+    if (app) partes.push(`Módulo: ${MODULOS.find((m) => m.value === app)?.label ?? app}`)
+    partes.push(`Rango: ${RANGOS.find((r) => r.value === rango)?.label ?? rango}`)
+    if (primera && registros.length < primera.total) {
+      partes.push(`Las ${num(registros.length)} más recientes de ${num(primera.total)}`)
+    }
+    return partes
+  }, [q, usuario, accion, app, rango, primera, registros.length])
+
   return (
     <div className="animate-fade-in">
       <PageHeader
@@ -202,6 +269,12 @@ export function AuditoriaPage() {
         title="Auditoría"
         subtitle="Todo lo que pasó en el sistema: quién lo hizo, cuándo y qué cambió."
         className="ct-rise"
+        actions={
+          <Button variant="outline" onClick={() => setExportarAbierto(true)} disabled={registros.length === 0}>
+            <Download className="h-4 w-4" />
+            Exportar
+          </Button>
+        }
       />
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -329,6 +402,14 @@ export function AuditoriaPage() {
           )}
         </div>
       )}
+
+      <ExportarTablaModal
+        abierto={exportarAbierto}
+        onCerrar={() => setExportarAbierto(false)}
+        gestor={GESTOR_EXPORT_AUDITORIA}
+        filasVista={registros}
+        contextoVista={contextoExport}
+      />
     </div>
   )
 }

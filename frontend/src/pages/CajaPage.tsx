@@ -5,6 +5,7 @@ import {
   Banknote,
   ChevronRight,
   Clock,
+  Download,
   EyeOff,
   FlaskConical,
   Lock,
@@ -49,6 +50,11 @@ import { CierreDetalleModal } from '@/components/caja/CierreDetalleModal'
 import { DiffChip } from '@/components/caja/DiffChip'
 import { CANAL_ICONO, CANAL_RESUMEN, FACTURACION_LABEL, MEDIO_ICONO, MEDIO_LABEL, TIPO_MOV_ICONO, operacionesLabel, signoMovimiento } from '@/components/caja/medios'
 import { MEDIOS_PAGO_CAJA } from '@/types'
+import {
+  ExportarTablaModal,
+  type ColumnaTabla,
+  type GestorExport,
+} from '@/components/exportar/ExportarTablaModal'
 
 /**
  * Caja: turnos con fondo declarado, movimientos con motivo, arqueo guiado en
@@ -73,6 +79,85 @@ function duracionDesde(iso: string): string {
 
 function ventasDe(cierre: CierreCaja): number {
   return Object.values(cierre.ventasPorMedio).reduce((a, v) => a + v, 0)
+}
+
+/** Qué se puede exportar del historial de cierres (botón «Exportar»). */
+const GESTOR_EXPORT_CIERRES: GestorExport<CierreCaja> = {
+  id: 'caja-cierres',
+  titulo: 'Cierres de caja',
+  nombreArchivo: 'cierres-caja-{fecha}',
+  columnas: [
+    { id: 'comprobante', label: 'Comprobante', corto: 'Z', tipo: 'texto', peso: 11, valor: (c) => zNum(c.numero) },
+    { id: 'caja', label: 'Caja', tipo: 'texto', peso: 16, valor: (c) => c.cajaNombre },
+    { id: 'cierre', label: 'Cierre', tipo: 'fechahora', peso: 17, valor: (c) => c.cerradaEn },
+    { id: 'cerrado_por', label: 'Responsable', tipo: 'texto', peso: 14, valor: (c) => c.cerradoPor },
+    {
+      id: 'ventas',
+      label: 'Ventas',
+      tipo: 'ars',
+      peso: 14,
+      totalizable: true,
+      valor: (c) => ventasDe(c),
+    },
+    {
+      id: 'diferencia',
+      label: 'Diferencia',
+      tipo: 'ars',
+      peso: 12,
+      totalizable: true,
+      ayuda: 'Positivo = sobrante, negativo = faltante.',
+      valor: (c) => c.diferenciaTotal,
+    },
+    { id: 'turno', label: 'Turno', tipo: 'entero', peso: 8, opcional: true, valor: (c) => c.sesionNumero },
+    { id: 'apertura', label: 'Apertura', tipo: 'fechahora', peso: 17, opcional: true, valor: (c) => c.abiertaEn },
+    { id: 'abierta_por', label: 'Abierta por', tipo: 'texto', peso: 14, opcional: true, valor: (c) => c.abiertaPor },
+    {
+      id: 'fondo_inicial',
+      label: 'Fondo inicial',
+      corto: 'Fondo',
+      tipo: 'ars',
+      peso: 13,
+      opcional: true,
+      valor: (c) => c.fondoInicial,
+    },
+    ...MEDIOS_PAGO_CAJA.map(
+      (m): ColumnaTabla<CierreCaja> => ({
+        id: `medio:${m.value}`,
+        label: `Ventas ${m.label.toLowerCase()}`,
+        corto: m.label,
+        tipo: 'ars',
+        peso: 13,
+        opcional: true,
+        totalizable: true,
+        valor: (c) => c.ventasPorMedio[m.value] ?? 0,
+      }),
+    ),
+    { id: 'ingresos', label: 'Ingresos', tipo: 'ars', peso: 12, opcional: true, totalizable: true, valor: (c) => c.ingresos },
+    { id: 'egresos', label: 'Egresos', tipo: 'ars', peso: 12, opcional: true, totalizable: true, valor: (c) => c.egresos },
+    { id: 'retiros', label: 'Retiros', tipo: 'ars', peso: 12, opcional: true, totalizable: true, valor: (c) => c.retiros },
+    {
+      id: 'fondo_siguiente',
+      label: 'Fondo siguiente',
+      corto: 'F. sig.',
+      tipo: 'ars',
+      peso: 13,
+      opcional: true,
+      valor: (c) => c.fondoSiguiente,
+    },
+    {
+      id: 'motivo',
+      label: 'Motivo de la diferencia',
+      corto: 'Motivo',
+      tipo: 'texto',
+      peso: 22,
+      opcional: true,
+      valor: (c) => c.motivoDiferencia ?? '',
+    },
+  ],
+  grupos: [
+    { id: 'caja', label: 'Caja', valor: (c) => c.cajaNombre },
+    { id: 'responsable', label: 'Responsable', valor: (c) => c.cerradoPor },
+  ],
 }
 
 export function CajaPage() {
@@ -176,6 +261,7 @@ export function CajaPage() {
   const [detalle, setDetalle] = useState<CierreCaja | null>(null)
   const [q, setQ] = useState('')
   const [filtroCaja, setFiltroCaja] = useState('')
+  const [exportarAbierto, setExportarAbierto] = useState(false)
 
   function entrarPractica() {
     resetPractica()
@@ -645,6 +731,15 @@ export function CajaPage() {
               className="sm:w-52"
             />
           )}
+          <Button
+            variant="outline"
+            onClick={() => setExportarAbierto(true)}
+            disabled={cierres.length === 0}
+            className="shrink-0"
+          >
+            <Download className="h-4 w-4" />
+            Exportar
+          </Button>
         </div>
 
         {cargandoCierres ? (
@@ -769,6 +864,18 @@ export function CajaPage() {
       )}
       <CierreDetalleModal open={Boolean(detalle)} cierre={detalle} onClose={() => setDetalle(null)} />
       {admin && !practica && <CajaManager open={configAbierta} onClose={() => setConfigAbierta(false)} />}
+      <ExportarTablaModal
+        abierto={exportarAbierto}
+        onCerrar={() => setExportarAbierto(false)}
+        gestor={GESTOR_EXPORT_CIERRES}
+        filasVista={cierresFiltrados}
+        filasTodas={cierres}
+        contextoVista={[
+          ...(q.trim() ? [`Búsqueda: «${q.trim()}»`] : []),
+          ...(filtroCaja ? [`Caja: ${cajas.find((c) => c.id === filtroCaja)?.nombre ?? filtroCaja}`] : []),
+          ...(practica ? ['Modo práctica (datos de mentira)'] : []),
+        ]}
+      />
     </div>
   )
 }

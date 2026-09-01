@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Eraser, Lightbulb, MessageCircle, Search, SearchX, SlidersHorizontal, Smartphone } from 'lucide-react'
+import { Download, Eraser, Lightbulb, MessageCircle, Search, SearchX, SlidersHorizontal, Smartphone } from 'lucide-react'
 import type { ModeloEquipo } from '@/types'
 import { listarModelos } from '@/services/cotizaciones'
 import { useAuth } from '@/store/auth'
@@ -17,6 +17,11 @@ import { AyudaCotizacionesPagina } from '@/components/AyudaContenidos'
 import { useToast } from '@/components/ToastProvider'
 import { CotizacionesManager } from '@/components/CotizacionesManager'
 import { MensajeWhatsappModal } from '@/components/MensajeWhatsappModal'
+import {
+  ExportarTablaModal,
+  type ColumnaTabla,
+  type GestorExport,
+} from '@/components/exportar/ExportarTablaModal'
 import {
   borrarPlantillaLocal,
   CLAVE_MENSAJE_COTIZACION,
@@ -48,6 +53,38 @@ const TIPS = [
   'Equipo en parte de pago: restauralo de fábrica y arrancá con una SIM para descartar bloqueo de operador.',
 ]
 
+/** Una fila del exportador: el modelo con UNA de sus capacidades (o ninguna). */
+interface FilaExportCotizacion {
+  modelo: ModeloEquipo
+  capacidad: string
+  min: number | null
+  max: number | null
+  /** Precio de cada tipo de service, por nombre. */
+  servicios: Map<string, number>
+}
+
+/** Aplana los modelos a una fila por capacidad (los sin rangos van igual). */
+function filasCotizacionDe(modelos: ModeloEquipo[]): FilaExportCotizacion[] {
+  const salida: FilaExportCotizacion[] = []
+  for (const modelo of modelos) {
+    const servicios = new Map(modelo.servicios.map((s) => [s.tipo_nombre, Number(s.precio)]))
+    if (modelo.cotizaciones.length === 0) {
+      salida.push({ modelo, capacidad: '', min: null, max: null, servicios })
+      continue
+    }
+    for (const c of modelo.cotizaciones) {
+      salida.push({
+        modelo,
+        capacidad: c.capacidad_label,
+        min: Number(c.precio_min),
+        max: Number(c.precio_max),
+        servicios,
+      })
+    }
+  }
+  return salida
+}
+
 /** Respuesta tipo para WhatsApp: rellena la plantilla con los datos del modelo. */
 function mensajeWhatsapp(modelo: ModeloEquipo, plantilla: string): string | null {
   if (modelo.cotizaciones.length === 0) return null
@@ -70,6 +107,7 @@ export function CotizacionesPage() {
   const [busqueda, setBusqueda] = useState('')
   const [configOpen, setConfigOpen] = useState(false)
   const [msgOpen, setMsgOpen] = useState(false)
+  const [exportarAbierto, setExportarAbierto] = useState(false)
   const queryClient = useQueryClient()
 
   const { data: modelos = [], isLoading } = useQuery({
@@ -143,6 +181,49 @@ export function CotizacionesPage() {
     return [...gens].sort((a, b) => a - b)
   }, [activos])
 
+  /* ---- Exportar: una fila por modelo × capacidad, services como columnas ---- */
+  const filasExportVista = useMemo(() => filasCotizacionDe(visibles), [visibles])
+  const filasExportTodas = useMemo(() => filasCotizacionDe(activos), [activos])
+
+  const gestorExport = useMemo<GestorExport<FilaExportCotizacion>>(() => {
+    // Los tipos de service, en el orden en que aparecen en los modelos.
+    const tipos: string[] = []
+    for (const m of activos) {
+      for (const s of m.servicios) {
+        if (!tipos.includes(s.tipo_nombre)) tipos.push(s.tipo_nombre)
+      }
+    }
+    const columnasService: ColumnaTabla<FilaExportCotizacion>[] = tipos.map((nombre) => ({
+      id: `service:${nombre}`,
+      label: nombre,
+      tipo: 'usd',
+      peso: 12,
+      ayuda: 'Precio del service para el modelo (se repite en cada capacidad).',
+      valor: (f) => f.servicios.get(nombre) ?? null,
+    }))
+    return {
+      id: 'cotizaciones',
+      titulo: 'Cotizaciones',
+      nombreArchivo: 'cotizaciones-{fecha}',
+      columnas: [
+        { id: 'modelo', label: 'Modelo', tipo: 'texto', peso: 24, valor: (f) => f.modelo.nombre_completo },
+        { id: 'capacidad', label: 'Capacidad', tipo: 'texto', peso: 11, valor: (f) => f.capacidad },
+        { id: 'min', label: 'Toma mín USD', corto: 'Mín USD', tipo: 'usd', peso: 12, valor: (f) => f.min },
+        { id: 'max', label: 'Toma máx USD', corto: 'Máx USD', tipo: 'usd', peso: 12, valor: (f) => f.max },
+        ...columnasService,
+        {
+          id: 'marca',
+          label: 'Marca',
+          tipo: 'texto',
+          peso: 12,
+          opcional: true,
+          valor: (f) => f.modelo.marca,
+        },
+      ],
+      grupos: [{ id: 'marca', label: 'Marca', valor: (f) => f.modelo.marca.trim() || 'Sin marca' }],
+    }
+  }, [activos])
+
   async function copiarRespuesta(modelo: ModeloEquipo) {
     const mensaje = mensajeWhatsapp(modelo, plantilla)
     if (!mensaje) return
@@ -167,6 +248,14 @@ export function CotizacionesPage() {
             <AyudaInfo titulo="Cómo cotizar usados">
               <AyudaCotizacionesPagina />
             </AyudaInfo>
+            <Button
+              variant="outline"
+              onClick={() => setExportarAbierto(true)}
+              disabled={filasExportTodas.length === 0}
+            >
+              <Download className="h-4 w-4" />
+              Exportar
+            </Button>
             <Button variant="outline" onClick={() => setMsgOpen(true)}>
               <MessageCircle className="h-4 w-4" />
               Mensaje
@@ -295,6 +384,14 @@ export function CotizacionesPage() {
       )}
 
       <CotizacionesManager open={configOpen} onClose={() => setConfigOpen(false)} />
+      <ExportarTablaModal
+        abierto={exportarAbierto}
+        onCerrar={() => setExportarAbierto(false)}
+        gestor={gestorExport}
+        filasVista={filasExportVista}
+        filasTodas={filasExportTodas}
+        contextoVista={busqueda.trim() ? [`Búsqueda: «${busqueda.trim()}»`] : []}
+      />
       <MensajeWhatsappModal
         open={msgOpen}
         onClose={() => setMsgOpen(false)}

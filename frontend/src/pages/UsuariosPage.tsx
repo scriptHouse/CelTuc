@@ -8,6 +8,7 @@ import { z } from 'zod'
 import {
   AtSign,
   Briefcase,
+  Download,
   Eye,
   EyeOff,
   KeyRound,
@@ -46,6 +47,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
+import { ExportarTablaModal, type GestorExport } from '@/components/exportar/ExportarTablaModal'
 
 const schema = z
   .object({
@@ -75,6 +77,64 @@ function esAdmin(u: UsuarioAdmin): boolean {
   return u.es_administrador ?? (u.is_superuser || u.is_staff)
 }
 
+function nivelDe(u: UsuarioAdmin): string {
+  if (u.is_superuser) return 'Superadmin'
+  return esAdmin(u) ? 'Admin' : 'Empleado'
+}
+
+/** Qué se puede exportar de las cuentas (botón «Exportar»). */
+const GESTOR_EXPORT_USUARIOS: GestorExport<UsuarioAdmin> = {
+  id: 'usuarios',
+  titulo: 'Usuarios',
+  nombreArchivo: 'usuarios-{fecha}',
+  columnas: [
+    { id: 'username', label: 'Usuario', tipo: 'texto', peso: 20, valor: (u) => u.username },
+    { id: 'email', label: 'Email', tipo: 'texto', peso: 26, valor: (u) => u.email },
+    { id: 'nivel', label: 'Nivel', tipo: 'texto', peso: 12, valor: nivelDe },
+    { id: 'rol', label: 'Rol', tipo: 'texto', peso: 18, valor: (u) => u.rol?.nombre ?? '' },
+    {
+      id: 'empleado',
+      label: 'Empleado vinculado',
+      corto: 'Empleado',
+      tipo: 'texto',
+      peso: 22,
+      valor: (u) => u.empleado?.nombre_completo ?? '',
+    },
+    { id: 'activa', label: 'Activa', tipo: 'texto', peso: 8, valor: (u) => (u.is_active ? 'Sí' : 'No') },
+    {
+      id: 'ultimo_ingreso',
+      label: 'Último ingreso',
+      corto: 'Últ. ingreso',
+      tipo: 'fechahora',
+      peso: 17,
+      valor: (u) => u.last_login,
+    },
+    { id: 'alta', label: 'Alta', tipo: 'fecha', peso: 12, valor: (u) => u.date_joined },
+    {
+      id: 'en_linea',
+      label: 'En línea ahora',
+      corto: 'En línea',
+      tipo: 'texto',
+      peso: 9,
+      opcional: true,
+      valor: (u) => (u.en_linea ? 'Sí' : 'No'),
+    },
+    {
+      id: 'id',
+      label: 'ID interno',
+      corto: 'ID',
+      tipo: 'entero',
+      peso: 8,
+      opcional: true,
+      valor: (u) => u.id,
+    },
+  ],
+  grupos: [
+    { id: 'nivel', label: 'Nivel', valor: nivelDe },
+    { id: 'rol', label: 'Rol', valor: (u) => u.rol?.nombre ?? (esAdmin(u) ? 'Administradores' : 'Sin rol') },
+  ],
+}
+
 export function UsuariosPage() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -92,6 +152,7 @@ export function UsuariosPage() {
 
   const [modalOpen, setModalOpen] = useState(false)
   const [editando, setEditando] = useState<UsuarioAdmin | null>(null)
+  const [exportarAbierto, setExportarAbierto] = useState(false)
 
   const invalidar = () => {
     queryClient.invalidateQueries({ queryKey: ['usuarios'] })
@@ -199,6 +260,10 @@ export function UsuariosPage() {
         className="ct-rise"
         actions={
           <>
+            <Button variant="outline" onClick={() => setExportarAbierto(true)} disabled={usuarios.length === 0}>
+              <Download className="h-4 w-4" />
+              Exportar
+            </Button>
             <Button variant="outline" onClick={() => navigate('/usuarios/roles')}>
               <ShieldCheck className="h-4 w-4" />
               Roles y permisos
@@ -321,6 +386,12 @@ export function UsuariosPage() {
         saving={crear.isPending || actualizar.isPending}
         onClose={() => setModalOpen(false)}
         onSubmit={handleGuardar}
+      />
+      <ExportarTablaModal
+        abierto={exportarAbierto}
+        onCerrar={() => setExportarAbierto(false)}
+        gestor={GESTOR_EXPORT_USUARIOS}
+        filasVista={usuarios}
       />
     </div>
   )

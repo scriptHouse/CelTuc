@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query'
-import { ChevronRight, Fingerprint, Loader2, Search, UserRoundPlus } from 'lucide-react'
+import { ChevronRight, Download, Fingerprint, Loader2, Search, UserRoundPlus } from 'lucide-react'
 import type { FichadaAsistencia } from '@/types'
 import { detalleFichada, listarFichadas } from '@/services/asistencia'
 import { Badge } from '@/components/ui/Badge'
@@ -16,6 +16,7 @@ import {
   type DatosAsignacion,
 } from '@/components/asistencia/AsignarNumeroModal'
 import { haceDias, metodoDe, tipoDe } from '@/components/asistencia/constantes'
+import { ExportarTablaModal, type GestorExport } from '@/components/exportar/ExportarTablaModal'
 import { num } from '@/lib/format'
 import { cn, ctStagger } from '@/lib/utils'
 
@@ -70,6 +71,59 @@ function hora(iso: string): string {
   return new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
 }
 
+/** Qué se puede exportar de las fichadas (botón «Exportar»: lo cargado en pantalla). */
+const GESTOR_EXPORT_FICHADAS: GestorExport<FichadaAsistencia> = {
+  id: 'asistencia-fichadas',
+  titulo: 'Fichadas',
+  nombreArchivo: 'fichadas-{fecha}',
+  columnas: [
+    { id: 'fecha', label: 'Fecha y hora', corto: 'Fecha', tipo: 'fechahora', peso: 17, valor: (f) => f.ocurrida_en },
+    {
+      id: 'empleado',
+      label: 'Empleado',
+      tipo: 'texto',
+      peso: 22,
+      valor: (f) => f.empleado?.nombre ?? 'Sin asignar',
+    },
+    { id: 'tipo', label: 'Tipo', tipo: 'texto', peso: 15, valor: (f) => tipoDe(f.tipo).label },
+    { id: 'metodo', label: 'Método', tipo: 'texto', peso: 12, valor: (f) => metodoDe(f.metodo).label },
+    { id: 'sucursal', label: 'Sucursal', tipo: 'texto', peso: 14, valor: (f) => f.sucursal.nombre },
+    { id: 'reloj', label: 'Reloj', tipo: 'texto', peso: 14, valor: (f) => f.dispositivo.nombre },
+    {
+      id: 'numero_reloj',
+      label: 'Nº en el reloj',
+      corto: 'Nº',
+      tipo: 'texto',
+      peso: 9,
+      opcional: true,
+      valor: (f) => f.numero_reloj || '',
+    },
+    {
+      id: 'nombre_reloj',
+      label: 'Nombre en el reloj',
+      corto: 'Nombre reloj',
+      tipo: 'texto',
+      peso: 16,
+      opcional: true,
+      valor: (f) => f.nombre_reloj || '',
+    },
+    {
+      id: 'asignacion',
+      label: 'Asignación',
+      tipo: 'texto',
+      peso: 12,
+      opcional: true,
+      valor: (f) => (f.estado_mapeo === 'mapeada' ? 'Con empleado' : 'Sin asignar'),
+    },
+    { id: 'id', label: 'ID interno', corto: 'ID', tipo: 'entero', peso: 8, opcional: true, valor: (f) => f.id },
+  ],
+  grupos: [
+    { id: 'sucursal', label: 'Sucursal', valor: (f) => f.sucursal.nombre },
+    { id: 'empleado', label: 'Empleado', valor: (f) => f.empleado?.nombre ?? 'Sin asignar' },
+    { id: 'tipo', label: 'Tipo', valor: (f) => tipoDe(f.tipo).label },
+  ],
+}
+
 export function FichadasTab() {
   const [busqueda, setBusqueda] = useState('')
   const [q, setQ] = useState('')
@@ -85,6 +139,7 @@ export function FichadasTab() {
   const [rango, setRango] = useState<Rango>('7d')
   const [detalleId, setDetalleId] = useState<number | null>(null)
   const [asignando, setAsignando] = useState<DatosAsignacion | null>(null)
+  const [exportarAbierto, setExportarAbierto] = useState(false)
 
   const { data, isLoading, isFetching, isFetchingNextPage, fetchNextPage, hasNextPage } =
     useInfiniteQuery({
@@ -129,6 +184,27 @@ export function FichadasTab() {
     }
     return grupos
   }, [fichadas])
+
+  // Cómo describir en el archivo exportado lo que se estaba viendo.
+  const contextoExport = useMemo(() => {
+    const partes: string[] = []
+    if (q) partes.push(`Búsqueda: «${q}»`)
+    if (sucursal) {
+      const nombre = primera?.sucursales?.find((s) => String(s.id) === sucursal)?.nombre
+      partes.push(`Sucursal: ${nombre ?? sucursal}`)
+    }
+    if (dispositivo) {
+      const nombre = primera?.dispositivos?.find((r) => String(r.id) === dispositivo)?.nombre
+      partes.push(`Reloj: ${nombre ?? dispositivo}`)
+    }
+    if (tipo) partes.push(TIPOS_FILTRO.find((t) => t.value === tipo)?.label ?? tipo)
+    if (mapeo) partes.push(MAPEO_FILTRO.find((m) => m.value === mapeo)?.label ?? mapeo)
+    partes.push(`Rango: ${RANGOS.find((r) => r.value === rango)?.label ?? rango}`)
+    if (primera && fichadas.length < primera.total) {
+      partes.push(`Las ${num(fichadas.length)} más recientes de ${num(primera.total)}`)
+    }
+    return partes
+  }, [q, sucursal, dispositivo, tipo, mapeo, rango, primera, fichadas.length])
 
   return (
     <div>
@@ -194,6 +270,15 @@ export function FichadasTab() {
           <span className="ml-auto tnum text-xs text-ink-400">
             {primera ? `${num(fichadas.length)} de ${num(primera.total)} fichadas` : ''}
           </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setExportarAbierto(true)}
+            disabled={fichadas.length === 0}
+          >
+            <Download className="h-4 w-4" />
+            Exportar
+          </Button>
         </div>
       </Card>
 
@@ -252,6 +337,13 @@ export function FichadasTab() {
 
       <DetalleFichadaModal id={detalleId} onClose={() => setDetalleId(null)} />
       <AsignarNumeroModal datos={asignando} onClose={() => setAsignando(null)} />
+      <ExportarTablaModal
+        abierto={exportarAbierto}
+        onCerrar={() => setExportarAbierto(false)}
+        gestor={GESTOR_EXPORT_FICHADAS}
+        filasVista={fichadas}
+        contextoVista={contextoExport}
+      />
     </div>
   )
 }

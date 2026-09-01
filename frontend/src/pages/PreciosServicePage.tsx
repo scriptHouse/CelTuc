@@ -5,6 +5,7 @@ import {
   BatteryCharging,
   Camera,
   CircuitBoard,
+  Download,
   Eraser,
   Layers,
   LayoutGrid,
@@ -42,6 +43,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { AyudaInfo } from '@/components/ui/AyudaInfo'
 import { AyudaServicePagina } from '@/components/AyudaContenidos'
 import { PreciosServiceManager } from '@/components/PreciosServiceManager'
+import { ExportarTablaModal, type GestorExport } from '@/components/exportar/ExportarTablaModal'
 
 /** Ícono para el chip de cada sección, por palabra clave del nombre.
  * Así las secciones nuevas que cargue el admin reciben un ícono razonable
@@ -65,6 +67,74 @@ const ICONOS_SECCION: [RegExp, LucideIcon][] = [
 
 function iconoDeSeccion(nombre: string): LucideIcon {
   return ICONOS_SECCION.find(([patron]) => patron.test(nombre))?.[1] ?? Wrench
+}
+
+/** Una fila del exportador: sección × ítem × variante, con sus 4 precios vivos. */
+interface FilaExportService {
+  seccion: string
+  etiqueta: string
+  nota: string
+  variante: string
+  precios: PrecioEfectivoService | null
+}
+
+/** Aplana las secciones con sus ítems al formato de fila del exportador. */
+function filasServiceDe(
+  grupos: { seccion: SeccionPreciosService; items: ItemPrecioService[] }[],
+): FilaExportService[] {
+  const salida: FilaExportService[] = []
+  for (const { seccion, items } of grupos) {
+    const variantes = new Map(seccion.variantes.map((v) => [v.id, v.nombre]))
+    for (const item of items) {
+      if (item.precios.length === 0) {
+        salida.push({
+          seccion: seccion.nombre,
+          etiqueta: item.etiqueta,
+          nota: item.nota,
+          variante: '',
+          precios: null,
+        })
+        continue
+      }
+      for (const precio of item.precios) {
+        salida.push({
+          seccion: seccion.nombre,
+          etiqueta: item.etiqueta,
+          nota: item.nota,
+          // La variante solo dice algo cuando el ítem tiene más de una.
+          variante: item.precios.length > 1 ? (variantes.get(precio.variante) ?? '') : '',
+          precios: precio.efectivo,
+        })
+      }
+    }
+  }
+  return salida
+}
+
+/** Qué se puede exportar de la lista de service (botón «Exportar»). */
+const GESTOR_EXPORT_SERVICE: GestorExport<FilaExportService> = {
+  id: 'precios-service',
+  titulo: 'Precios de service',
+  nombreArchivo: 'service-{fecha}',
+  columnas: [
+    { id: 'etiqueta', label: 'Ítem', tipo: 'texto', peso: 32, valor: (f) => f.etiqueta },
+    { id: 'seccion', label: 'Sección', tipo: 'texto', peso: 18, valor: (f) => f.seccion },
+    { id: 'variante', label: 'Variante', tipo: 'texto', peso: 14, valor: (f) => f.variante },
+    { id: 'lista_usd', label: 'Lista USD', tipo: 'usd', peso: 11, valor: (f) => f.precios?.lista_usd ?? null },
+    { id: 'lista_ars', label: 'Lista $', tipo: 'ars', peso: 13, valor: (f) => f.precios?.lista_ars ?? null },
+    { id: 'cash_ars', label: 'Cash $', tipo: 'ars', peso: 13, valor: (f) => f.precios?.cash_ars ?? null },
+    {
+      id: 'cash_usd',
+      label: 'Cash USD',
+      tipo: 'usd',
+      peso: 11,
+      opcional: true,
+      valor: (f) => f.precios?.cash_usd ?? null,
+    },
+    { id: 'nota', label: 'Nota', tipo: 'texto', peso: 24, opcional: true, valor: (f) => f.nota || '' },
+  ],
+  grupos: [{ id: 'seccion', label: 'Sección', valor: (f) => f.seccion }],
+  agruparPorDefecto: 'seccion',
 }
 
 /** Arma las opciones del selector: líneas (con 2+ equipos) y equipos. */
@@ -101,6 +171,7 @@ export function PreciosServicePage() {
   const [filtroEquipo, setFiltroEquipo] = useState('')
   const [seccionId, setSeccionId] = useState<number | null>(null)
   const [configOpen, setConfigOpen] = useState(false)
+  const [exportarAbierto, setExportarAbierto] = useState(false)
 
   const { data: secciones = [], isLoading } = useQuery({
     queryKey: ['service-secciones'],
@@ -189,6 +260,23 @@ export function PreciosServicePage() {
   const totalResultados = visibles.reduce((total, grupo) => total + grupo.items.length, 0)
   const etiquetaFiltro = opcionesEquipos.find((o) => o.value === filtroEquipo)?.label
 
+  /* ---- Exportar: filas aplanadas (sección × ítem × variante) ---- */
+  const filasExportVista = useMemo(() => filasServiceDe(visibles), [visibles])
+  const filasExportTodas = useMemo(
+    () =>
+      filasServiceDe(
+        activas.map((seccion) => ({ seccion, items: seccion.items.filter((i) => i.activo) })),
+      ),
+    [activas],
+  )
+  const contextoExport = useMemo(() => {
+    const partes: string[] = []
+    if (query) partes.push(`Búsqueda: «${query}»`)
+    if (idsEquipo !== null && etiquetaFiltro) partes.push(`Equipo: ${etiquetaFiltro}`)
+    if (seleccionada) partes.push(`Sección: ${seleccionada.nombre}`)
+    return partes
+  }, [query, idsEquipo, etiquetaFiltro, seleccionada])
+
   return (
     <div className="animate-fade-in">
       <PageHeader
@@ -202,6 +290,14 @@ export function PreciosServicePage() {
             <AyudaInfo titulo="Cómo usar Service">
               <AyudaServicePagina />
             </AyudaInfo>
+            <Button
+              variant="outline"
+              onClick={() => setExportarAbierto(true)}
+              disabled={filasExportTodas.length === 0}
+            >
+              <Download className="h-4 w-4" />
+              Exportar
+            </Button>
             {admin && (
               <Button variant="outline" onClick={() => setConfigOpen(true)}>
                 <SlidersHorizontal className="h-4 w-4" />
@@ -405,6 +501,14 @@ export function PreciosServicePage() {
       )}
 
       <PreciosServiceManager open={configOpen} onClose={() => setConfigOpen(false)} />
+      <ExportarTablaModal
+        abierto={exportarAbierto}
+        onCerrar={() => setExportarAbierto(false)}
+        gestor={GESTOR_EXPORT_SERVICE}
+        filasVista={filasExportVista}
+        filasTodas={filasExportTodas}
+        contextoVista={contextoExport}
+      />
     </div>
   )
 }

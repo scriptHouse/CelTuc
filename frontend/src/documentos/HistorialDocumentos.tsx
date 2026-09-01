@@ -40,6 +40,7 @@ import {
 import { SUCURSALES_DOC } from './content'
 import { DOC_MODULES } from './registry'
 import { EnviarDocumentoModal } from './EnviarDocumentoModal'
+import { ExportarTablaModal, type GestorExport } from '@/components/exportar/ExportarTablaModal'
 
 /**
  * Historial de documentos generados: la pestaña "Archivo" del módulo.
@@ -108,6 +109,61 @@ function peso(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+/** Qué se puede exportar del historial (botón «Exportar»: lo cargado en pantalla). */
+const GESTOR_EXPORT_HISTORIAL: GestorExport<DocumentoGenerado> = {
+  id: 'documentos-historial',
+  titulo: 'Historial de documentos',
+  nombreArchivo: 'documentos-{fecha}',
+  columnas: [
+    { id: 'creado', label: 'Fecha y hora', corto: 'Fecha', tipo: 'fechahora', peso: 17, valor: (d) => d.creado },
+    { id: 'tipo', label: 'Documento', tipo: 'texto', peso: 20, valor: (d) => d.tipo_nombre },
+    { id: 'referencia', label: 'N° / referencia', corto: 'N°', tipo: 'texto', peso: 11, valor: (d) => d.referencia || '' },
+    { id: 'cliente', label: 'Cliente', tipo: 'texto', peso: 22, valor: (d) => d.cliente || '' },
+    { id: 'detalle', label: 'Detalle', tipo: 'texto', peso: 26, valor: (d) => d.detalle || '' },
+    {
+      id: 'total',
+      label: 'Importe',
+      tipo: 'ars',
+      peso: 14,
+      totalizable: true,
+      valor: (d) => (d.total === null || d.total === '' ? null : Number(d.total)),
+    },
+    { id: 'formato', label: 'Formato', tipo: 'texto', peso: 10, valor: (d) => d.formato_display },
+    { id: 'sucursal', label: 'Sucursal', tipo: 'texto', peso: 14, valor: (d) => d.sucursal || '' },
+    {
+      id: 'autor',
+      label: 'Generado por',
+      corto: 'Por',
+      tipo: 'texto',
+      peso: 14,
+      valor: (d) => d.generado_por?.username ?? '',
+    },
+    {
+      id: 'cliente_documento',
+      label: 'Documento del cliente',
+      corto: 'DNI/CUIT',
+      tipo: 'texto',
+      peso: 13,
+      opcional: true,
+      valor: (d) => d.cliente_documento || '',
+    },
+    {
+      id: 'archivo',
+      label: 'Archivo',
+      tipo: 'texto',
+      peso: 26,
+      opcional: true,
+      valor: (d) => d.nombre_archivo || '',
+    },
+    { id: 'id', label: 'ID interno', corto: 'ID', tipo: 'entero', peso: 8, opcional: true, valor: (d) => d.id },
+  ],
+  grupos: [
+    { id: 'tipo', label: 'Documento', valor: (d) => d.tipo_nombre },
+    { id: 'sucursal', label: 'Sucursal', valor: (d) => d.sucursal || 'Sin sucursal' },
+    { id: 'autor', label: 'Generado por', valor: (d) => d.generado_por?.username ?? 'Sin usuario' },
+  ],
+}
+
 export function HistorialDocumentos({ tipoInicial = '' }: { tipoInicial?: string }) {
   const toast = useToast()
   const confirm = useConfirm()
@@ -132,6 +188,7 @@ export function HistorialDocumentos({ tipoInicial = '' }: { tipoInicial?: string
   // Documento que se está por enviar (WhatsApp / email). El modal se monta una
   // sola vez para todo el listado, no uno por renglón.
   const [aEnviar, setAEnviar] = useState<DocumentoGenerado | null>(null)
+  const [exportarAbierto, setExportarAbierto] = useState(false)
 
   const { data, isLoading, isFetching, isFetchingNextPage, fetchNextPage, hasNextPage } =
     useInfiniteQuery({
@@ -170,6 +227,21 @@ export function HistorialDocumentos({ tipoInicial = '' }: { tipoInicial?: string
   }, [documentos])
 
   const hayFiltros = Boolean(q || tipo || formato || sucursal || usuario || rango !== 'todo')
+
+  // Cómo describir en el archivo exportado lo que se estaba viendo.
+  const contextoExport = useMemo(() => {
+    const partes: string[] = []
+    if (q) partes.push(`Búsqueda: «${q}»`)
+    if (tipo) partes.push(`Documento: ${DOC_MODULES.find((m) => m.id === tipo)?.nombre ?? tipo}`)
+    if (formato) partes.push(`Formato: ${FORMATOS.find((f) => f.value === formato)?.label ?? formato}`)
+    if (sucursal) partes.push(`Sucursal: ${sucursal}`)
+    if (usuario) partes.push(`Generados por @${usuario}`)
+    partes.push(`Rango: ${RANGOS.find((r) => r.value === rango)?.label ?? rango}`)
+    if (primera && documentos.length < primera.total) {
+      partes.push(`Los ${num(documentos.length)} más recientes de ${num(primera.total)}`)
+    }
+    return partes
+  }, [q, tipo, formato, sucursal, usuario, rango, primera, documentos.length])
 
   const opcionesTipo = [
     { value: '', label: 'Todos los documentos' },
@@ -292,6 +364,15 @@ export function HistorialDocumentos({ tipoInicial = '' }: { tipoInicial?: string
           <span className="ml-auto tnum text-xs text-ink-400">
             {primera ? `${num(documentos.length)} de ${num(primera.total)}` : ''}
           </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setExportarAbierto(true)}
+            disabled={documentos.length === 0}
+          >
+            <Download className="h-4 w-4" />
+            Exportar listado
+          </Button>
         </div>
       </Card>
 
@@ -347,6 +428,13 @@ export function HistorialDocumentos({ tipoInicial = '' }: { tipoInicial?: string
       )}
 
       <EnviarDocumentoModal doc={aEnviar} onCerrar={() => setAEnviar(null)} />
+      <ExportarTablaModal
+        abierto={exportarAbierto}
+        onCerrar={() => setExportarAbierto(false)}
+        gestor={GESTOR_EXPORT_HISTORIAL}
+        filasVista={documentos}
+        contextoVista={contextoExport}
+      />
     </div>
   )
 }

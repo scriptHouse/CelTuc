@@ -7,6 +7,7 @@ import { z } from 'zod'
 import {
   AtSign,
   Building2,
+  Download,
   Eye,
   EyeOff,
   KeyRound,
@@ -53,6 +54,7 @@ import { RolesManager } from '@/components/RolesManager'
 import { SucursalesManager } from '@/components/SucursalesManager'
 import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
+import { ExportarTablaModal, type GestorExport } from '@/components/exportar/ExportarTablaModal'
 
 const schema = z
   .object({
@@ -82,6 +84,48 @@ type FormData = z.infer<typeof schema>
 
 function iniciales(e: Empleado): string {
   return `${e.nombre.charAt(0)}${e.apellido.charAt(0)}`.toUpperCase() || 'E'
+}
+
+/** Qué se puede exportar del equipo (botón «Exportar»). */
+const GESTOR_EXPORT_EMPLEADOS: GestorExport<Empleado> = {
+  id: 'empleados',
+  titulo: 'Empleados',
+  nombreArchivo: 'empleados-{fecha}',
+  columnas: [
+    { id: 'nombre', label: 'Empleado', tipo: 'texto', peso: 28, valor: (e) => e.nombre_completo },
+    { id: 'sucursal', label: 'Sucursal', tipo: 'texto', peso: 18, valor: (e) => e.sucursal?.nombre ?? '' },
+    {
+      id: 'usuario',
+      label: 'Usuario',
+      tipo: 'texto',
+      peso: 16,
+      valor: (e) => e.usuario?.username ?? '',
+    },
+    { id: 'email', label: 'Email', tipo: 'texto', peso: 24, valor: (e) => e.usuario?.email ?? '' },
+    { id: 'rol', label: 'Rol', tipo: 'texto', peso: 16, valor: (e) => e.usuario?.rol?.nombre ?? '' },
+    {
+      id: 'acceso',
+      label: 'Acceso al sistema',
+      corto: 'Acceso',
+      tipo: 'texto',
+      peso: 10,
+      valor: (e) => (e.puede_loguear ? 'Sí' : 'No'),
+    },
+    { id: 'alta', label: 'Alta', tipo: 'fecha', peso: 12, valor: (e) => e.creado },
+    {
+      id: 'id',
+      label: 'ID interno',
+      corto: 'ID',
+      tipo: 'entero',
+      peso: 8,
+      opcional: true,
+      valor: (e) => e.id,
+    },
+  ],
+  grupos: [
+    { id: 'sucursal', label: 'Sucursal', valor: (e) => e.sucursal?.nombre ?? 'Sin sucursal' },
+    { id: 'rol', label: 'Rol', valor: (e) => e.usuario?.rol?.nombre ?? 'Sin rol' },
+  ],
 }
 
 export function EmpleadosPage() {
@@ -115,6 +159,7 @@ export function EmpleadosPage() {
   const [rolesOpen, setRolesOpen] = useState(false)
   const [sucursalesOpen, setSucursalesOpen] = useState(false)
   const [editando, setEditando] = useState<Empleado | null>(null)
+  const [exportarAbierto, setExportarAbierto] = useState(false)
 
   const invalidar = () => {
     queryClient.invalidateQueries({ queryKey: ['empleados'] })
@@ -211,22 +256,28 @@ export function EmpleadosPage() {
         subtitle="El equipo de CelTuc y quién puede iniciar sesión."
         className="ct-rise"
         actions={
-          admin ? (
-            <>
-              <Button variant="outline" onClick={() => setSucursalesOpen(true)}>
-                <Building2 className="h-4 w-4" />
-                Sucursales
-              </Button>
-              <Button variant="outline" onClick={() => setRolesOpen(true)}>
-                <SlidersHorizontal className="h-4 w-4" />
-                Roles
-              </Button>
-              <Button onClick={abrirNuevo}>
-                <Plus className="h-4 w-4" />
-                Nuevo empleado
-              </Button>
-            </>
-          ) : undefined
+          <>
+            <Button variant="outline" onClick={() => setExportarAbierto(true)} disabled={empleados.length === 0}>
+              <Download className="h-4 w-4" />
+              Exportar
+            </Button>
+            {admin && (
+              <>
+                <Button variant="outline" onClick={() => setSucursalesOpen(true)}>
+                  <Building2 className="h-4 w-4" />
+                  Sucursales
+                </Button>
+                <Button variant="outline" onClick={() => setRolesOpen(true)}>
+                  <SlidersHorizontal className="h-4 w-4" />
+                  Roles
+                </Button>
+                <Button onClick={abrirNuevo}>
+                  <Plus className="h-4 w-4" />
+                  Nuevo empleado
+                </Button>
+              </>
+            )}
+          </>
         }
       />
 
@@ -349,6 +400,12 @@ export function EmpleadosPage() {
 
       <RolesManager open={rolesOpen} onClose={() => setRolesOpen(false)} />
       <SucursalesManager open={sucursalesOpen} onClose={() => setSucursalesOpen(false)} />
+      <ExportarTablaModal
+        abierto={exportarAbierto}
+        onCerrar={() => setExportarAbierto(false)}
+        gestor={GESTOR_EXPORT_EMPLEADOS}
+        filasVista={empleados}
+      />
     </div>
   )
 }

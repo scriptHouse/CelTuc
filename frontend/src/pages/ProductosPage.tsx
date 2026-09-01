@@ -4,6 +4,7 @@ import {
   Apple,
   BatteryCharging,
   Cable,
+  Download,
   Eraser,
   Gamepad2,
   Gift,
@@ -41,6 +42,11 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { AyudaInfo } from '@/components/ui/AyudaInfo'
 import { AyudaProductosPagina } from '@/components/AyudaContenidos'
 import { ProductosManager } from '@/components/ProductosManager'
+import {
+  ExportarTablaModal,
+  type ColumnaTabla,
+  type GestorExport,
+} from '@/components/exportar/ExportarTablaModal'
 
 /**
  * Catálogo central de productos (hoja "Accesorios" + lo que se cargue).
@@ -68,6 +74,101 @@ function iconoDeCategoria(nombre: string): LucideIcon {
   return ICONOS_CATEGORIA.find(([patron]) => patron.test(nombre))?.[1] ?? Package
 }
 
+/** Una fila del exportador: el producto con sus categorías ya resueltas. */
+interface FilaExportProducto {
+  producto: ProductoCatalogo
+  categoria: string
+  subcategoria: string
+}
+
+const COLUMNAS_EXPORT_PRODUCTOS: ColumnaTabla<FilaExportProducto>[] = [
+  { id: 'producto', label: 'Producto', tipo: 'texto', peso: 34, valor: (f) => f.producto.nombre },
+  { id: 'marca', label: 'Marca', tipo: 'texto', peso: 14, valor: (f) => f.producto.marca || '' },
+  { id: 'calidad', label: 'Calidad', tipo: 'texto', peso: 14, valor: (f) => f.producto.calidad || '' },
+  { id: 'categoria', label: 'Categoría', tipo: 'texto', peso: 18, valor: (f) => f.categoria },
+  {
+    id: 'subcategoria',
+    label: 'Subcategoría',
+    corto: 'Subcat.',
+    tipo: 'texto',
+    peso: 16,
+    valor: (f) => f.subcategoria,
+  },
+  {
+    id: 'lista_usd',
+    label: 'Lista USD',
+    tipo: 'usd',
+    peso: 12,
+    valor: (f) => f.producto.efectivo?.lista_usd ?? null,
+  },
+  {
+    id: 'lista_ars',
+    label: 'Lista $',
+    tipo: 'ars',
+    peso: 14,
+    valor: (f) => f.producto.efectivo?.lista_ars ?? null,
+  },
+  {
+    id: 'cash_ars',
+    label: 'Cash $',
+    tipo: 'ars',
+    peso: 14,
+    valor: (f) => f.producto.efectivo?.cash_ars ?? null,
+  },
+  {
+    id: 'cash_usd',
+    label: 'Cash USD',
+    tipo: 'usd',
+    peso: 12,
+    opcional: true,
+    valor: (f) => f.producto.efectivo?.cash_usd ?? null,
+  },
+  { id: 'nota', label: 'Nota', tipo: 'texto', peso: 22, opcional: true, valor: (f) => f.producto.nota || '' },
+  {
+    id: 'nuevo',
+    label: 'Nuevo',
+    tipo: 'texto',
+    peso: 8,
+    opcional: true,
+    valor: (f) => (f.producto.nuevo ? 'Sí' : 'No'),
+  },
+  {
+    id: 'a_pedido',
+    label: 'A pedido',
+    tipo: 'texto',
+    peso: 9,
+    opcional: true,
+    ayuda: 'No se stockea: se trae cuando alguien lo pide.',
+    valor: (f) => (f.producto.a_pedido ? 'Sí' : 'No'),
+  },
+  {
+    id: 'id',
+    label: 'ID interno',
+    corto: 'ID',
+    tipo: 'entero',
+    peso: 8,
+    opcional: true,
+    valor: (f) => f.producto.id,
+  },
+]
+
+/** La columna de costo: solo existe para administradores (el backend la manda solo a ellos). */
+const COLUMNA_COSTO_PRODUCTOS: ColumnaTabla<FilaExportProducto> = {
+  id: 'costo_usd',
+  label: 'Costo USD',
+  tipo: 'usd',
+  peso: 12,
+  opcional: true,
+  ayuda: 'Costo de reposición. Solo lo ven los administradores.',
+  valor: (f) => f.producto.costo_usd ?? null,
+}
+
+const GRUPOS_EXPORT_PRODUCTOS = [
+  { id: 'categoria', label: 'Categoría', valor: (f: FilaExportProducto) => f.categoria },
+  { id: 'marca', label: 'Marca', valor: (f: FilaExportProducto) => f.producto.marca.trim() || 'Sin marca' },
+  { id: 'calidad', label: 'Calidad', valor: (f: FilaExportProducto) => f.producto.calidad.trim() || 'Sin calidad' },
+]
+
 export function ProductosPage() {
   const usuario = useAuth((s) => s.usuario)
   const admin = esAdmin(usuario)
@@ -77,6 +178,7 @@ export function ProductosPage() {
   const [filtroCalidad, setFiltroCalidad] = useState('')
   const [categoriaId, setCategoriaId] = useState<number | null>(null)
   const [configOpen, setConfigOpen] = useState(false)
+  const [exportarAbierto, setExportarAbierto] = useState(false)
 
   const { data: categorias = [], isLoading: cargandoCategorias } = useQuery({
     queryKey: ['productos-categorias'],
@@ -182,6 +284,70 @@ export function ProductosPage() {
 
   const totalResultados = visibles.reduce((total, g) => total + g.productos.length, 0)
 
+  /* ---- Exportar: las filas con su categoría raíz ya resuelta ---- */
+  const filasExportVista = useMemo(
+    () =>
+      visibles.flatMap(({ categoria, productos: filas }) =>
+        filas.map((p): FilaExportProducto => {
+          const propia = categoriaPorId.get(p.categoria)
+          return {
+            producto: p,
+            categoria: categoria.nombre,
+            subcategoria: propia?.padre != null ? propia.nombre : '',
+          }
+        }),
+      ),
+    [visibles, categoriaPorId],
+  )
+
+  const filasExportTodas = useMemo(() => {
+    const salida: FilaExportProducto[] = []
+    for (const raiz of raices) {
+      const idsGrupo = new Set([raiz.id, ...(hijasDe.get(raiz.id) ?? []).map((h) => h.id)])
+      const filas = productos
+        .filter((p) => idsGrupo.has(p.categoria) && p.activo)
+        .sort((a, b) => {
+          const ca = categoriaPorId.get(a.categoria)
+          const cb = categoriaPorId.get(b.categoria)
+          const ordenCa = ca?.padre ? 1000 + (ca.orden + 1) * 1000 + a.orden : a.orden
+          const ordenCb = cb?.padre ? 1000 + (cb.orden + 1) * 1000 + b.orden : b.orden
+          return ordenCa - ordenCb
+        })
+      for (const p of filas) {
+        const propia = categoriaPorId.get(p.categoria)
+        salida.push({
+          producto: p,
+          categoria: raiz.nombre,
+          subcategoria: propia?.padre != null ? propia.nombre : '',
+        })
+      }
+    }
+    return salida
+  }, [raices, hijasDe, productos, categoriaPorId])
+
+  const gestorExport = useMemo<GestorExport<FilaExportProducto>>(
+    () => ({
+      id: 'productos',
+      titulo: 'Productos',
+      nombreArchivo: 'productos-{fecha}',
+      columnas: admin
+        ? [...COLUMNAS_EXPORT_PRODUCTOS, COLUMNA_COSTO_PRODUCTOS]
+        : COLUMNAS_EXPORT_PRODUCTOS,
+      grupos: GRUPOS_EXPORT_PRODUCTOS,
+      agruparPorDefecto: 'categoria',
+    }),
+    [admin],
+  )
+
+  const contextoExport = useMemo(() => {
+    const partes: string[] = []
+    if (query) partes.push(`Búsqueda: «${query}»`)
+    if (filtroMarca) partes.push(`Marca: ${filtroMarca}`)
+    if (filtroCalidad) partes.push(`Calidad: ${filtroCalidad}`)
+    if (seleccionada) partes.push(`Categoría: ${seleccionada.nombre}`)
+    return partes
+  }, [query, filtroMarca, filtroCalidad, seleccionada])
+
   return (
     <div className="animate-fade-in">
       <PageHeader
@@ -195,6 +361,14 @@ export function ProductosPage() {
             <AyudaInfo titulo="Cómo usar Productos">
               <AyudaProductosPagina />
             </AyudaInfo>
+            <Button
+              variant="outline"
+              onClick={() => setExportarAbierto(true)}
+              disabled={filasExportTodas.length === 0}
+            >
+              <Download className="h-4 w-4" />
+              Exportar
+            </Button>
             {admin && (
               <Button variant="outline" onClick={() => setConfigOpen(true)}>
                 <SlidersHorizontal className="h-4 w-4" />
@@ -378,6 +552,14 @@ export function ProductosPage() {
       )}
 
       <ProductosManager open={configOpen} onClose={() => setConfigOpen(false)} />
+      <ExportarTablaModal
+        abierto={exportarAbierto}
+        onCerrar={() => setExportarAbierto(false)}
+        gestor={gestorExport}
+        filasVista={filasExportVista}
+        filasTodas={filasExportTodas}
+        contextoVista={contextoExport}
+      />
     </div>
   )
 }

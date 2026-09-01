@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   CalendarClock,
   Contact,
+  Download,
   IdCard,
   Loader2,
   type LucideIcon,
@@ -39,6 +40,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
+import { ExportarTablaModal, type GestorExport } from '@/components/exportar/ExportarTablaModal'
 
 const CONDICION_LABEL: Record<string, string> = {
   responsable_inscripto: 'Responsable Inscripto',
@@ -77,9 +79,75 @@ const ORIGEN: Record<OrigenCompra, { label: string; icono: LucideIcon }> = {
   venta: { label: 'Mostrador', icono: Store },
 }
 
+/** Qué se puede exportar de la base de clientes (botón «Exportar»). */
+const GESTOR_EXPORT_CLIENTES: GestorExport<Cliente> = {
+  id: 'clientes',
+  titulo: 'Clientes',
+  nombreArchivo: 'clientes-{fecha}',
+  columnas: [
+    { id: 'nombre', label: 'Cliente', tipo: 'texto', peso: 32, valor: (c) => c.nombre },
+    {
+      id: 'documento',
+      label: 'Documento',
+      tipo: 'texto',
+      peso: 18,
+      valor: (c) => (c.doc_numero ? `${DOC_LABEL[c.doc_tipo] ?? c.doc_tipo} ${c.doc_numero}` : ''),
+    },
+    { id: 'telefono', label: 'Teléfono', tipo: 'texto', peso: 16, valor: (c) => c.telefono || '' },
+    { id: 'email', label: 'Email', tipo: 'texto', peso: 24, valor: (c) => c.email || '' },
+    {
+      id: 'condicion',
+      label: 'Condición fiscal',
+      corto: 'Condición',
+      tipo: 'texto',
+      peso: 20,
+      valor: (c) => CONDICION_LABEL[c.condicion] ?? c.condicion,
+    },
+    {
+      id: 'compras',
+      label: 'Compras',
+      tipo: 'entero',
+      peso: 10,
+      totalizable: true,
+      valor: (c) => c.cantidad_compras ?? 0,
+    },
+    {
+      id: 'total',
+      label: 'Total gastado',
+      corto: 'Total',
+      tipo: 'ars',
+      peso: 15,
+      totalizable: true,
+      valor: (c) => c.total_gastado ?? 0,
+    },
+    {
+      id: 'ultima',
+      label: 'Última compra',
+      corto: 'Última',
+      tipo: 'fecha',
+      peso: 13,
+      valor: (c) => c.ultima_compra ?? null,
+    },
+    {
+      id: 'id',
+      label: 'ID interno',
+      corto: 'ID',
+      tipo: 'entero',
+      peso: 8,
+      opcional: true,
+      ayuda: 'Para volver a cruzar el archivo contra el sistema.',
+      valor: (c) => c.id,
+    },
+  ],
+  grupos: [
+    { id: 'condicion', label: 'Condición fiscal', valor: (c) => CONDICION_LABEL[c.condicion] ?? c.condicion },
+  ],
+}
+
 export function ClientesPage() {
   const [busqueda, setBusqueda] = useState('')
   const [selId, setSelId] = useState<number | null>(null)
+  const [exportarAbierto, setExportarAbierto] = useState(false)
 
   const { data: clientes = [], isLoading } = useQuery({
     queryKey: ['clientes'],
@@ -117,6 +185,12 @@ export function ClientesPage() {
         title="Clientes"
         subtitle="Tu base de clientes y todas sus compras: facturas y ventas de mostrador."
         className="ct-rise"
+        actions={
+          <Button variant="outline" onClick={() => setExportarAbierto(true)} disabled={clientes.length === 0}>
+            <Download className="h-4 w-4" />
+            Exportar
+          </Button>
+        }
       />
 
       <div className="mb-5 grid grid-cols-3 gap-3">
@@ -191,6 +265,14 @@ export function ClientesPage() {
       )}
 
       <ClienteDetalleModal id={selId} onClose={() => setSelId(null)} />
+      <ExportarTablaModal
+        abierto={exportarAbierto}
+        onCerrar={() => setExportarAbierto(false)}
+        gestor={GESTOR_EXPORT_CLIENTES}
+        filasVista={filtrados}
+        filasTodas={clientes}
+        contextoVista={busqueda.trim() ? [`Búsqueda: «${busqueda.trim()}»`] : []}
+      />
     </div>
   )
 }
