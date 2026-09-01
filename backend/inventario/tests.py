@@ -817,6 +817,237 @@ class PlanillaImportacionTests(TestCase):
         self.assertIn('PRODUCTOS', ' '.join(ctx.exception.messages))
 
 
+# Las seis columnas de MODULOS, cada una combinada sobre sus tres calidades:
+# A la seccion, B el modelo, y de la C a la T los grupos de a tres.
+GRUPOS_MODULOS = [
+    'COSTO USD', 'COSTO $', 'PRECIO DE LISTA USD', 'PRECIO DE LISTA $',
+    'STOCK', 'STOCK MINIMO',
+]
+COL_LISTA_USD = 9   # I: primera calidad del precio de lista
+COL_STOCK = 15      # O: primera calidad del stock
+COL_MINIMO = 18     # R: primera calidad del minimo
+
+
+def _planilla_con_modulos(
+    normales, modelos, *, encabezado=True, siglas_en_stock=True, despues=(),
+):
+    """Un .xlsx con la forma real: el bloque de siempre y abajo el de MODULOS.
+
+    `modelos` son tuplas (nombre, [celda por calidad]) en el orden CC / CO / CA,
+    donde cada celda es (lista_usd, stock, minimo) o None si esa calidad no
+    existe para ese modelo (la planilla la deja con un guion).
+
+    Con `encabezado=False` sale la planilla vieja: el bloque sin su encabezado,
+    que es el caso que el importador tiene que seguir rechazando en vez de
+    tomar un precio como si fuera un conteo.
+    """
+    import io
+
+    import openpyxl
+
+    libro = openpyxl.Workbook()
+    hoja = libro.active
+    hoja.append([
+        None, 'PRODUCTOS', 'COSTO USD', 'COSTO $', 'PRECIO DE LISTA USD',
+        'PRECIO CASH USD (20% OFF)', 'PRECIO DE LISTA CREDITO', '$/DEBITO/TRANSF',
+        'STOCK', 'STOCK MINIMO',
+    ])
+    for seccion, producto, lista, stock, minimo in normales:
+        hoja.append([seccion, producto, None, None, lista, None, None, None, stock, minimo])
+
+    fila = hoja.max_row + 1
+    hoja.cell(fila, 1).value = 'MODULOS'
+    if encabezado:
+        # El encabezado propio: el titulo de cada grupo va en su primera columna
+        # (en el archivo real esta combinado sobre las tres).
+        hoja.cell(fila, 2).value = 'PRODUCTOS'
+        for i, titulo in enumerate(GRUPOS_MODULOS):
+            hoja.cell(fila, 3 + i * 3).value = titulo
+    fila += 1
+
+    # El sub-encabezado que reparte las calidades. El archivo del negocio no lo
+    # repite sobre STOCK: `siglas_en_stock=False` reproduce ese caso.
+    for i in range(len(GRUPOS_MODULOS)):
+        if not siglas_en_stock and i >= 4:
+            continue
+        for j, sigla in enumerate(('CC', 'CO', 'CA')):
+            hoja.cell(fila, 3 + i * 3 + j).value = sigla
+    fila += 1
+
+    for nombre, calidades in modelos:
+        hoja.cell(fila, 2).value = nombre
+        for j, celda in enumerate(calidades):
+            if celda is None:
+                hoja.cell(fila, COL_LISTA_USD + j).value = '-'
+                continue
+            lista, stock, minimo = celda
+            hoja.cell(fila, COL_LISTA_USD + j).value = lista
+            hoja.cell(fila, COL_STOCK + j).value = stock
+            hoja.cell(fila, COL_MINIMO + j).value = minimo
+        fila += 1
+
+    for seccion, producto, lista, stock, minimo in despues:
+        hoja.cell(fila, 1).value = seccion
+        hoja.cell(fila, 2).value = producto
+        hoja.cell(fila, 5).value = lista
+        hoja.cell(fila, 9).value = stock
+        hoja.cell(fila, 10).value = minimo
+        fila += 1
+
+    buffer = io.BytesIO()
+    libro.save(buffer)
+    buffer.seek(0)
+    buffer.name = 'StockConModulos.xlsx'
+    return buffer
+
+
+class PlanillaModulosTests(TestCase):
+    """MODULOS: encabezado propio y las calidades (CC / CO / CA) en columnas.
+
+    Es la unica seccion donde la planilla NO pone un producto por renglon: pone
+    un modelo, y las tres calidades al costado. Cada una es un producto distinto
+    del catalogo, asi que cada una tiene que salir como su propia fila del diff
+    con su precio y su stock.
+    """
+
+    def setUp(self):
+        from .importacion import analizar
+
+        self.analizar = analizar
+        self.sucursal = Sucursal.objects.create(nombre='Modulos test', orden=93)
+        self.categoria = CategoriaProducto.objects.create(nombre='Modulos')
+        self.copia = Producto.objects.create(
+            categoria=self.categoria, nombre='Zetamodulo 11 PRO',
+            calidad='Calidad copia', precio_lista_usd=Decimal('122.4'),
+        )
+        self.original = Producto.objects.create(
+            categoria=self.categoria, nombre='Zetamodulo 11 PRO',
+            calidad='Calidad original', precio_lista_usd=Decimal('173.4'),
+        )
+        aplicar_ajuste(self.copia, self.sucursal, delta=2)
+
+    def _por_nombre(self, planilla):
+        return {f['nombre_planilla']: f for f in self.analizar(planilla, self.sucursal)['filas']}
+
+    def _una_fila(self, **kwargs):
+        return _planilla_con_modulos(
+            [], [('Zetamodulo 11 PRO', [(122.4, 9, None), (173.4, 4, 2), (224.4, 1, None)])],
+            **kwargs,
+        )
+
+    def test_cada_calidad_sale_como_su_propia_fila(self):
+        filas = self._por_nombre(self._una_fila())
+        self.assertEqual(
+            sorted(filas),
+            [
+                'Zetamodulo 11 PRO Calidad Apple',
+                'Zetamodulo 11 PRO Calidad copia',
+                'Zetamodulo 11 PRO Calidad original',
+            ],
+        )
+        # Cada una con SU stock y SU precio, no los del renglon de al lado.
+        self.assertEqual(filas['Zetamodulo 11 PRO Calidad copia']['cantidad_nueva'], 9)
+        self.assertEqual(filas['Zetamodulo 11 PRO Calidad original']['cantidad_nueva'], 4)
+        self.assertEqual(filas['Zetamodulo 11 PRO Calidad Apple']['cantidad_nueva'], 1)
+        self.assertEqual(filas['Zetamodulo 11 PRO Calidad original']['minimo_nuevo'], 2)
+        self.assertEqual(filas['Zetamodulo 11 PRO Calidad Apple']['lista_usd'], '224.4')
+
+    def test_matchea_exacto_contra_el_producto_de_esa_calidad(self):
+        """El nombre que arma la planilla es el mismo que rearma el catalogo."""
+        filas = self._por_nombre(self._una_fila())
+        copia = filas['Zetamodulo 11 PRO Calidad copia']
+        self.assertEqual(copia['confianza'], 'exacta')
+        self.assertEqual(copia['producto'], self.copia.id)
+        self.assertEqual(copia['cantidad_actual'], 2)
+        self.assertEqual(copia['estado'], 'actualiza')
+        original = filas['Zetamodulo 11 PRO Calidad original']
+        self.assertEqual(original['producto'], self.original.id)
+        # Dos calidades del mismo modelo son productos distintos: NO son duplicadas.
+        self.assertEqual(copia['duplicada_con'], [])
+
+    def test_las_siglas_solo_sobre_los_precios_igual_reparten_el_stock(self):
+        """El archivo del negocio rotula CC/CO/CA sobre los precios y no sobre STOCK.
+
+        Los grupos estan combinados de a tres, asi que el reparto que sale de un
+        grupo sirve para todos: es lo que deja leer el archivo tal cual viene.
+        """
+        filas = self._por_nombre(self._una_fila(siglas_en_stock=False))
+        self.assertEqual(filas['Zetamodulo 11 PRO Calidad copia']['cantidad_nueva'], 9)
+        self.assertEqual(filas['Zetamodulo 11 PRO Calidad Apple']['cantidad_nueva'], 1)
+
+    def test_la_calidad_que_no_existe_para_el_modelo_no_genera_fila(self):
+        planilla = _planilla_con_modulos(
+            [], [('Zetamodulo 11 PRO', [(122.4, 9, None), None, None])],
+        )
+        filas = self._por_nombre(planilla)
+        self.assertEqual(list(filas), ['Zetamodulo 11 PRO Calidad copia'])
+
+    def test_calidad_con_precio_y_sin_conteo_no_toca_el_stock(self):
+        """Celda vacia sigue sin ser cero, tambien adentro de la matriz."""
+        planilla = _planilla_con_modulos(
+            [], [('Zetamodulo 11 PRO', [(122.4, None, None), (173.4, 4, None), None])],
+        )
+        fila = self._por_nombre(planilla)['Zetamodulo 11 PRO Calidad copia']
+        self.assertEqual(fila['estado'], 'sin_valor')
+        self.assertFalse(fila['sugerido'])
+        self.assertIsNone(fila['cantidad_nueva'])
+
+    def test_el_alta_separa_el_modelo_de_la_calidad(self):
+        """Lo que se crea es "11 PRO" + "Calidad Apple", no un nombre pegado."""
+        from .importacion import aplicar
+
+        fila = self._por_nombre(self._una_fila())['Zetamodulo 11 PRO Calidad Apple']
+        self.assertEqual(fila['estado'], 'nueva')
+        self.assertTrue(fila['puede_crear'])
+        self.assertEqual(fila['nombre_base'], 'Zetamodulo 11 PRO')
+        self.assertEqual(fila['calidad'], 'Calidad Apple')
+
+        aplicar(self.sucursal, [{
+            'crear': {
+                'categoria': self.categoria,
+                'nombre': fila['nombre_base'],
+                'calidad': fila['calidad'],
+                'lista_usd': Decimal('224.4'),
+            },
+            'cantidad': fila['cantidad_nueva'],
+        }])
+        creado = Producto.objects.get(
+            categoria=self.categoria, nombre='Zetamodulo 11 PRO', calidad='Calidad Apple',
+        )
+        self.assertEqual(creado.precio_lista_usd, Decimal('224.4'))
+        # Y desde ahi la planilla lo encuentra sola, sin pasar por "nueva".
+        vuelta = self._por_nombre(self._una_fila())['Zetamodulo 11 PRO Calidad Apple']
+        self.assertEqual(vuelta['producto'], creado.id)
+        self.assertEqual(vuelta['confianza'], 'exacta')
+
+    def test_el_bloque_sin_su_encabezado_sigue_quedando_afuera(self):
+        """La planilla vieja no cambia: sin encabezado, esas filas son invalidas.
+
+        Es la red que evita el peor error posible —meter un precio como si fuera
+        un conteo— y tiene que seguir puesta para los archivos de antes.
+        """
+        filas = self._por_nombre(self._una_fila(encabezado=False))
+        self.assertEqual(list(filas), ['Zetamodulo 11 PRO'])
+        fila = filas['Zetamodulo 11 PRO']
+        self.assertEqual(fila['estado'], 'invalida')
+        self.assertIn('precios', fila['motivo'])
+
+    def test_la_seccion_de_abajo_vuelve_al_encabezado_de_arriba(self):
+        """Un titulo nuevo cierra el bloque: lo que sigue se lee como siempre."""
+        planilla = _planilla_con_modulos(
+            [('ZETATEST CABLES', 'Zetamodulo Cable', 10, 3, None)],
+            [('Zetamodulo 11 PRO', [(122.4, 9, None), None, None])],
+            despues=[('ZETATEST CABLES', 'Zetamodulo Cable', 10, 6, None)],
+        )
+        filas = self._por_nombre(planilla)
+        # El de arriba y el de abajo apuntan al mismo renglon del catalogo: se
+        # leyeron los dos con el encabezado de siempre (columna STOCK = I).
+        cable = filas['Zetamodulo Cable']
+        self.assertIn(cable['estado'], ('nueva', 'actualiza'))
+        self.assertEqual(cable['cantidad_nueva'], 6)
+        self.assertEqual(filas['Zetamodulo 11 PRO Calidad copia']['cantidad_nueva'], 9)
+
+
 class MatcheoImportacionTests(TestCase):
     """El cruce con el catalogo: exacto, aproximado y lo que se manda a revisar."""
 

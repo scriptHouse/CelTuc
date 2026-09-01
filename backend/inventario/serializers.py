@@ -286,6 +286,12 @@ class ProductoNuevoImportacionSerializer(serializers.Serializer):
     categoria = serializers.PrimaryKeyRelatedField(
         queryset=CategoriaProducto.objects.filter(activo=True),
     )
+    # Solo la trae la planilla que reparte las calidades en columnas (MODULOS):
+    # ahi el nombre es el modelo y la calidad es lo que separa un producto del
+    # otro. En el resto de las secciones viaja vacia, como hasta ahora.
+    calidad = serializers.CharField(
+        max_length=60, required=False, allow_blank=True, default='',
+    )
     lista_usd = serializers.DecimalField(
         max_digits=12, decimal_places=2, min_value=Decimal('0'),
         required=False, allow_null=True,

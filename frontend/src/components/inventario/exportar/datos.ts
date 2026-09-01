@@ -689,6 +689,67 @@ export const COLUMNAS_IMPORTADOR = [
   { id: 'minimo', label: 'STOCK MINIMO', ancho: 21.14 },
 ] as const
 
+/**
+ * Las calidades que la planilla del negocio reparte EN COLUMNAS dentro de
+ * MÓDULOS: el sub-encabezado las rotula CC / CO / CA y arriba, combinado sobre
+ * las tres, va el título del grupo (STOCK, PRECIO DE LISTA USD…). En el
+ * catálogo no son parte del nombre sino la calidad del producto:
+ * "11 PRO" + "Calidad copia".
+ *
+ * Las siglas, los nombres y el orden son el CONTRATO con el importador
+ * (`CALIDADES_EN_COLUMNA` en `backend/inventario/importacion.py`): si cambian
+ * acá, el archivo que se baja deja de volver a entrar.
+ */
+export const CALIDADES_MODULOS = [
+  { sigla: 'CC', calidad: 'Calidad copia' },
+  { sigla: 'CO', calidad: 'Calidad original' },
+  { sigla: 'CA', calidad: 'Calidad Apple' },
+] as const
+
+/** Lo que la planilla sabe de UNA calidad de UN modelo de módulo. */
+export interface CeldaModulo {
+  costoUsd: number | null
+  costoArs: number | null
+  listaUsd: number | null
+  listaArs: number | null
+  /** Unidades en la sucursal elegida. `null` = nunca se informó (celda vacía). */
+  stock: number | null
+  minimo: number | null
+}
+
+/**
+ * Los grupos del encabezado de MÓDULOS: cada título se combina sobre las tres
+ * calidades, así que el bloque ocupa 2 + 6×3 = 20 columnas (A..T), las mismas
+ * que la planilla del negocio.
+ */
+export const GRUPOS_MODULOS: ReadonlyArray<{ id: keyof CeldaModulo; label: string }> = [
+  { id: 'costoUsd', label: 'COSTO USD' },
+  { id: 'costoArs', label: 'COSTO $' },
+  { id: 'listaUsd', label: 'PRECIO DE LISTA USD' },
+  { id: 'listaArs', label: 'PRECIO DE LISTA $' },
+  { id: 'stock', label: 'STOCK' },
+  { id: 'minimo', label: 'STOCK MINIMO' },
+]
+
+/** Un modelo de la matriz de MÓDULOS: una celda por calidad, o null si no existe. */
+export interface FilaMatrizImportador {
+  nombre: string
+  celdas: Array<CeldaModulo | null>
+}
+
+/** La categoría que se escribe con las calidades en columnas. */
+const CATEGORIA_MATRIZ = 'modulos'
+
+const sinAcentos = (texto: string) =>
+  texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase()
+
+/** El lugar de esta calidad en la matriz, o -1 si no es una de las tres. */
+function columnaDeCalidad(calidad: string): number {
+  const buscada = sinAcentos(calidad || '')
+  if (!buscada) return -1
+  return CALIDADES_MODULOS.findIndex((c) => sinAcentos(c.calidad) === buscada)
+}
+
 /** Un renglón de la planilla del importador. */
 export interface FilaImportador {
   /** Título de sección: solo va en la PRIMERA fila del grupo (como el original). */
@@ -708,6 +769,11 @@ export interface FilaImportador {
 export interface GrupoImportador {
   categoria: string
   filas: FilaImportador[]
+  /**
+   * MÓDULOS: los productos cuya calidad va en columna. Se escribe como un
+   * bloque aparte, con su propio encabezado, DESPUÉS de las filas normales.
+   */
+  matriz?: FilaMatrizImportador[]
 }
 
 /**
@@ -731,6 +797,10 @@ export function nombreDePlanilla(producto: ProductoCatalogo): string {
  */
 export function filasImportador(dataset: Dataset, sucursalId: number | null): GrupoImportador[] {
   const grupos = new Map<string, FilaImportador[]>()
+  // MÓDULOS: modelo → una celda por calidad (CC / CO / CA), como la planilla.
+  const matriz = new Map<string, Array<CeldaModulo | null>>()
+  let categoriaMatriz = ''
+
   for (const fila of dataset.filas) {
     const producto = fila.producto
     // Sin sucursal elegida (caso raro: ninguna activa) el stock queda vacío,
@@ -739,6 +809,35 @@ export function filasImportador(dataset: Dataset, sucursalId: number | null): Gr
     const categoria = fila.raiz?.nombre ?? fila.categoria?.nombre ?? 'SIN CATEGORÍA'
     const lista = producto.efectivo?.lista_usd ?? producto.precio_lista_usd
     const cashUsd = producto.efectivo?.cash_usd ?? producto.precio_cash_usd
+    const listaArs = producto.efectivo?.lista_ars ?? producto.precio_lista_ars ?? null
+    // «celda vacía no es cero»: una fila que nunca se contó viaja vacía, para
+    // que al reimportar no ponga el stock en cero.
+    const stock = !stockFila || stockFila.sin_dato ? null : stockFila.cantidad
+    const minimo = stockFila?.stock_minimo ?? null
+
+    // En MÓDULOS la calidad no va en el nombre sino en su columna. El producto
+    // de esa categoría cuya calidad no es ninguna de las tres (o está vacía) se
+    // escribe como un renglón normal: así nada queda afuera del archivo.
+    const columna =
+      sinAcentos(categoria) === CATEGORIA_MATRIZ ? columnaDeCalidad(producto.calidad) : -1
+    if (columna >= 0) {
+      categoriaMatriz = categoria
+      let celdas = matriz.get(producto.nombre)
+      if (!celdas) {
+        celdas = CALIDADES_MODULOS.map(() => null)
+        matriz.set(producto.nombre, celdas)
+      }
+      celdas[columna] = {
+        costoUsd: producto.costo_usd ?? null,
+        costoArs: null, // la planilla lo deja vacío: se calcula aparte
+        listaUsd: lista ?? null,
+        listaArs,
+        stock,
+        minimo,
+      }
+      continue
+    }
+
     const item: FilaImportador = {
       categoria,
       nombre: nombreDePlanilla(producto),
@@ -746,16 +845,33 @@ export function filasImportador(dataset: Dataset, sucursalId: number | null): Gr
       costoArs: null, // la planilla lo deja vacío: se calcula aparte
       listaUsd: lista ?? null,
       cashUsd: cashUsd ?? null,
-      listaArs: producto.efectivo?.lista_ars ?? producto.precio_lista_ars ?? null,
+      listaArs,
       cashArs: producto.efectivo?.cash_ars ?? producto.precio_cash_ars ?? null,
-      // «celda vacía no es cero»: una fila que nunca se contó viaja vacía, para
-      // que al reimportar no ponga el stock en cero.
-      stock: !stockFila || stockFila.sin_dato ? null : stockFila.cantidad,
-      minimo: stockFila?.stock_minimo ?? null,
+      stock,
+      minimo,
     }
     const actual = grupos.get(categoria)
     if (actual) actual.push(item)
     else grupos.set(categoria, [item])
   }
-  return [...grupos.entries()].map(([categoria, filas]) => ({ categoria, filas }))
+
+  const salida: GrupoImportador[] = [...grupos.entries()].map(([categoria, filas]) => ({
+    categoria,
+    filas,
+  }))
+  if (!matriz.size) return salida
+
+  const bloque: FilaMatrizImportador[] = [...matriz.entries()].map(([nombre, celdas]) => ({
+    nombre,
+    celdas,
+  }))
+  const existente = salida.find((g) => g.categoria === categoriaMatriz)
+  const grupo = existente ?? { categoria: categoriaMatriz, filas: [] }
+  grupo.matriz = bloque
+  // El bloque va ÚLTIMO. Su encabezado tiene las columnas corridas y manda de
+  // esa fila para abajo, así que después no puede quedar ninguna sección
+  // normal: se leería con el mapa equivocado.
+  if (existente) salida.splice(salida.indexOf(existente), 1)
+  salida.push(grupo)
+  return salida
 }

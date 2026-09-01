@@ -137,6 +137,14 @@ export interface FilaImportacion {
   fila: number
   seccion: string
   nombre_planilla: string
+  /**
+   * Cómo se daría de alta si no existe. En MÓDULOS la planilla trae la calidad
+   * en una columna (CC / CO / CA), así que el producto es "11 PRO" + "Calidad
+   * copia" y no uno llamado "11 PRO Calidad copia". En el resto de las
+   * secciones `nombre_base` es el nombre de la planilla y `calidad` va vacía.
+   */
+  nombre_base: string
+  calidad: string
   estado: EstadoFilaImportacion
   /** Por qué quedó así (vacío cuando no hace falta explicar nada). */
   motivo: string
@@ -202,7 +210,13 @@ export interface ItemImportacionInput {
   /** Producto del catálogo al que se le fija la cantidad. */
   producto?: number
   /** O el alta de un producto que la planilla trae y no existe (solo admin). */
-  crear?: { nombre: string; categoria: number; lista_usd?: string | null }
+  crear?: {
+    nombre: string
+    categoria: number
+    /** Solo la trae MÓDULOS, que reparte las calidades en columnas. */
+    calidad?: string
+    lista_usd?: string | null
+  }
   cantidad: number
   /** null borra la alerta; omitido no la toca. */
   stock_minimo?: number | null

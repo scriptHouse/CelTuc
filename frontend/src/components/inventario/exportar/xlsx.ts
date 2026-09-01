@@ -17,8 +17,14 @@
  * ejecutar y validar fuera del navegador.
  */
 import ExcelJS from 'exceljs'
-import { COLUMNAS_IMPORTADOR, filasImportador } from './datos'
-import type { ColumnaResuelta, Dataset, FilaExport, TotalesExport } from './datos'
+import { CALIDADES_MODULOS, COLUMNAS_IMPORTADOR, GRUPOS_MODULOS, filasImportador } from './datos'
+import type {
+  ColumnaResuelta,
+  Dataset,
+  FilaExport,
+  GrupoImportador,
+  TotalesExport,
+} from './datos'
 import type { TipoColumna } from './tipos'
 
 /** Un renglón del kardex ya resuelto (nombres, no ids). */
@@ -677,6 +683,116 @@ const BORDE_PLANILLA: Partial<ExcelJS.Borders> = {
 /** El fondo de cada columna: impares azul, pares blanco (como el original). */
 const fondoPlanilla = (columna: number) => (columna % 2 === 1 ? PLANILLA_AZUL : PLANILLA_BLANCO)
 
+/** La primera columna de datos del bloque de MÓDULOS (C: A es la sección, B el modelo). */
+const MODULOS_PRIMERA = 3
+/** El bloque ocupa A..T: dos columnas fijas y seis grupos de tres calidades. */
+const MODULOS_ULTIMA =
+  MODULOS_PRIMERA + GRUPOS_MODULOS.length * CALIDADES_MODULOS.length - 1
+
+/** El formato de cada grupo de MÓDULOS, en el orden de `GRUPOS_MODULOS`. */
+const FMT_MODULOS: Record<string, string> = {
+  costoUsd: FMT_PLANILLA_USD,
+  costoArs: FMT_PLANILLA_ARS,
+  listaUsd: FMT_PLANILLA_USD,
+  listaArs: FMT_PLANILLA_PESOS,
+  stock: FMT_ENTERO,
+  minimo: FMT_ENTERO,
+}
+
+/** El fondo de cada grupo: alternado, para que se vea dónde empieza y termina. */
+const fondoGrupoModulos = (grupo: number) =>
+  grupo % 2 === 0 ? PLANILLA_AZUL : PLANILLA_BLANCO
+
+/**
+ * El bloque de MÓDULOS: la planilla reparte ahí las calidades EN COLUMNAS
+ * (CC / CO / CA) en vez de meterlas en el nombre, y para eso vuelve a escribir
+ * el encabezado con las columnas corridas.
+ *
+ * Se escribe igual que el archivo del negocio —título de grupo combinado sobre
+ * sus tres calidades, sub-encabezado con las siglas, un renglón por modelo— y
+ * el importador lo entiende porque cada encabezado nuevo manda desde su fila
+ * hacia abajo (`_columnas_de` en `backend/inventario/importacion.py`).
+ *
+ * Devuelve la primera fila libre.
+ */
+function bloqueModulos(
+  ws: ExcelJS.Worksheet,
+  filaInicial: number,
+  grupo: GrupoImportador,
+): number {
+  const filas = grupo.matriz ?? []
+  if (!filas.length) return filaInicial
+
+  const pintar = (celda: ExcelJS.Cell, fondo: string, negrita = false) => {
+    celda.font = { name: FUENTE, size: 10, bold: negrita, color: { argb: PLANILLA_NEGRO } }
+    celda.fill = fill(fondo)
+    celda.border = BORDE_PLANILLA
+    celda.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }
+  }
+
+  /* ---- Encabezado propio: PRODUCTOS y un título por grupo ---- */
+  const cabecera = ws.getRow(filaInicial)
+  cabecera.height = 25.5
+  pintar(cabecera.getCell(2), PLANILLA_BLANCO, true)
+  cabecera.getCell(2).value = 'PRODUCTOS'
+  GRUPOS_MODULOS.forEach((columna, i) => {
+    const desde = MODULOS_PRIMERA + i * CALIDADES_MODULOS.length
+    const hasta = desde + CALIDADES_MODULOS.length - 1
+    ws.mergeCells(filaInicial, desde, filaInicial, hasta)
+    const celda = cabecera.getCell(desde)
+    celda.value = columna.label
+    pintar(celda, fondoGrupoModulos(i), true)
+    // El merge deja las otras dos celdas vacías: se pintan igual para que el
+    // borde del grupo cierre parejo.
+    for (let c = desde + 1; c <= hasta; c++) pintar(cabecera.getCell(c), fondoGrupoModulos(i))
+  })
+
+  /* ---- Sub-encabezado: las tres calidades bajo cada grupo ---- */
+  const siglas = ws.getRow(filaInicial + 1)
+  siglas.height = 15
+  pintar(siglas.getCell(2), PLANILLA_BLANCO)
+  GRUPOS_MODULOS.forEach((_, i) => {
+    CALIDADES_MODULOS.forEach((calidad, j) => {
+      const celda = siglas.getCell(MODULOS_PRIMERA + i * CALIDADES_MODULOS.length + j)
+      celda.value = calidad.sigla
+      pintar(celda, fondoGrupoModulos(i), true)
+    })
+  })
+
+  /* ---- Un renglón por modelo ---- */
+  let fila = filaInicial + 2
+  for (const item of filas) {
+    const r = ws.getRow(fila)
+    r.height = 15
+    const nombre = r.getCell(2)
+    nombre.value = item.nombre
+    pintar(nombre, PLANILLA_BLANCO)
+    nombre.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+    GRUPOS_MODULOS.forEach((columna, i) => {
+      CALIDADES_MODULOS.forEach((_, j) => {
+        const celda = r.getCell(MODULOS_PRIMERA + i * CALIDADES_MODULOS.length + j)
+        // La calidad que no existe para ese modelo viaja VACÍA, igual que una
+        // fila sin contar: el importador la deja como está.
+        celda.value = item.celdas[j]?.[columna.id] ?? null
+        pintar(celda, fondoGrupoModulos(i))
+        celda.numFmt = FMT_MODULOS[columna.id]
+      })
+    })
+    fila += 1
+  }
+
+  /* ---- El título de la sección, combinado en vertical como el original ---- */
+  const ultima = fila - 1
+  if (ultima > filaInicial) ws.mergeCells(`A${filaInicial}:A${ultima}`)
+  const titulo = ws.getCell(filaInicial, 1)
+  titulo.value = grupo.categoria
+  titulo.font = { name: FUENTE, size: 10, bold: true, color: { argb: PLANILLA_NEGRO } }
+  titulo.fill = fill(PLANILLA_AZUL)
+  titulo.alignment = { vertical: 'middle', horizontal: 'center', textRotation: 90 }
+  titulo.border = BORDE_PLANILLA
+  return fila
+}
+
 /**
  * La planilla tal cual la lee «Importar stock»: encabezado en la fila 1,
  * categoría combinada en la columna A y una fila por producto.
@@ -692,7 +808,9 @@ function hojaImportador(wb: ExcelJS.Workbook, dataset: Dataset) {
     config.xlsx.sucursalImportador ?? dataset.sucursales[0]?.id ?? null
   const sucursal = dataset.sucursales.find((s) => s.id === sucursalId)
   const grupos = filasImportador(dataset, sucursalId)
-  const nCols = COLUMNAS_IMPORTADOR.length
+  // MÓDULOS ensancha la hoja hasta la T: sus calidades van en columnas.
+  const conModulos = grupos.some((g) => g.matriz?.length)
+  const nCols = conModulos ? MODULOS_ULTIMA : COLUMNAS_IMPORTADOR.length
 
   const ws = wb.addWorksheet((sucursal?.nombre ?? 'Stock').slice(0, 31), {
     pageSetup: {
@@ -704,12 +822,18 @@ function hojaImportador(wb: ExcelJS.Workbook, dataset: Dataset) {
       margins: { left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 },
     },
   })
-  ws.columns = COLUMNAS_IMPORTADOR.map((c) => ({
-    width: c.ancho,
+  const anchos = COLUMNAS_IMPORTADOR.map((c) => c.ancho)
+  // Las columnas de más del bloque de MÓDULOS toman el ancho de las de precio.
+  const anchoPrecio = COLUMNAS_IMPORTADOR[2].ancho
+  while (anchos.length < nCols) anchos.push(anchoPrecio)
+  ws.columns = anchos.map((width) => ({
+    width,
     style: { font: { name: FUENTE, size: 10 } },
   }))
 
-  /* ---- Fila 1: los rótulos que busca el importador ---- */
+  /* ---- Fila 1: los rótulos que busca el importador ----
+     Son siempre las diez columnas de la planilla: el bloque de MÓDULOS trae
+     después su propio encabezado, con las columnas corridas. */
   const cabecera = ws.getRow(1)
   cabecera.height = 25.5
   COLUMNAS_IMPORTADOR.forEach((columna, i) => {
@@ -762,16 +886,21 @@ function hojaImportador(wb: ExcelJS.Workbook, dataset: Dataset) {
       fila += 1
     }
     const hasta = fila - 1
-    if (hasta < desde) continue
-    // El título de la sección: una celda combinada en vertical, como el original.
-    if (hasta > desde) ws.mergeCells(`A${desde}:A${hasta}`)
-    const titulo = ws.getCell(desde, 1)
-    titulo.value = grupo.categoria
-    titulo.font = { name: FUENTE, size: 10, bold: true, color: { argb: PLANILLA_NEGRO } }
-    titulo.fill = fill(PLANILLA_AZUL)
-    // Vertical y centrado, como en la planilla del negocio (la columna A mide 5).
-    titulo.alignment = { vertical: 'middle', horizontal: 'center', textRotation: 90 }
-    titulo.border = BORDE_PLANILLA
+    if (hasta >= desde) {
+      // El título de la sección: una celda combinada en vertical, como el original.
+      if (hasta > desde) ws.mergeCells(`A${desde}:A${hasta}`)
+      const titulo = ws.getCell(desde, 1)
+      titulo.value = grupo.categoria
+      titulo.font = { name: FUENTE, size: 10, bold: true, color: { argb: PLANILLA_NEGRO } }
+      titulo.fill = fill(PLANILLA_AZUL)
+      // Vertical y centrado, como en la planilla del negocio (la columna A mide 5).
+      titulo.alignment = { vertical: 'middle', horizontal: 'center', textRotation: 90 }
+      titulo.border = BORDE_PLANILLA
+    }
+    // MÓDULOS cierra la hoja con su bloque de calidades en columnas. Va al
+    // final y con su propio encabezado: de esa fila para abajo el importador
+    // lee con ESE mapa, así que no puede quedar nada normal después.
+    if (grupo.matriz?.length) fila = bloqueModulos(ws, fila, grupo)
   }
 
   ws.views = [{ state: 'frozen', ySplit: 1, activeCell: 'B2' }]

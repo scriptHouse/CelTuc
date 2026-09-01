@@ -370,8 +370,12 @@ export function ImportarStockModal({
         return {
           ...base,
           crear: {
-            nombre: fila.nombre_planilla,
+            // El nombre y la calidad van separados: en MÓDULOS la planilla trae
+            // la calidad en su propia columna (fuera de las dos coinciden con
+            // el nombre de la planilla y una calidad vacía).
+            nombre: fila.nombre_base,
             categoria: fila.categoria_id!,
+            calidad: fila.calidad,
             lista_usd: fila.lista_usd,
           },
         }

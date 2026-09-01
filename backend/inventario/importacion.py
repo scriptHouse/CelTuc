@@ -10,10 +10,14 @@ Dos cuidados que definen el diseño:
 1. **Celda vacia NO es cero.** Si la planilla no informa cantidad, la fila se
    marca `sin_valor` y no se toca el stock. Sin esta regla, importar una
    planilla a medio llenar pondria en cero medio inventario.
-2. **La columna STOCK no siempre es stock.** En la seccion MODULOS la planilla
-   reusa esas columnas para los precios CO/AO. Se detecta por el sub-encabezado
-   (una etiqueta de texto donde deberia ir un numero) y, ademas, cualquier valor
-   que no parezca un conteo queda fuera con su motivo a la vista.
+2. **La hoja cambia de forma en el medio.** MODULOS vuelve a escribir el
+   encabezado con las columnas corridas y reparte las calidades (CC / CO / CA)
+   EN COLUMNAS: cada modelo es un renglon con tres precios y tres stocks. Cada
+   encabezado nuevo manda desde su fila hacia abajo y cada calidad sale como su
+   propia fila ("11 PRO" + "Calidad copia"). Si ese bloque llega sin encabezado
+   (una planilla vieja), sigue valiendo la red de siempre: se detecta que la
+   columna STOCK esta ocupada por precios y esas filas quedan afuera con el
+   motivo a la vista, en vez de meter un precio como si fuera un conteo.
 
 El matcheo contra el catalogo va de lo seguro a lo dudoso: nombre exacto (con
 las variantes que arma la planilla: "Fuente 20W - CO" es nombre + calidad),
@@ -59,6 +63,18 @@ ENCABEZADO_STOCK = 'stock'
 ENCABEZADO_MINIMO = 'stock minimo'
 ENCABEZADO_LISTA = 'precio de lista usd'
 
+# Las calidades que la planilla reparte EN COLUMNAS (hoy solo MODULOS): arriba
+# va el titulo del grupo combinado sobre las tres (STOCK, PRECIO DE LISTA USD)
+# y abajo el sub-encabezado que las nombra. El catalogo no las guarda en el
+# nombre sino en la calidad del producto: "11 PRO" + "Calidad copia".
+CALIDADES_EN_COLUMNA = {
+    'cc': 'Calidad copia',
+    'co': 'Calidad original',
+    'ca': 'Calidad Apple',
+}
+# Lo que escribe la planilla cuando esa calidad no existe para ese modelo.
+SIN_DATO_PLANILLA = ('-', '--', 'n/a', 's/d')
+
 
 # ===== Normalizacion =====
 
@@ -95,28 +111,89 @@ def _a_decimal(valor):
 
 # ===== Lectura de la planilla =====
 
+def _columnas_de(fila):
+    """Las columnas de una fila de encabezado, o None si no lo es.
+
+    Alcanza con que esten PRODUCTOS y STOCK; el minimo y el precio de lista son
+    opcionales. Se usa dos veces —para encontrar el encabezado de arriba y para
+    reconocer el que MODULOS vuelve a escribir en el medio de la hoja— asi que
+    ninguna posicion queda fija: cada bloque dice donde tiene lo suyo.
+    """
+    rotulos = [normalizar(c) for c in fila]
+    if ENCABEZADO_PRODUCTO not in rotulos or ENCABEZADO_STOCK not in rotulos:
+        return None
+    return {
+        'producto': rotulos.index(ENCABEZADO_PRODUCTO),
+        'stock': rotulos.index(ENCABEZADO_STOCK),
+        'minimo': rotulos.index(ENCABEZADO_MINIMO) if ENCABEZADO_MINIMO in rotulos else None,
+        'lista': rotulos.index(ENCABEZADO_LISTA) if ENCABEZADO_LISTA in rotulos else None,
+    }
+
+
 def _indice_encabezado(filas):
     """La fila que tiene los rotulos (PRODUCTOS ... STOCK) y sus columnas."""
     for i, fila in enumerate(filas):
-        rotulos = [normalizar(c) for c in fila]
-        if ENCABEZADO_PRODUCTO in rotulos and ENCABEZADO_STOCK in rotulos:
-            columnas = {
-                'producto': rotulos.index(ENCABEZADO_PRODUCTO),
-                'stock': rotulos.index(ENCABEZADO_STOCK),
-                'minimo': rotulos.index(ENCABEZADO_MINIMO) if ENCABEZADO_MINIMO in rotulos else None,
-                'lista': rotulos.index(ENCABEZADO_LISTA) if ENCABEZADO_LISTA in rotulos else None,
-            }
+        columnas = _columnas_de(fila)
+        if columnas is not None:
             return i, columnas
     return None, None
+
+
+def _calidades_desde(fila, inicio):
+    """Las calidades rotuladas a partir de `inicio`, en columnas consecutivas."""
+    if inicio is None:
+        return []
+    encontradas = []
+    for salto in range(len(CALIDADES_EN_COLUMNA)):
+        posicion = inicio + salto
+        if posicion >= len(fila):
+            break
+        calidad = CALIDADES_EN_COLUMNA.get(normalizar(fila[posicion]))
+        if calidad is None:
+            break
+        encontradas.append((calidad, salto))
+    # Una sola etiqueta no es un reparto sino un rotulo suelto: con ese piso, un
+    # "CO" perdido en una celda no se confunde con la matriz de MODULOS.
+    return encontradas if len(encontradas) > 1 else []
+
+
+def _calidades_de_subencabezado(fila, columnas):
+    """El reparto de calidades en columnas de un sub-encabezado, o [].
+
+    La planilla combina el titulo de cada grupo sobre sus tres columnas y rotula
+    abajo CC / CO / CA. Alcanza con encontrar UN grupo rotulado: los
+    desplazamientos son los mismos para todos, asi que el que sale del precio de
+    lista sirve igual para STOCK, que en el archivo del negocio no repite las
+    etiquetas.
+    """
+    for cual in ('stock', 'lista', 'minimo'):
+        encontradas = _calidades_desde(fila, columnas.get(cual))
+        if encontradas:
+            return encontradas
+    return []
+
+
+def _informa(valor):
+    """Si la celda dice algo: la planilla marca con un guion lo que no existe."""
+    if valor is None:
+        return False
+    if isinstance(valor, str):
+        texto = valor.strip()
+        return bool(texto) and texto.lower() not in SIN_DATO_PLANILLA
+    return True
 
 
 def leer_planilla(archivo):
     """Devuelve las filas de producto de la planilla, ya ubicadas por columna.
 
     Cada fila es un dict con `fila` (numero real en el Excel, para que quien
-    revisa pueda ir a buscarla), `seccion`, `nombre`, `stock_crudo`,
-    `minimo_crudo`, `lista_usd` y `columna_ocupada` (la seccion reusa la
-    columna STOCK para otra cosa).
+    revisa pueda ir a buscarla), `seccion`, `nombre`, `nombre_base`, `calidad`,
+    `stock_crudo`, `minimo_crudo`, `lista_usd` y `columna_ocupada` (la seccion
+    reusa la columna STOCK para otra cosa).
+
+    La hoja puede cambiar de forma en el medio: cada encabezado nuevo manda
+    desde su fila hacia abajo y, si abajo reparte las calidades en columnas,
+    cada modelo sale como una fila por calidad.
     """
     try:
         import openpyxl
@@ -150,25 +227,56 @@ def leer_planilla(archivo):
             'con las columnas "PRODUCTOS" y "STOCK".'
         )
 
-    def celda(fila, cual):
+    def celda(fila, cual, salto=0):
         pos = columnas[cual]
-        return fila[pos] if pos is not None and pos < len(fila) else None
+        if pos is None:
+            return None
+        pos += salto
+        return fila[pos] if pos < len(fila) else None
 
+    base = columnas
     filas = []
     seccion = ''
     columna_ocupada = False
     # El sub-encabezado aparece JUSTO ANTES del titulo de su seccion, asi que
     # su aviso tiene que sobrevivir a ese cambio de seccion (y solo a ese).
     hereda_aviso = False
+    # Calidades en columna del bloque activo: [(calidad, desplazamiento)].
+    calidades = []
+    # Solo se buscan en la fila siguiente a un encabezado nuevo. En el bloque de
+    # arriba no se busca nada, que es lo que garantiza que las planillas de
+    # siempre se sigan leyendo exactamente igual que antes.
+    buscando_calidades = False
     for numero in range(indice + 1, len(crudas)):
         cruda = crudas[numero]
         etiqueta = str(cruda[0] or '').strip() if cruda else ''
+        otro_encabezado = _columnas_de(cruda) if cruda else None
         if etiqueta:
             seccion = etiqueta
+            # Un titulo nuevo cierra el bloque de calidades y devuelve la hoja a
+            # su encabezado de arriba. No cuando el titulo viene en la MISMA
+            # fila que el encabezado que abre el bloque: asi lo escribe MODULOS.
+            if otro_encabezado is None and calidades:
+                columnas, calidades = base, []
             columna_ocupada = hereda_aviso
             hereda_aviso = False
+        if otro_encabezado is not None:
+            # La hoja vuelve a empezar con otras columnas (asi entra MODULOS):
+            # de aca para abajo se lee con este mapa.
+            columnas = otro_encabezado
+            calidades = []
+            buscando_calidades = True
+            columna_ocupada = False
+            hereda_aviso = False
+            continue
         nombre = str(celda(cruda, 'producto') or '').strip()
         if not nombre:
+            if buscando_calidades:
+                encontradas = _calidades_de_subencabezado(cruda, columnas)
+                if encontradas:
+                    calidades = encontradas
+                    buscando_calidades = False
+                    continue
             # Sub-encabezado: la planilla rotula con texto la columna donde
             # deberian ir unidades (MODULOS la usa para los precios CO/AO).
             valor = celda(cruda, 'stock')
@@ -176,16 +284,52 @@ def leer_planilla(archivo):
                 columna_ocupada = True
                 hereda_aviso = True
             continue
+        buscando_calidades = False
+        if calidades:
+            filas.extend(_filas_por_calidad(cruda, celda, numero, seccion, nombre, calidades))
+            continue
         filas.append({
             'fila': numero + 1,
             'seccion': seccion,
             'nombre': nombre,
+            'nombre_base': nombre,
+            'calidad': '',
             'stock_crudo': celda(cruda, 'stock'),
             'minimo_crudo': celda(cruda, 'minimo'),
             'lista_usd': _a_decimal(celda(cruda, 'lista')),
             'columna_ocupada': columna_ocupada,
         })
     return filas
+
+
+def _filas_por_calidad(cruda, celda, numero, seccion, nombre, calidades):
+    """Una fila de la planilla que trae varias calidades EN COLUMNAS.
+
+    Sale una fila por calidad, cada una con su precio y su stock. La calidad que
+    no existe para ese modelo no genera fila: la planilla la deja con un guion y
+    sin unidades, y una fila fantasma solo ensuciaria la revision.
+    """
+    salidas = []
+    for calidad, salto in calidades:
+        stock = celda(cruda, 'stock', salto)
+        lista = _a_decimal(celda(cruda, 'lista', salto))
+        if not _informa(stock):
+            # El guion es "no existe", no "conte cero": se lee como celda vacia.
+            stock = None
+            if lista is None:
+                continue
+        salidas.append({
+            'fila': numero + 1,
+            'seccion': seccion,
+            'nombre': f'{nombre} {calidad}',
+            'nombre_base': nombre,
+            'calidad': calidad,
+            'stock_crudo': stock,
+            'minimo_crudo': celda(cruda, 'minimo', salto),
+            'lista_usd': lista,
+            'columna_ocupada': False,
+        })
+    return salidas
 
 
 def _cantidad(valor):
@@ -305,16 +449,26 @@ class IndiceCatalogo:
             return 0
         return 1 if abs(lista_usd - producto.precio_lista_usd) < Decimal('0.02') else 0
 
-    def buscar(self, nombre, seccion, lista_usd):
+    def buscar(self, nombre, seccion, lista_usd, calidad=''):
         """(producto, confianza, candidatos).
 
         `confianza` es 'exacta' o 'aproximada'. Si no se puede decidir, devuelve
         (None, None, candidatos) — con candidatos vacio significa que el
         producto no esta en el catalogo.
+
+        `calidad` solo llega cuando la planilla la dice en una columna (MODULOS).
+        Cuando llega, manda: un producto de OTRA calidad no es este por mas
+        parecido que sea el nombre. Sin esa regla "11 PRO Calidad Apple" se
+        pegaria por parecido a "11 PRO Calidad copia" —dos productos distintos
+        que solo se diferencian en una palabra— y el conteo de uno terminaria
+        escrito en el otro.
         """
         buscada = clave(nombre)
+        pedida = clave(calidad)
         categoria = self.categoria_de_seccion(seccion)
         candidatos = list(self.por_clave.get(buscada, ()))
+        if pedida:
+            candidatos = [p for p in candidatos if clave(p.calidad) == pedida]
         # La seccion desempata: si hay candidatos ahi, los de otras secciones
         # sobran. Si no hay ninguno, se aceptan los de afuera (la planilla junta
         # en una seccion cosas que el catalogo separo, ej. cables dentro de
@@ -355,6 +509,8 @@ class IndiceCatalogo:
                 continue
             base = difflib.SequenceMatcher(None, buscada, cercana).ratio()
             for producto in self.por_clave[cercana]:
+                if pedida and clave(producto.calidad) != pedida:
+                    continue
                 total = base
                 if categoria and self.raiz_de_producto[producto.id] == categoria.id:
                     total += 0.10
@@ -409,7 +565,7 @@ def analizar(archivo, sucursal):
         cantidad, motivo = _cantidad(cruda['stock_crudo'])
         minimo, _ = _cantidad(cruda['minimo_crudo'])
         producto, confianza, candidatos = indice.buscar(
-            cruda['nombre'], cruda['seccion'], cruda['lista_usd'],
+            cruda['nombre'], cruda['seccion'], cruda['lista_usd'], cruda['calidad'],
         )
         categoria = indice.categoria_de_seccion(cruda['seccion'])
         actual = actuales.get(producto.id) if producto is not None else None
@@ -418,6 +574,11 @@ def analizar(archivo, sucursal):
             'fila': cruda['fila'],
             'seccion': cruda['seccion'],
             'nombre_planilla': cruda['nombre'],
+            # Como se daria de alta si no existe: MODULOS trae la calidad en
+            # una columna, asi que el alta es "11 PRO" + "Calidad copia" y no
+            # un producto llamado "11 PRO Calidad copia".
+            'nombre_base': cruda['nombre_base'],
+            'calidad': cruda['calidad'],
             'confianza': confianza,
             'producto': producto.id if producto is not None else None,
             'producto_nombre': producto.nombre if producto is not None else '',
@@ -544,14 +705,17 @@ def _crear_producto(datos, usuario):
 
     Nace con lo unico que la planilla sabe: nombre, categoria de su seccion y
     precio de lista en dolares (los demas precios los deriva el catalogo, como
-    con cualquier producto). Lo fino —marca, calidad, notas— se completa
-    despues desde Productos.
+    con cualquier producto). Se suma la calidad cuando la planilla la trae en
+    una columna (MODULOS: CC / CO / CA), porque ahi si la sabe y sin ella los
+    tres modulos de un mismo modelo serian el mismo producto. Lo fino —marca,
+    notas— se completa despues desde Productos.
     """
     categoria = datos['categoria']
     ultimo = Producto.objects.filter(categoria=categoria).aggregate(m=Max('orden'))['m'] or 0
     return Producto.objects.create(
         categoria=categoria,
         nombre=datos['nombre'][:200],
+        calidad=(datos.get('calidad') or '')[:60],
         precio_lista_usd=datos.get('lista_usd'),
         orden=ultimo + 1,
         creado_por=usuario,
