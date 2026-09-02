@@ -916,15 +916,15 @@ class PlanillaModulosTests(TestCase):
         self.analizar = analizar
         self.sucursal = Sucursal.objects.create(nombre='Modulos test', orden=93)
         self.categoria = CategoriaProducto.objects.create(nombre='Modulos')
-        self.copia = Producto.objects.create(
+        self.certificada = Producto.objects.create(
             categoria=self.categoria, nombre='Zetamodulo 11 PRO',
-            calidad='Calidad copia', precio_lista_usd=Decimal('122.4'),
+            calidad='Calidad certificada', precio_lista_usd=Decimal('122.4'),
         )
         self.original = Producto.objects.create(
             categoria=self.categoria, nombre='Zetamodulo 11 PRO',
             calidad='Calidad original', precio_lista_usd=Decimal('173.4'),
         )
-        aplicar_ajuste(self.copia, self.sucursal, delta=2)
+        aplicar_ajuste(self.certificada, self.sucursal, delta=2)
 
     def _por_nombre(self, planilla):
         return {f['nombre_planilla']: f for f in self.analizar(planilla, self.sucursal)['filas']}
@@ -941,12 +941,12 @@ class PlanillaModulosTests(TestCase):
             sorted(filas),
             [
                 'Zetamodulo 11 PRO Calidad Apple',
-                'Zetamodulo 11 PRO Calidad copia',
+                'Zetamodulo 11 PRO Calidad certificada',
                 'Zetamodulo 11 PRO Calidad original',
             ],
         )
         # Cada una con SU stock y SU precio, no los del renglon de al lado.
-        self.assertEqual(filas['Zetamodulo 11 PRO Calidad copia']['cantidad_nueva'], 9)
+        self.assertEqual(filas['Zetamodulo 11 PRO Calidad certificada']['cantidad_nueva'], 9)
         self.assertEqual(filas['Zetamodulo 11 PRO Calidad original']['cantidad_nueva'], 4)
         self.assertEqual(filas['Zetamodulo 11 PRO Calidad Apple']['cantidad_nueva'], 1)
         self.assertEqual(filas['Zetamodulo 11 PRO Calidad original']['minimo_nuevo'], 2)
@@ -955,15 +955,15 @@ class PlanillaModulosTests(TestCase):
     def test_matchea_exacto_contra_el_producto_de_esa_calidad(self):
         """El nombre que arma la planilla es el mismo que rearma el catalogo."""
         filas = self._por_nombre(self._una_fila())
-        copia = filas['Zetamodulo 11 PRO Calidad copia']
-        self.assertEqual(copia['confianza'], 'exacta')
-        self.assertEqual(copia['producto'], self.copia.id)
-        self.assertEqual(copia['cantidad_actual'], 2)
-        self.assertEqual(copia['estado'], 'actualiza')
+        certificada = filas['Zetamodulo 11 PRO Calidad certificada']
+        self.assertEqual(certificada['confianza'], 'exacta')
+        self.assertEqual(certificada['producto'], self.certificada.id)
+        self.assertEqual(certificada['cantidad_actual'], 2)
+        self.assertEqual(certificada['estado'], 'actualiza')
         original = filas['Zetamodulo 11 PRO Calidad original']
         self.assertEqual(original['producto'], self.original.id)
         # Dos calidades del mismo modelo son productos distintos: NO son duplicadas.
-        self.assertEqual(copia['duplicada_con'], [])
+        self.assertEqual(certificada['duplicada_con'], [])
 
     def test_las_siglas_solo_sobre_los_precios_igual_reparten_el_stock(self):
         """El archivo del negocio rotula CC/CO/CA sobre los precios y no sobre STOCK.
@@ -972,7 +972,7 @@ class PlanillaModulosTests(TestCase):
         grupo sirve para todos: es lo que deja leer el archivo tal cual viene.
         """
         filas = self._por_nombre(self._una_fila(siglas_en_stock=False))
-        self.assertEqual(filas['Zetamodulo 11 PRO Calidad copia']['cantidad_nueva'], 9)
+        self.assertEqual(filas['Zetamodulo 11 PRO Calidad certificada']['cantidad_nueva'], 9)
         self.assertEqual(filas['Zetamodulo 11 PRO Calidad Apple']['cantidad_nueva'], 1)
 
     def test_la_calidad_que_no_existe_para_el_modelo_no_genera_fila(self):
@@ -980,14 +980,14 @@ class PlanillaModulosTests(TestCase):
             [], [('Zetamodulo 11 PRO', [(122.4, 9, None), None, None])],
         )
         filas = self._por_nombre(planilla)
-        self.assertEqual(list(filas), ['Zetamodulo 11 PRO Calidad copia'])
+        self.assertEqual(list(filas), ['Zetamodulo 11 PRO Calidad certificada'])
 
     def test_calidad_con_precio_y_sin_conteo_no_toca_el_stock(self):
         """Celda vacia sigue sin ser cero, tambien adentro de la matriz."""
         planilla = _planilla_con_modulos(
             [], [('Zetamodulo 11 PRO', [(122.4, None, None), (173.4, 4, None), None])],
         )
-        fila = self._por_nombre(planilla)['Zetamodulo 11 PRO Calidad copia']
+        fila = self._por_nombre(planilla)['Zetamodulo 11 PRO Calidad certificada']
         self.assertEqual(fila['estado'], 'sin_valor')
         self.assertFalse(fila['sugerido'])
         self.assertIsNone(fila['cantidad_nueva'])
@@ -1045,7 +1045,7 @@ class PlanillaModulosTests(TestCase):
         cable = filas['Zetamodulo Cable']
         self.assertIn(cable['estado'], ('nueva', 'actualiza'))
         self.assertEqual(cable['cantidad_nueva'], 6)
-        self.assertEqual(filas['Zetamodulo 11 PRO Calidad copia']['cantidad_nueva'], 9)
+        self.assertEqual(filas['Zetamodulo 11 PRO Calidad certificada']['cantidad_nueva'], 9)
 
 
 class MatcheoImportacionTests(TestCase):

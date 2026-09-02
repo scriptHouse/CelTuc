@@ -14,7 +14,7 @@ Dos cuidados que definen el diseño:
    encabezado con las columnas corridas y reparte las calidades (CC / CO / CA)
    EN COLUMNAS: cada modelo es un renglon con tres precios y tres stocks. Cada
    encabezado nuevo manda desde su fila hacia abajo y cada calidad sale como su
-   propia fila ("11 PRO" + "Calidad copia"). Si ese bloque llega sin encabezado
+   propia fila ("11 PRO" + "Calidad certificada"). Si ese bloque llega sin encabezado
    (una planilla vieja), sigue valiendo la red de siempre: se detecta que la
    columna STOCK esta ocupada por precios y esas filas quedan afuera con el
    motivo a la vista, en vez de meter un precio como si fuera un conteo.
@@ -66,9 +66,9 @@ ENCABEZADO_LISTA = 'precio de lista usd'
 # Las calidades que la planilla reparte EN COLUMNAS (hoy solo MODULOS): arriba
 # va el titulo del grupo combinado sobre las tres (STOCK, PRECIO DE LISTA USD)
 # y abajo el sub-encabezado que las nombra. El catalogo no las guarda en el
-# nombre sino en la calidad del producto: "11 PRO" + "Calidad copia".
+# nombre sino en la calidad del producto: "11 PRO" + "Calidad certificada".
 CALIDADES_EN_COLUMNA = {
-    'cc': 'Calidad copia',
+    'cc': 'Calidad certificada',
     'co': 'Calidad original',
     'ca': 'Calidad Apple',
 }
@@ -459,7 +459,7 @@ class IndiceCatalogo:
         `calidad` solo llega cuando la planilla la dice en una columna (MODULOS).
         Cuando llega, manda: un producto de OTRA calidad no es este por mas
         parecido que sea el nombre. Sin esa regla "11 PRO Calidad Apple" se
-        pegaria por parecido a "11 PRO Calidad copia" —dos productos distintos
+        pegaria por parecido a "11 PRO Calidad certificada" —dos productos distintos
         que solo se diferencian en una palabra— y el conteo de uno terminaria
         escrito en el otro.
         """
@@ -575,8 +575,8 @@ def analizar(archivo, sucursal):
             'seccion': cruda['seccion'],
             'nombre_planilla': cruda['nombre'],
             # Como se daria de alta si no existe: MODULOS trae la calidad en
-            # una columna, asi que el alta es "11 PRO" + "Calidad copia" y no
-            # un producto llamado "11 PRO Calidad copia".
+            # una columna, asi que el alta es "11 PRO" + "Calidad certificada" y no
+            # un producto llamado "11 PRO Calidad certificada".
             'nombre_base': cruda['nombre_base'],
             'calidad': cruda['calidad'],
             'confianza': confianza,

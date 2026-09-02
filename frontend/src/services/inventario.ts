@@ -140,8 +140,8 @@ export interface FilaImportacion {
   /**
    * Cómo se daría de alta si no existe. En MÓDULOS la planilla trae la calidad
    * en una columna (CC / CO / CA), así que el producto es "11 PRO" + "Calidad
-   * copia" y no uno llamado "11 PRO Calidad copia". En el resto de las
-   * secciones `nombre_base` es el nombre de la planilla y `calidad` va vacía.
+   * certificada" y no uno llamado "11 PRO Calidad certificada". En el resto de
+   * las secciones `nombre_base` es el nombre de la planilla y `calidad` va vacía.
    */
   nombre_base: string
   calidad: string

@@ -694,14 +694,14 @@ export const COLUMNAS_IMPORTADOR = [
  * MÓDULOS: el sub-encabezado las rotula CC / CO / CA y arriba, combinado sobre
  * las tres, va el título del grupo (STOCK, PRECIO DE LISTA USD…). En el
  * catálogo no son parte del nombre sino la calidad del producto:
- * "11 PRO" + "Calidad copia".
+ * "11 PRO" + "Calidad certificada".
  *
  * Las siglas, los nombres y el orden son el CONTRATO con el importador
  * (`CALIDADES_EN_COLUMNA` en `backend/inventario/importacion.py`): si cambian
  * acá, el archivo que se baja deja de volver a entrar.
  */
 export const CALIDADES_MODULOS = [
-  { sigla: 'CC', calidad: 'Calidad copia' },
+  { sigla: 'CC', calidad: 'Calidad certificada' },
   { sigla: 'CO', calidad: 'Calidad original' },
   { sigla: 'CA', calidad: 'Calidad Apple' },
 ] as const
