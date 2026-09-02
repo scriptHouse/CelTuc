@@ -126,11 +126,19 @@ class FlujoCompletoNotaCreditoTests(TestCase):
         self.assertIn('supera', r.data['detail'])
 
         # --- 5. Se acredita el saldo restante --------------------------------
+        # La fecha va FIJA (como en los pasos 1 y 2): el paso 8 comprueba que
+        # agosto de 2026 cierre en cero, y eso solo se cumple si los tres
+        # comprobantes caen en ese mes. Sin fecha, la nota tomaria la de hoy
+        # (`Comprobante.fecha` por defecto es `timezone.localdate`) y el test
+        # pasaria en agosto y fallaria el resto del año.
         ta, ultimo, cae = self._con_arca(2)
         with ta, ultimo, cae:
             r = self.cliente.post(
                 url_nc,
-                {'items': [{'descripcion': 'Saldo', 'cantidad': 1, 'precio_unitario': '900'}]},
+                {
+                    'items': [{'descripcion': 'Saldo', 'cantidad': 1, 'precio_unitario': '900'}],
+                    'fecha': '2026-08-15',
+                },
                 format='json',
             )
         self.assertEqual(r.status_code, 201, r.data)
