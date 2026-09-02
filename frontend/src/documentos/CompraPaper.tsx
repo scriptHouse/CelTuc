@@ -48,7 +48,8 @@ export function CompraPaper({ datos, onChange, readOnly, direccion }: PaperProps
           <MiniRow label={COMPRA_LABELS.cel} value={datos.cel} onChange={set('cel')} readOnly={readOnly} divider />
           <MiniRow label={COMPRA_LABELS.mail} value={datos.mail} onChange={set('mail')} readOnly={readOnly} divider />
           <MiniRow label={COMPRA_LABELS.condicion} value={datos.condicion} onChange={set('condicion')} readOnly={readOnly} divider />
-          <MiniRow label={COMPRA_LABELS.imei} value={datos.imei} onChange={set('imei')} readOnly={readOnly} h={21} />
+          <MiniRow label={COMPRA_LABELS.imei} value={datos.imei} onChange={set('imei')} readOnly={readOnly} divider />
+          <MiniRow label={COMPRA_LABELS.garantia} value={datos.garantia} onChange={set('garantia')} readOnly={readOnly} h={21} />
         </div>
         <div style={{ width: GAP_W }} />
         <div style={{ width: RIGHT_W }}>
@@ -68,7 +69,9 @@ export function CompraPaper({ datos, onChange, readOnly, direccion }: PaperProps
           </div>
           <div
             style={{
-              height: 61,
+              // 81 = las cinco filas de la caja de la izquierda menos la
+              // etiqueta TOTAL, para que ambas columnas cierren parejas.
+              height: 81,
               border: `${BOX}px solid ${INK}`,
               borderTop: 'none',
               boxSizing: 'border-box',

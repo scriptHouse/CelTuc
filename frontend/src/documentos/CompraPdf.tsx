@@ -31,14 +31,16 @@ export function CompraPdf({ datos, direccion }: { datos: CompraData; direccion?:
           <PdfMiniRow label={COMPRA_LABELS.cel} value={datos.cel} divider />
           <PdfMiniRow label={COMPRA_LABELS.mail} value={datos.mail} divider />
           <PdfMiniRow label={COMPRA_LABELS.condicion} value={datos.condicion} divider />
-          <PdfMiniRow label={COMPRA_LABELS.imei} value={datos.imei} h={21} />
+          <PdfMiniRow label={COMPRA_LABELS.imei} value={datos.imei} divider />
+          <PdfMiniRow label={COMPRA_LABELS.garantia} value={datos.garantia} h={21} />
         </View>
         <View style={{ width: GAP_W }} />
         <View style={{ width: RIGHT_W }}>
           <View style={{ height: 20, borderWidth: BOX, borderColor: INK, alignItems: 'center', justifyContent: 'center' }}>
             <Text style={{ fontSize: pt(11), fontFamily: BOLD }}>{COMPRA_LABELS.total}</Text>
           </View>
-          <View style={{ height: 61, borderWidth: BOX, borderTopWidth: 0, borderColor: INK, justifyContent: 'center' }}>
+          {/* 81: acompaña a la caja de cinco filas de la izquierda. */}
+          <View style={{ height: 81, borderWidth: BOX, borderTopWidth: 0, borderColor: INK, justifyContent: 'center' }}>
             <Text style={{ fontSize: pt(16), fontFamily: BOLD, textAlign: 'center' }}>{datos.total}</Text>
           </View>
         </View>

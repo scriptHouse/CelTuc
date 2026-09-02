@@ -16,6 +16,7 @@ export interface CompraData {
   mail: string
   condicion: string
   imei: string
+  garantia: string
   total: string
 }
 
@@ -35,6 +36,7 @@ export function compraVacia(): CompraData {
     mail: '',
     condicion: '',
     imei: '',
+    garantia: '',
     total: '',
   }
 }
@@ -54,6 +56,7 @@ export const COMPRA_LABELS = {
   mail: 'MAIL:',
   condicion: 'CONDICION:',
   imei: 'IMEI:',
+  garantia: 'GARANTIA:',
   total: 'TOTAL',
 } as const
 

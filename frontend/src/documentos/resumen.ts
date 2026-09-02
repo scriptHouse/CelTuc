@@ -83,7 +83,13 @@ export function resumenCompra(d: CompraData): ResumenDocumento {
     referencia: d.cupon,
     cliente: d.recibiDe,
     clienteDocumento: d.dni,
-    detalle: juntar(d.concepto, d.conceptoExtra, d.condicion, imei(d.imei)),
+    detalle: juntar(
+      d.concepto,
+      d.conceptoExtra,
+      d.condicion,
+      imei(d.imei),
+      d.garantia.trim() ? `Garantía ${d.garantia.trim()}` : '',
+    ),
     total: montoDe(d.total) ?? montoDe(d.laSuma),
   }
 }
