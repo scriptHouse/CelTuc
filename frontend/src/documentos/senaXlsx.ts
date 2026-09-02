@@ -8,7 +8,7 @@ const LINEAS = {
   laSuma: 'LA SUMA DE:___________________________________________________________',
   concepto: 'EN CONCEPTO DE:_____________________________',
   conceptoC: '_________________________________________________________',
-  valorTotal: 'VALOR TOTAL:______________________',
+  valorTotal: 'VALOR DE SEÑA:____________________',
 }
 
 export async function construirSenaXlsx(d: SenaData, direccion: string = SENA.direccion): Promise<Blob> {
@@ -43,7 +43,7 @@ export async function construirSenaXlsx(d: SenaData, direccion: string = SENA.di
   put(ws, 'B6', con('LA SUMA DE:', d.laSuma, LINEAS.laSuma), s10, ALIGN.left)
   put(ws, 'B7', con('EN CONCEPTO DE:', d.concepto, LINEAS.concepto), s10, ALIGN.left)
   if (!d.concepto.trim()) put(ws, 'C7', LINEAS.conceptoC, s10, ALIGN.left)
-  put(ws, 'B9', con('VALOR TOTAL:', d.valorTotal, LINEAS.valorTotal), s10, ALIGN.left)
+  put(ws, 'B9', con(SENA.valorTotal, d.valorTotal, LINEAS.valorTotal), s10, ALIGN.left)
 
   put(ws, 'F9', SENA.total, calibri(10, true), ALIGN.center)
   put(ws, 'F10', d.total, calibri(11, true), ALIGN.center)
