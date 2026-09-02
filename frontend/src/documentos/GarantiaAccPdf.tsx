@@ -1,13 +1,13 @@
 import { Document, Image, Page, Text, View } from '@react-pdf/renderer'
 import { BOLD, PAGINA_ISO_STYLE, PdfBody, PdfGarantia, PdfPaper, PdfTitle, paginaISO } from './kitPdf'
-import { pt } from './kit'
+import { INK, pt } from './kit'
 import { LOGO_CELTUC, ICON_FACEBOOK, ICON_INSTAGRAM } from './assets'
 import { EMPRESA, lineaDireccion } from './content'
-import { GACC_H, GACC_RUNS, GACC_TITULO, GACC_W, type GAccData } from './garantiaAccContent'
+import { GACC_FECHA_LABEL, GACC_H, GACC_RUNS, GACC_TITULO, GACC_W, type GAccData } from './garantiaAccContent'
 
 const M = 28
 
-export function GarantiaAccPdf({ direccion = EMPRESA.direccion }: { datos: GAccData; direccion?: string }) {
+export function GarantiaAccPdf({ datos, direccion = EMPRESA.direccion }: { datos: GAccData; direccion?: string }) {
   return (
     <Document title={`${GACC_TITULO} — CelTuc`} author="CelTuc">
       <Page size={paginaISO(GACC_W, GACC_H, M)} style={PAGINA_ISO_STYLE}>
@@ -29,6 +29,23 @@ export function GarantiaAccPdf({ direccion = EMPRESA.direccion }: { datos: GAccD
             </View>
 
             <PdfGarantia runs={GACC_RUNS} fontSize={pt(8)} />
+
+            {/* Pie: fecha y hora de emision, abajo a la derecha (espeja al Paper). */}
+            <View
+              style={{
+                height: 18,
+                paddingTop: 5,
+                flexDirection: 'row',
+                justifyContent: 'flex-end',
+                alignItems: 'flex-end',
+                gap: 4,
+              }}
+            >
+              <Text style={{ fontSize: pt(8), fontFamily: BOLD, paddingBottom: 1 }}>{GACC_FECHA_LABEL}</Text>
+              <View style={{ width: 104, borderBottomWidth: 1, borderColor: INK }}>
+                <Text style={{ fontSize: pt(8), textAlign: 'center' }}>{datos.fechaHora}</Text>
+              </View>
+            </View>
           </PdfBody>
         </PdfPaper>
       </Page>

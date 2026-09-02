@@ -1,7 +1,7 @@
 import { Document, Image, Page, Text, View } from '@react-pdf/renderer'
 import { LOGO_CELTUC, ICON_FACEBOOK, ICON_INSTAGRAM } from './assets'
 import { EMPRESA, lineaDireccion } from './content'
-import { GACC_RUNS, GACC_TITULO } from './garantiaAccContent'
+import { GACC_FECHA_LABEL, GACC_RUNS, GACC_TITULO, type GAccData } from './garantiaAccContent'
 
 /* ============================================================================
  * Garantía de accesorios — versión TICKET para impresora térmica POS80 (80mm).
@@ -18,13 +18,18 @@ const MM = 72 / 25.4 // puntos por milímetro (1mm = 2.8346pt)
 const W = 80 * MM // 226.77pt (ancho del papel)
 const PAD = 4 * MM // 11.34pt de margen lateral → contenido de 72mm
 
-/** Alto del ticket (pt). Ajustado para que el contenido entre justo. */
-export const POS80_H = 300
+/**
+ * Alto del ticket (pt). Ajustado para que el contenido entre JUSTO en una sola
+ * pagina: si se queda corto, react-pdf manda el sobrante a una segunda hoja y
+ * la termica escupe un ticket casi en blanco. Al tocar el contenido, verificar
+ * que el PDF siga teniendo UNA sola pagina.
+ */
+export const POS80_H = 316
 
 const REG = 'Helvetica'
 const BOLD = 'Helvetica-Bold'
 
-export function GarantiaAccPos80Pdf({ direccion = EMPRESA.direccion }: { direccion?: string }) {
+export function GarantiaAccPos80Pdf({ datos, direccion = EMPRESA.direccion }: { datos: GAccData; direccion?: string }) {
   return (
     <Document title="Garantía de accesorios (POS80) — CelTuc" author="CelTuc">
       <Page
@@ -59,6 +64,11 @@ export function GarantiaAccPos80Pdf({ direccion = EMPRESA.direccion }: { direcci
         </Text>
 
         <View style={{ borderTopWidth: 1, borderColor: '#000', marginTop: 8 }} />
+
+        {/* Pie: fecha y hora de emision, alineada a la derecha como en el papel. */}
+        <Text style={{ fontSize: 7.5, fontFamily: BOLD, textAlign: 'right', marginTop: 4 }}>
+          {`${GACC_FECHA_LABEL} ${datos.fechaHora}`.trim()}
+        </Text>
       </Page>
     </Document>
   )

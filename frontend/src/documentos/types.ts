@@ -111,10 +111,11 @@ export interface DocModule<T = unknown> {
   loadXlsx: () => Promise<(datos: T, direccion?: string) => Promise<Blob>>
   /**
    * Opcional: versión para ticketera térmica POS80 (80mm). Sólo la definen los
-   * documentos que además pueden imprimirse como ticket. No recibe `datos`
-   * porque el ticket es de contenido fijo (p. ej. la garantía de accesorios).
+   * documentos que además pueden imprimirse como ticket. Recibe los mismos
+   * `datos` que el PDF: aunque el texto sea fijo, el ticket lleva los campos
+   * del pie (p. ej. la fecha y hora de la garantía de accesorios).
    */
-  loadPos80?: () => Promise<ComponentType<{ direccion?: string }>>
+  loadPos80?: () => Promise<ComponentType<{ datos: T; direccion?: string }>>
 }
 
 /** Fecha de hoy en partes (para prefijar el campo FECHA de los formularios). */
@@ -125,4 +126,17 @@ export function hoyDMY(): { dia: string; mes: string; anio: string } {
     mes: String(d.getMonth() + 1).padStart(2, '0'),
     anio: String(d.getFullYear()).slice(-2),
   }
+}
+
+/**
+ * Fecha y hora de ahora en `dd/mm/aaaa hh:mm` (24 h).
+ *
+ * Prefija el pie de la garantía de accesorios. Se calcula al crear el
+ * documento en blanco, así que "Limpiar" la vuelve a poner en hora; el campo
+ * queda editable para corregirla a mano.
+ */
+export function ahoraFechaHora(): string {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`
 }

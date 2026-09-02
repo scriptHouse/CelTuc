@@ -347,7 +347,7 @@ export function DocumentosPage() {
     setBusy('pos80')
     try {
       const [{ pdf }, Pos80] = await Promise.all([import('@react-pdf/renderer'), active.loadPos80()])
-      const blob = await pdf(<Pos80 direccion={direccion} />).toBlob()
+      const blob = await pdf(<Pos80 datos={datos} direccion={direccion} />).toBlob()
       const nombre = `${active.nombreArchivo(datos)}-ticket.pdf`
       const url = URL.createObjectURL(blob)
       const win = window.open(url, '_blank')

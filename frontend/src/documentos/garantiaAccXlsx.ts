@@ -1,15 +1,18 @@
 import { ALIGN, Bordes, blobDe, cajaCompletaEn, calibri, nuevaHoja, put, richGarantia, setCols, setRows } from './kitXlsx'
 import { LOGO_CELTUC, ICON_FACEBOOK, ICON_INSTAGRAM } from './assets'
 import { EMPRESA, lineaDireccion } from './content'
-import { GACC_RUNS, GACC_TITULO, type GAccData } from './garantiaAccContent'
+import { GACC_FECHA_LABEL, GACC_RUNS, GACC_TITULO, type GAccData } from './garantiaAccContent'
 
-export async function construirGarantiaAccXlsx(_d: GAccData, direccion: string = EMPRESA.direccion): Promise<Blob> {
+export async function construirGarantiaAccXlsx(d: GAccData, direccion: string = EMPRESA.direccion): Promise<Blob> {
   const { wb, ws } = nuevaHoja('Garantia Accesorios')
   setCols(ws, [2.5, 11, 9, 11, 11, 11, 2.5])
-  setRows(ws, [20.1, 9.9, 15, 15, 9.9, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 9])
+  // Filas 6..17: caja del texto de garantia (12 x 16.25 = el mismo alto util
+  // que antes ocupaban 13 filas de 15). La 18 queda para el pie con la fecha.
+  setRows(ws, [20.1, 9.9, 15, 15, 9.9, 16.25, 16.25, 16.25, 16.25, 16.25, 16.25, 16.25, 16.25, 16.25, 16.25, 16.25, 16.25, 15, 9])
 
   ws.mergeCells('A1:G1')
-  ws.mergeCells('B6:F18')
+  ws.mergeCells('B6:F17')
+  ws.mergeCells('B18:F18')
 
   const b = new Bordes()
   // Marco
@@ -25,6 +28,9 @@ export async function construirGarantiaAccXlsx(_d: GAccData, direccion: string =
   put(ws, 'C5', `   ${EMPRESA.instagram}      ${EMPRESA.facebook}`, calibri(9), ALIGN.left)
   ws.getCell('B6').value = richGarantia(GACC_RUNS, 8)
   ws.getCell('B6').alignment = ALIGN.justify
+
+  // Pie: fecha y hora de emision, contra el margen derecho (como en el PDF).
+  put(ws, 'B18', `${GACC_FECHA_LABEL} ${d.fechaHora}`.trim(), calibri(8, true), ALIGN.right)
 
   // Logo + redes
   const logoId = wb.addImage({ base64: LOGO_CELTUC.split(',')[1], extension: 'jpeg' })
