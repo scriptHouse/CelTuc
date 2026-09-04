@@ -54,7 +54,7 @@ export function SenaPaper({ datos, onChange, readOnly, direccion = SENA.direccio
           <SenaLine label={SENA.concepto} value={datos.concepto} onChange={set('concepto')} readOnly={readOnly} />
         </div>
 
-        {/* Pie: VALOR DE SEÑA + disclaimer | SALDO A PAGAR + firma */}
+        {/* Pie: VALOR TOTAL + disclaimer | SALDO A PAGAR + firma */}
         <div style={{ display: 'flex', gap: 12, marginTop: 8, flex: 1 }}>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
             <SenaLine label={SENA.valorTotal} value={datos.valorTotal} onChange={set('valorTotal')} readOnly={readOnly} />

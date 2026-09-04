@@ -38,7 +38,7 @@ export const SENA = {
   tel: 'TEL:',
   laSuma: 'LA SUMA DE:',
   concepto: 'EN CONCEPTO DE:',
-  valorTotal: 'VALOR DE SEÑA:',
+  valorTotal: 'VALOR TOTAL:',
   total: 'SALDO A PAGAR',
   firma: 'FIRMA',
   /** Línea de firma del formato nuevo (guiones bajos, ya no puntos). */

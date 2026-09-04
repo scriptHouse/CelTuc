@@ -125,9 +125,9 @@ export function resumenSena(d: SenaData): ResumenDocumento {
     referencia: d.numeroRecibo,
     cliente: d.recibiDe,
     detalle: d.concepto,
-    // El importe del historial es LO SEÑADO (el campo "VALOR DE SEÑA"), no el
-    // campo `total`, que en el papel es el "SALDO A PAGAR": archivar el saldo
-    // mostraria en el historial lo que el cliente NO pagó.
+    // El importe del historial es el "VALOR TOTAL" (campo `valorTotal`), no el
+    // campo `total`, que en el papel es el cuadro "SALDO A PAGAR": archivar el
+    // saldo mostraria en el historial lo que el cliente todavia NO pagó.
     total: montoDe(d.valorTotal) ?? montoDe(d.laSuma),
   }
 }

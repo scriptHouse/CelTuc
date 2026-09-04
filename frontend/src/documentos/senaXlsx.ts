@@ -8,7 +8,7 @@ const LINEAS = {
   laSuma: 'LA SUMA DE:___________________________________________________________',
   concepto: 'EN CONCEPTO DE:_____________________________',
   conceptoC: '_________________________________________________________',
-  valorTotal: 'VALOR DE SEÑA:____________________',
+  valorTotal: 'VALOR TOTAL:______________________',
 }
 
 export async function construirSenaXlsx(d: SenaData, direccion: string = SENA.direccion): Promise<Blob> {
