@@ -47,6 +47,18 @@ export function ReparacionPaper({ datos, onChange, readOnly, direccion }: PaperP
       </div>
 
       <div style={{ height: 7 }} />
+
+      {/* Observaciones: una sola caja del ancho de las dos de arriba. */}
+      <div style={{ border: `${BOX}px solid ${INK}`, boxSizing: 'border-box' }}>
+        <MiniRow
+          label={REP_LABELS.observaciones}
+          value={datos.observaciones}
+          onChange={set('observaciones')}
+          readOnly={readOnly}
+        />
+      </div>
+
+      <div style={{ height: 7 }} />
     </DocShell>
   )
 }

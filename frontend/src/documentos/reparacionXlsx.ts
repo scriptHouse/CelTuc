@@ -8,25 +8,27 @@ export async function construirReparacionXlsx(d: ReparacionData, direccion?: str
     15, 15, 15, 15, 5.1, // 1-5
     15, 15, 15, 5.1, 5.1, // 6-10
     15, 15, 15, 15, 5.1, // 11-15 (14 = PIN, 15 = separador)
-    21, // 16
-    39, // 17
-    ...Array(29).fill(15), // 18-46
-    15.8, 15, 25.5, 20.2, // 47-50
+    15, 5.1, // 16 = OBSERVACIONES, 17 = separador
+    21, // 18
+    39, // 19
+    ...Array(29).fill(15), // 20-48
+    15.8, 15, 25.5, 20.2, // 49-52
   ])
-  ;['A1:J1', 'B6:I6', 'B7:I7', 'B8:I8', 'B16:I47'].forEach((m) => ws.mergeCells(m))
+  ;['A1:J1', 'B6:I6', 'B7:I7', 'B8:I8', 'B16:I16', 'B18:I49'].forEach((m) => ws.mergeCells(m))
 
   const b = new Bordes()
-  b.h(1, 10, 50, 'bottom')
-  b.v(1, 2, 50, 'left')
-  b.v(10, 2, 50, 'right')
+  b.h(1, 10, 52, 'bottom')
+  b.v(1, 2, 52, 'left')
+  b.v(10, 2, 52, 'right')
   ctHeaderXlsx(wb, ws, b, { cupon: d.cupon, dia: d.fechaDia, mes: d.fechaMes, anio: d.fechaAnio, direccion })
   // La caja del equipo tiene una fila mas que la de importes: arrancan juntas
   // y la izquierda baja un renglon, igual que en el PDF.
   b.caja(2, 11, 4, 14, [11, 12, 13]) // CEL / MAIL / IMEI / PIN
-  b.caja(6, 11, 9, 13, [11, 12]) // PRESUPUESTO / SEÑA / PENDIENTE
+  b.caja(6, 11, 9, 13, [11, 12]) // PRESUPUESTO / EFECTIVO / LISTA
   b.apply(ws)
   cajaCompletaEn(ws, 'A1')
-  cajaCompletaEn(ws, 'B16') // condiciones (combinada)
+  cajaCompletaEn(ws, 'B16') // observaciones (combinada, ancho de las dos cajas)
+  cajaCompletaEn(ws, 'B18') // condiciones (combinada)
 
   const bold10 = calibri(10, true)
   const con = (label: string, v: string, blanco: string) => (v.trim() ? `${label} ${v}` : blanco)
@@ -44,10 +46,12 @@ export async function construirReparacionXlsx(d: ReparacionData, direccion?: str
   put(ws, 'F12', con(REP_LABELS.sena, d.sena, REP_LABELS.sena), bold10, ALIGN.left)
   put(ws, 'F13', con(REP_LABELS.pendiente, d.pendiente, REP_LABELS.pendiente), bold10, ALIGN.left)
 
-  ws.getCell('B16').value = richGarantia(REP_GARANTIA, 7)
-  ws.getCell('B16').alignment = { horizontal: 'left', vertical: 'top', wrapText: true }
+  put(ws, 'B16', con(REP_LABELS.observaciones, d.observaciones, REP_LABELS.observaciones), bold10, ALIGN.left)
 
-  firmasXlsx(ws, 49)
+  ws.getCell('B18').value = richGarantia(REP_GARANTIA, 7)
+  ws.getCell('B18').alignment = { horizontal: 'left', vertical: 'top', wrapText: true }
+
+  firmasXlsx(ws, 51)
 
   return blobDe(wb)
 }

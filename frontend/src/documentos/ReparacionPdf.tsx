@@ -41,6 +41,13 @@ export function ReparacionPdf({ datos, direccion }: { datos: ReparacionData; dir
       </View>
 
       <View style={{ height: 7 }} />
+
+      {/* Observaciones: una sola caja del ancho de las dos de arriba. */}
+      <View style={{ borderWidth: BOX, borderColor: INK }}>
+        <PdfMiniRow label={REP_LABELS.observaciones} value={datos.observaciones} />
+      </View>
+
+      <View style={{ height: 7 }} />
     </PdfDocShell>
   )
 }

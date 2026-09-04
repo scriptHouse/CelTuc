@@ -16,8 +16,12 @@ export interface ReparacionData {
   /** Codigo de desbloqueo del equipo: sin el, el service no puede probarlo. */
   pin: string
   presupuesto: string
+  /* `sena` y `pendiente` conservan su nombre historico: en el papel son las
+     etiquetas EFECTIVO y LISTA. No se renombran porque el historial guarda el
+     formulario con estas claves y los documentos ya archivados las usan. */
   sena: string
   pendiente: string
+  observaciones: string
 }
 
 export function reparacionVacia(): ReparacionData {
@@ -37,11 +41,16 @@ export function reparacionVacia(): ReparacionData {
     presupuesto: '',
     sena: '',
     pendiente: '',
+    observaciones: '',
   }
 }
 
 export const REP_W = 776
-export const REP_H = 989
+/* El alto crece 30px respecto del formato original (989): es exactamente lo
+   que ocupan el renglon de OBSERVACIONES y su separacion. Se agranda el papel
+   en vez de robarle espacio a la caja de condiciones, que ya venia justa. La
+   hoja del PDF no cambia (paginaISO ya la dimensiona con margen de sobra). */
+export const REP_H = 1019
 
 export const REP_TITULO = 'GARANTIA REPARACION'
 
@@ -54,8 +63,9 @@ export const REP_LABELS = {
   imei: 'IMEI:',
   pin: 'PIN:',
   presupuesto: 'PRESUPUESTO:',
-  sena: 'SEÑA:',
-  pendiente: 'PENDIENTE:',
+  sena: 'EFECTIVO:',
+  pendiente: 'LISTA:',
+  observaciones: 'OBSERVACIONES:',
 } as const
 
 export const REP_LINEAS = {
