@@ -6,7 +6,7 @@
 
 export const EMPRESA = {
   nombre: 'CELTUC',
-  direccion: 'Salta 186 - Yerba Buena',
+  direccion: 'Salta 184 - San Miguel de Tucumán',
   telefono: '381 347-0778',
   instagram: '@CelTuc',
   facebook: '/CelTuc',
@@ -30,7 +30,7 @@ export function lineaDireccion(direccion: string): string {
  * Direcciones disponibles para el encabezado. Se elige una desde la página y
  * se aplica a TODOS los documentos (preview, PDF y Excel).
  */
-export const DIRECCIONES = ['Salta 186 - Yerba Buena', 'Yerba Buena - Tucumán'] as const
+export const DIRECCIONES = ['Salta 184 - San Miguel de Tucumán', 'Yerba Buena - Tucumán'] as const
 
 export type Direccion = (typeof DIRECCIONES)[number]
 
@@ -47,7 +47,7 @@ export const DIRECCION_POR_DEFECTO: Direccion = DIRECCIONES[0]
  * nueva sin entrada acá cae en la dirección por defecto hasta agregarle su línea.
  */
 export const SUCURSALES_DOC = [
-  { nombre: 'Salta', direccion: 'Salta 186 - Yerba Buena' },
+  { nombre: 'Salta', direccion: 'Salta 184 - San Miguel de Tucumán' },
   { nombre: 'Solar YB', direccion: 'Yerba Buena - Tucumán' },
   { nombre: 'Central YB', direccion: 'Yerba Buena - Tucumán' },
 ] as const

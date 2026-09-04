@@ -8,6 +8,9 @@ import { SENA, SENA_H, SENA_W, type SenaData } from './senaContent'
 
 const M = 28
 
+/** Ancho del renglón de dirección: el que necesita, no el de su columna. */
+const DIR_W = 340
+
 export function SenaPdf({ datos, direccion = SENA.direccion }: { datos: SenaData; direccion?: string }) {
   return (
     <Document title="Comprobante de seña — CelTuc" author="CelTuc">
@@ -18,7 +21,11 @@ export function SenaPdf({ datos, direccion = SENA.direccion }: { datos: SenaData
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <View style={{ flex: 1 }}>
                 <Image src={LOGO_CELTUC} style={{ width: 54, height: 54 }} />
-                <Text style={{ fontSize: pt(8), marginTop: 3 }}>{lineaDireccion(direccion)}</Text>
+                {/* La dirección se mide sola (DIR_W), no contra la columna: es más
+                    larga que ella y, si envolviera, correría todo el papel hacia
+                    abajo. Cae por debajo del bloque de la derecha, así que el
+                    excedente sobra sobre espacio vacío. Espeja el preview HTML. */}
+                <Text style={{ fontSize: pt(8), marginTop: 3, width: DIR_W }}>{lineaDireccion(direccion)}</Text>
               </View>
               <View style={{ width: 226, gap: 5 }}>
                 {/* N° RECIBO y FECHA: dos cajas lado a lado (formato nuevo) */}

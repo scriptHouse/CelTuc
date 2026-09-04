@@ -5,6 +5,9 @@ import { lineaDireccion } from './content'
 import { SENA, SENA_H, SENA_W, type SenaData } from './senaContent'
 import type { PaperProps } from './types'
 
+/** Ancho del renglón de dirección: el que necesita, no el de su columna. */
+const DIR_W = 340
+
 export function SenaPaper({ datos, onChange, readOnly, direccion = SENA.direccion }: PaperProps<SenaData>) {
   const set = (k: keyof SenaData) => (v: string) => onChange({ [k]: v })
 
@@ -13,9 +16,13 @@ export function SenaPaper({ datos, onChange, readOnly, direccion = SENA.direccio
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '7px 16px 7px 21px', fontSize: pt(10) }}>
         {/* Encabezado: logo + dirección | N° RECIBO + FECHA + leyenda */}
         <div style={{ display: 'flex', gap: 10 }}>
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
             <img src={LOGO_CELTUC} alt="CelTuc" width={54} height={54} style={{ display: 'block' }} />
-            <div style={{ fontSize: pt(8), marginTop: 3 }}>{lineaDireccion(direccion)}</div>
+            {/* Ancho propio (DIR_W): la dirección es más larga que su columna y, si
+                envolviera, correría todo el papel hacia abajo. Queda por debajo del
+                bloque de la derecha, así que el excedente sobra sobre espacio vacío.
+                El `minWidth: 0` de arriba evita que ese ancho empuje la columna. */}
+            <div style={{ fontSize: pt(8), marginTop: 3, width: DIR_W }}>{lineaDireccion(direccion)}</div>
           </div>
           <div style={{ width: 226, display: 'flex', flexDirection: 'column', gap: 5 }}>
             {/* N° RECIBO y FECHA: dos cajas lado a lado (formato nuevo) */}
