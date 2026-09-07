@@ -13,10 +13,11 @@
  *  · Página lista para imprimir: ajustada al ancho, con la fila de títulos
  *    repetida en cada hoja y el número de página en el pie.
  *
- * Este archivo NO importa nada de la app (solo ExcelJS y el dataset): se puede
- * ejecutar y validar fuera del navegador.
+ * Este archivo NO importa nada de la app (solo ExcelJS, el saneador OOXML y el
+ * dataset): se puede ejecutar y validar fuera del navegador.
  */
 import ExcelJS from 'exceljs'
+import { sanearXlsx } from '@/components/exportar/sanearXlsx'
 import { CALIDADES_MODULOS, COLUMNAS_IMPORTADOR, GRUPOS_MODULOS, filasImportador } from './datos'
 import type {
   ColumnaResuelta,
@@ -111,9 +112,7 @@ export async function construirXlsx(
   if (op.formatoImportador) {
     hojaImportador(wb, dataset)
     const buffer = await wb.xlsx.writeBuffer()
-    return new Blob([buffer], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    })
+    return sanearXlsx(buffer as unknown as Uint8Array)
   }
 
   hojaInventario(wb, dataset)
@@ -125,9 +124,9 @@ export async function construirXlsx(
   wb.views = [{ activeTab: 0, x: 0, y: 0, width: 20000, height: 20000, firstSheet: 0, visibility: 'visible' }]
 
   const buffer = await wb.xlsx.writeBuffer()
-  return new Blob([buffer], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  })
+  // El saneado deja el archivo 100 % válido según el esquema OOXML: sin él,
+  // el Excel de la web «repara» el libro y la hoja queda vacía.
+  return sanearXlsx(buffer as unknown as Uint8Array)
 }
 
 /* ===================== Hoja principal ===================== */
@@ -354,7 +353,10 @@ function hojaInventario(wb: ExcelJS.Workbook, dataset: Dataset) {
         xSplit: columnas[0]?.id === 'producto' ? 1 : 0,
         ySplit: filaTitulos,
         showGridLines: false,
-        activeCell: `A${filaTitulos + 1}`,
+        // La celda activa tiene que caer DENTRO del panel congelado inferior
+        // derecho (con xSplit, columna B en adelante): si queda fuera, los
+        // visores estrictos (Excel web) tratan el archivo como corrupto.
+        activeCell: `${columnas[0]?.id === 'producto' ? 'B' : 'A'}${filaTitulos + 1}`,
       },
     ]
   }
@@ -391,9 +393,13 @@ function hojaInventario(wb: ExcelJS.Workbook, dataset: Dataset) {
   /* ---- Impresión ---- */
   ws.pageSetup.printTitlesRow = `${filaTitulos}:${filaTitulos}`
   ws.pageSetup.printArea = `A1:${ultima}${Math.max(fila - 1, filaTitulos)}`
+  // Tras el código de tamaño (&9) no puede venir un dígito: Excel lo leería
+  // como parte del tamaño («&907/09» → tamaño 907, inválido). El guarda le
+  // antepone un espacio solo cuando el texto arranca con número (las fechas).
+  const seg = (texto: string) => (/^\d/.test(texto) ? ` ${texto}` : texto)
   ws.headerFooter = {
-    oddFooter: `&L&9${escapar(meta.titulo)} — ${escapar(meta.sucursalesTexto)}&C&9Página &P de &N&R&9${escapar(cuando)}`,
-    evenFooter: `&L&9${escapar(meta.titulo)}&C&9Página &P de &N`,
+    oddFooter: `&L&9${seg(escapar(meta.titulo))} — ${escapar(meta.sucursalesTexto)}&C&9Página &P de &N&R&9${seg(escapar(cuando))}`,
+    evenFooter: `&L&9${seg(escapar(meta.titulo))}&C&9Página &P de &N`,
   }
 }
 

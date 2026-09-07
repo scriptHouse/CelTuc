@@ -15,6 +15,7 @@
  * ejecutar y validar fuera del navegador.
  */
 import ExcelJS from 'exceljs'
+import { sanearXlsx } from './sanearXlsx'
 import type { ColumnaResueltaTabla, DatasetTabla, TotalesTabla } from './datos'
 import type { TipoColumnaTabla } from './tipos'
 
@@ -100,9 +101,9 @@ export async function construirXlsxTabla<T>(dataset: DatasetTabla<T>): Promise<B
   wb.views = [{ activeTab: 0, x: 0, y: 0, width: 20000, height: 20000, firstSheet: 0, visibility: 'visible' }]
 
   const buffer = await wb.xlsx.writeBuffer()
-  return new Blob([buffer], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  })
+  // El saneado deja el archivo 100 % válido según el esquema OOXML: sin él,
+  // el Excel de la web «repara» el libro y la hoja queda vacía.
+  return sanearXlsx(buffer as unknown as Uint8Array)
 }
 
 /* ===================== Hoja principal ===================== */
@@ -286,7 +287,10 @@ function hojaPrincipal<T>(wb: ExcelJS.Workbook, dataset: DatasetTabla<T>) {
         xSplit: 1,
         ySplit: filaTitulos,
         showGridLines: false,
-        activeCell: `A${filaTitulos + 1}`,
+        // La celda activa tiene que caer DENTRO del panel inferior derecho
+        // (columna B en adelante): con A quedaría fuera del panel declarado y
+        // los visores estrictos tratan el archivo como corrupto.
+        activeCell: `B${filaTitulos + 1}`,
       },
     ]
   }
@@ -301,9 +305,13 @@ function hojaPrincipal<T>(wb: ExcelJS.Workbook, dataset: DatasetTabla<T>) {
   /* ---- Impresión ---- */
   ws.pageSetup.printTitlesRow = `${filaTitulos}:${filaTitulos}`
   ws.pageSetup.printArea = `A1:${ultima}${Math.max(fila - 1, filaTitulos)}`
+  // Tras el código de tamaño (&9) no puede venir un dígito: Excel lo leería
+  // como parte del tamaño («&907/09» → tamaño 907, inválido). El guarda le
+  // antepone un espacio solo cuando el texto arranca con número (las fechas).
+  const seg = (texto: string) => (/^\d/.test(texto) ? ` ${texto}` : texto)
   ws.headerFooter = {
-    oddFooter: `&L&9${escaparPie(meta.titulo)}&C&9Página &P de &N&R&9${escaparPie(cuando)}`,
-    evenFooter: `&L&9${escaparPie(meta.titulo)}&C&9Página &P de &N`,
+    oddFooter: `&L&9${seg(escaparPie(meta.titulo))}&C&9Página &P de &N&R&9${seg(escaparPie(cuando))}`,
+    evenFooter: `&L&9${seg(escaparPie(meta.titulo))}&C&9Página &P de &N`,
   }
 }
 
