@@ -126,7 +126,10 @@ function hojaPrincipal<T>(wb: ExcelJS.Workbook, dataset: DatasetTabla<T>) {
       margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 },
     },
   })
-  ws.properties.outlineProperties = { summaryBelow: true, summaryRight: false }
+  // OJO: no setear `ws.properties.outlineProperties`. ExcelJS escribe
+  // <outlinePr> DESPUÉS de <pageSetUpPr> y ese orden viola el esquema OOXML:
+  // Excel "repara" el libro y deja la hoja vacía (exceljs#1348). Lo que
+  // poníamos (summaryBelow: true) ya es el comportamiento por defecto de Excel.
 
   // Anchos: el peso de cada columna es su ancho en caracteres, con un piso que
   // garantiza que el título quepa (si no, Excel corta el rótulo).
