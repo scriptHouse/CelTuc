@@ -6,7 +6,7 @@ from facturacion.models import Cliente, Emisor
 from precios_service.models import ItemService
 from productos.models import CategoriaProducto, Producto
 
-from .importacion import MAX_UNIDADES
+from .importacion import MAX_UNIDADES, precio_planilla
 from .models import ItemVenta, MovimientoStock, PagoVenta, StockProducto, Sucursal, Venta
 
 
@@ -296,6 +296,18 @@ class ProductoNuevoImportacionSerializer(serializers.Serializer):
         max_digits=12, decimal_places=2, min_value=Decimal('0'),
         required=False, allow_null=True,
     )
+
+    def to_internal_value(self, data):
+        # El precio puede llegar con la basura de coma flotante del Excel
+        # (7.14 viaja como 7.140000000000001): se redondea ANTES de validar,
+        # porque el campo rechaza mas decimales de los que guarda el catalogo y
+        # una sola fila asi tiraba abajo la importacion entera. Lo que no es un
+        # precio se deja pasar tal cual, para que el error sea el de siempre.
+        if isinstance(data, dict) and data.get('lista_usd') not in (None, ''):
+            redondeado = precio_planilla(data['lista_usd'])
+            if redondeado is not None:
+                data = {**data, 'lista_usd': redondeado}
+        return super().to_internal_value(data)
 
     def validate_nombre(self, value):
         value = value.strip()

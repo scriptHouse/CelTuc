@@ -31,7 +31,7 @@ import {
   type ResultadoImportacion,
   type Sucursal,
 } from '@/services/inventario'
-import { ApiError } from '@/lib/api'
+import { ApiError, textoDeError } from '@/lib/api'
 import { num } from '@/lib/format'
 import { cn, coincideBusqueda } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
@@ -113,6 +113,33 @@ const FILTROS: Array<{ id: FiltroId; label: string }> = [
 /** Cuántas filas se pintan de una: el resto entra con "Ver más". */
 const PAGINA = 120
 
+/**
+ * El detalle del error de aplicar, en criollo.
+ *
+ * Cuando el servidor rechaza UNA fila, DRF contesta con la lista `items` en el
+ * mismo orden en que se mandó (un `{}` por la que está bien), así que la
+ * posición se traduce al número de fila de la planilla y se puede ir a mirarla.
+ */
+function detalleDelError(error: ApiError, filasEnviadas: number[]): string | undefined {
+  const cuerpo = error.data as { items?: unknown } | null
+  const items = cuerpo && typeof cuerpo === 'object' && Array.isArray(cuerpo.items)
+    ? cuerpo.items
+    : null
+  if (items) {
+    const indice = items.findIndex((item) => textoDeError(item) !== null)
+    const texto = indice >= 0 ? textoDeError(items[indice]) : null
+    const fila = filasEnviadas[indice]
+    // El prefijo solo cuando el error es DE esa fila: los que valen para toda
+    // la importación (un producto repetido, por ejemplo) vienen como texto
+    // suelto y ahí la posición no significa nada.
+    if (texto && fila && typeof items[indice] !== 'string') {
+      return `Fila ${fila} de la planilla: ${texto}`
+    }
+    if (texto) return texto
+  }
+  return error.message || undefined
+}
+
 export function ImportarStockModal({
   abierto,
   sucursales,
@@ -135,6 +162,10 @@ export function ImportarStockModal({
 }) {
   const toast = useToast()
   const inputArchivo = useRef<HTMLInputElement>(null)
+
+  // Las filas que se mandaron en el último intento, en orden: si el servidor
+  // rechaza una, sirve para decir CUÁL fila de la planilla es.
+  const enviadas = useRef<number[]>([])
 
   const [paso, setPaso] = useState<Paso>('sucursal')
   const [sucursalId, setSucursalId] = useState<number | null>(null)
@@ -380,6 +411,7 @@ export function ImportarStockModal({
           },
         }
       })
+      enviadas.current = items.map((item) => item.fila ?? 0)
       return aplicarImportacionStock({
         sucursal: sucursalId!,
         archivo: analisis?.archivo,
@@ -392,7 +424,10 @@ export function ImportarStockModal({
       onAplicado(data)
     },
     onError: (e) =>
-      toast.error('No se pudo importar', e instanceof ApiError ? e.message : undefined),
+      toast.error(
+        'No se pudo importar',
+        e instanceof ApiError ? detalleDelError(e, enviadas.current) : undefined,
+      ),
   })
 
   // --- Archivo ----------------------------------------------------------------

@@ -22,6 +22,24 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * El primer texto que aparece bajando por un cuerpo de error de DRF.
+ *
+ * Los errores anidados (una lista de ítems, cada uno con sus campos, cada campo
+ * con sus mensajes) no son un `{ campo: ["mensaje"] }` plano: hay que bajar
+ * hasta el texto. Sin esto, un error así se mostraba como "[object Object]".
+ */
+export function textoDeError(valor: unknown, profundidad = 6): string | null {
+  if (typeof valor === 'string') return valor.trim() || null
+  if (profundidad <= 0 || valor === null || typeof valor !== 'object') return null
+  const hijos = Array.isArray(valor) ? valor : Object.values(valor as Record<string, unknown>)
+  for (const hijo of hijos) {
+    const texto = textoDeError(hijo, profundidad - 1)
+    if (texto) return texto
+  }
+  return null
+}
+
 /** Extrae un mensaje legible del cuerpo de error de DRF. */
 function messageFromData(data: unknown, fallback: string): string {
   if (!data) return fallback
@@ -29,10 +47,8 @@ function messageFromData(data: unknown, fallback: string): string {
   if (typeof data === 'object') {
     const obj = data as Record<string, unknown>
     if (typeof obj.detail === 'string') return obj.detail
-    // Errores de validación: { campo: ["mensaje", ...] }.
-    const first = Object.values(obj)[0]
-    if (Array.isArray(first) && first.length) return String(first[0])
-    if (typeof first === 'string') return first
+    // Errores de validación: { campo: ["mensaje", ...] }, o anidados.
+    return textoDeError(obj) ?? fallback
   }
   return fallback
 }

@@ -28,7 +28,7 @@ import difflib
 import re
 import unicodedata
 from collections import defaultdict
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -47,6 +47,9 @@ UMBRAL_APROXIMADA = 0.84
 MARGEN_DESEMPATE = 0.02
 # Techo de filas a procesar (la planilla real ronda las 1.500).
 MAX_FILAS = 20000
+# El precio de lista del catalogo: dos decimales y diez enteros (max_digits=12).
+CENTAVO = Decimal('0.01')
+MAX_PRECIO = Decimal(10) ** 10
 
 # Abreviaturas de calidad que usa la planilla y el catalogo guarda completas.
 ALIAS_CALIDAD = {
@@ -107,6 +110,30 @@ def _a_decimal(valor):
         return Decimal(str(valor))
     except (InvalidOperation, ValueError, TypeError):
         return None
+
+
+def precio_planilla(valor):
+    """El precio de lista de una celda, redondeado a los dos decimales que
+    guarda el catalogo. None cuando la celda no trae un precio usable.
+
+    Excel calcula en binario y devuelve 7.14 como 7.140000000000001. Ese
+    sobrante no cambia el precio pero SI rompe el alta: el catalogo guarda dos
+    decimales, asi que el producto nuevo rebotaba y se caia la importacion
+    entera. Se redondea aca, al leer, y todo lo que viaja hacia adelante
+    (revision y alta) habla en centavos.
+    """
+    numero = _a_decimal(valor)
+    if numero is None or not numero.is_finite():
+        return None
+    try:
+        redondeado = numero.quantize(CENTAVO, rounding=ROUND_HALF_UP)
+    except InvalidOperation:
+        return None
+    # Fuera de rango no es un precio: un negativo, o un numero que no entra en
+    # el campo del catalogo (10 enteros + 2 decimales).
+    if redondeado < 0 or redondeado >= MAX_PRECIO:
+        return None
+    return redondeado
 
 
 # ===== Lectura de la planilla =====
@@ -296,7 +323,7 @@ def leer_planilla(archivo):
             'calidad': '',
             'stock_crudo': celda(cruda, 'stock'),
             'minimo_crudo': celda(cruda, 'minimo'),
-            'lista_usd': _a_decimal(celda(cruda, 'lista')),
+            'lista_usd': precio_planilla(celda(cruda, 'lista')),
             'columna_ocupada': columna_ocupada,
         })
     return filas
@@ -312,7 +339,7 @@ def _filas_por_calidad(cruda, celda, numero, seccion, nombre, calidades):
     salidas = []
     for calidad, salto in calidades:
         stock = celda(cruda, 'stock', salto)
-        lista = _a_decimal(celda(cruda, 'lista', salto))
+        lista = precio_planilla(celda(cruda, 'lista', salto))
         if not _informa(stock):
             # El guion es "no existe", no "conte cero": se lee como celda vacia.
             stock = None

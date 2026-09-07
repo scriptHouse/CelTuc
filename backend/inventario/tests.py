@@ -808,6 +808,27 @@ class PlanillaImportacionTests(TestCase):
         self.assertEqual(filas[4]['estado'], 'invalida')
         self.assertIn('CO/AO', filas[4]['motivo'])
 
+    def test_precio_del_excel_llega_redondeado_a_centavos(self):
+        """Excel devuelve 7.14 como 7.140000000000001 y el catalogo guarda dos
+        decimales: si ese sobrante viajaba, el alta del producto rebotaba y se
+        caia la importacion entera. Se redondea al leer la planilla."""
+        filas = self._filas(_planilla([
+            ('ZETATEST ACCESORIOS', 'Zetatest Cable Raro', 7.140000000000001, 3, None),
+        ]))
+        self.assertEqual(filas[2]['lista_usd'], '7.14')
+
+    def test_precio_que_no_es_precio_no_frena_la_fila(self):
+        """Un negativo o un numero que no entra en el catalogo se lee como
+        "sin precio": la fila sigue viva y el conteo se puede aplicar igual."""
+        filas = self._filas(_planilla([
+            ('ZETATEST ACCESORIOS', 'Zetatest Cable Negativo', -5, 3, None),
+            ('ZETATEST ACCESORIOS', 'Zetatest Cable Enorme', 10 ** 11, 4, None),
+        ]))
+        self.assertIsNone(filas[2]['lista_usd'])
+        self.assertEqual(filas[2]['cantidad_nueva'], 3)
+        self.assertIsNone(filas[3]['lista_usd'])
+        self.assertEqual(filas[3]['cantidad_nueva'], 4)
+
     def test_sin_encabezado_error_legible(self):
         from django.core.exceptions import ValidationError
 
@@ -950,7 +971,8 @@ class PlanillaModulosTests(TestCase):
         self.assertEqual(filas['Zetamodulo 11 PRO Calidad original']['cantidad_nueva'], 4)
         self.assertEqual(filas['Zetamodulo 11 PRO Calidad Apple']['cantidad_nueva'], 1)
         self.assertEqual(filas['Zetamodulo 11 PRO Calidad original']['minimo_nuevo'], 2)
-        self.assertEqual(filas['Zetamodulo 11 PRO Calidad Apple']['lista_usd'], '224.4')
+        # Siempre en centavos: es como lo guarda el catalogo.
+        self.assertEqual(filas['Zetamodulo 11 PRO Calidad Apple']['lista_usd'], '224.40')
 
     def test_matchea_exacto_contra_el_producto_de_esa_calidad(self):
         """El nombre que arma la planilla es el mismo que rearma el catalogo."""
@@ -1255,6 +1277,40 @@ class ImportarStockApiTests(TestCase):
         self.assertEqual(creado.categoria, self.categoria)
         self.assertEqual(creado.precio_lista_usd, Decimal('15'))
         self.assertEqual(creado.stocks.get(sucursal=self.sucursal).cantidad, 3)
+
+    def test_alta_con_el_precio_crudo_del_excel(self):
+        """Una planilla vieja (o una pestaña abierta antes) puede mandar el
+        precio con la basura de coma flotante: se redondea, no se rechaza."""
+        r = self._cliente(self.admin).post(self.APLICAR, {
+            'sucursal': self.sucursal.id,
+            'items': [{
+                'crear': {
+                    'nombre': 'Zetatest Precio Crudo', 'categoria': self.categoria.id,
+                    'lista_usd': '7.140000000000001',
+                },
+                'cantidad': 2,
+            }],
+        }, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['creados'], 1)
+        creado = Producto.objects.get(nombre='Zetatest Precio Crudo')
+        self.assertEqual(creado.precio_lista_usd, Decimal('7.14'))
+
+    def test_alta_con_precio_negativo_sigue_dando_400(self):
+        """Redondear no es tragarse cualquier cosa: un precio imposible se
+        rechaza como siempre, con su mensaje."""
+        r = self._cliente(self.admin).post(self.APLICAR, {
+            'sucursal': self.sucursal.id,
+            'items': [{
+                'crear': {
+                    'nombre': 'Zetatest Precio Negativo', 'categoria': self.categoria.id,
+                    'lista_usd': '-3',
+                },
+                'cantidad': 2,
+            }],
+        }, format='json')
+        self.assertEqual(r.status_code, 400)
+        self.assertFalse(Producto.objects.filter(nombre='Zetatest Precio Negativo').exists())
 
     def test_una_fila_invalida_no_aplica_ninguna(self):
         """Todo o nada: el stock no queda a medio importar."""
