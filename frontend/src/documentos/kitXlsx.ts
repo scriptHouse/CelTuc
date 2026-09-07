@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs'
+import { sanearXlsx } from '@/components/exportar/sanearXlsx'
 import { LOGO_CELTUC, ICON_FACEBOOK, ICON_INSTAGRAM } from './assets'
 import { EMPRESA, lineaDireccion } from './content'
 import type { Run } from './kit'
@@ -157,5 +158,7 @@ export function richGarantia(runs: Run[], size = 7): ExcelJS.CellValue {
 
 export async function blobDe(wb: ExcelJS.Workbook): Promise<Blob> {
   const buffer = await wb.xlsx.writeBuffer()
-  return new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  // El saneado deja el archivo 100 % válido según el esquema OOXML: sin él,
+  // un visor estricto (Excel web) puede «reparar» el libro al abrirlo.
+  return sanearXlsx(buffer as unknown as Uint8Array)
 }

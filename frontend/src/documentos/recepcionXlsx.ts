@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs'
+import { sanearXlsx } from '@/components/exportar/sanearXlsx'
 import { LOGO_CELTUC, ICON_FACEBOOK, ICON_INSTAGRAM } from './assets'
 import { EMPRESA, GARANTIA_RUNS, LABELS, lineaDireccion } from './content'
 import type { RecepcionData } from './types'
@@ -203,6 +204,8 @@ export async function construirRecepcionXlsx(
   const fbId = addImg(ICON_FACEBOOK, 'jpeg')
   ws.addImage(fbId, { tl: { col: 3.0, row: 4.35 }, ext: { width: 13, height: 13 }, editAs: 'oneCell' })
 
+  // El saneado deja el archivo 100 % válido según el esquema OOXML: sin él,
+  // un visor estricto (Excel web) puede «reparar» el libro al abrirlo.
   const buffer = await wb.xlsx.writeBuffer()
-  return new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  return sanearXlsx(buffer as unknown as Uint8Array)
 }

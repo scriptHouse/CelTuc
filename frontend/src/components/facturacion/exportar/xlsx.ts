@@ -13,10 +13,11 @@
  *  · Hojas opcionales: «Por cuenta» (una fila por CUIT con lo que entró por
  *    cada medio), «Comprobantes» y «Cómo se generó».
  *
- * Este archivo NO importa nada de la app (sólo ExcelJS y el dataset): se puede
- * ejecutar y validar fuera del navegador.
+ * Este archivo NO importa nada de la app (sólo ExcelJS, el saneador OOXML y el
+ * dataset): se puede ejecutar y validar fuera del navegador.
  */
 import ExcelJS from 'exceljs'
+import { sanearXlsx } from '@/components/exportar/sanearXlsx'
 import { MEDIO_LABEL, type ColumnaResuelta, type DatasetFacturacion, type FilaFacturacion } from './datos'
 import { nombreMes, type TipoColumna } from './tipos'
 
@@ -114,9 +115,9 @@ export async function construirXlsx(dataset: DatasetFacturacion): Promise<Blob> 
   ]
 
   const buffer = await wb.xlsx.writeBuffer()
-  return new Blob([buffer], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  })
+  // El saneado deja el archivo 100 % válido según el esquema OOXML: sin él,
+  // un visor estricto (Excel web) puede «reparar» el libro al abrirlo.
+  return sanearXlsx(buffer as unknown as Uint8Array)
 }
 
 /* ===================== Hoja principal ===================== */
@@ -343,8 +344,12 @@ function hojaPlanilla(wb: ExcelJS.Workbook, dataset: DatasetFacturacion) {
 
   // Al imprimir, la fila de títulos se repite en todas las hojas.
   ws.pageSetup.printTitlesRow = `${filaTitulos}:${filaTitulos}`
+  // Tras el código de tamaño (&8) no puede venir un dígito: Excel lo leería
+  // como parte del tamaño. El guarda antepone un espacio si el texto arranca
+  // con número.
+  const seg = (texto: string) => (/^\d/.test(texto) ? ` ${texto}` : texto)
   ws.headerFooter = {
-    oddFooter: `&L&"Calibri,Regular"&8${meta.titulo} · ${meta.periodo}&R&"Calibri,Regular"&8Página &P de &N`,
+    oddFooter: `&L&"Calibri,Regular"&8${seg(meta.titulo)} · ${meta.periodo}&R&"Calibri,Regular"&8Página &P de &N`,
   }
 }
 
