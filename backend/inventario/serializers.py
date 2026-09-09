@@ -6,7 +6,7 @@ from facturacion.models import Cliente, Emisor
 from precios_service.models import ItemService
 from productos.models import CategoriaProducto, Producto
 
-from .importacion import MAX_UNIDADES, precio_planilla
+from .importacion import MAX_COLUMNAS, MAX_UNIDADES, precio_planilla
 from .models import ItemVenta, MovimientoStock, PagoVenta, StockProducto, Sucursal, Venta
 
 
@@ -260,11 +260,46 @@ class TransferenciaStockSerializer(serializers.Serializer):
 MAX_MB_PLANILLA = 10
 
 
+# De que columna sale cada dato. Solo viaja cuando quien importa lo corrige a
+# mano desde «Opciones avanzadas»: el numero es la columna del Excel (0 = A) y
+# -1 significa "no leer ese dato de ninguna columna".
+CAMPOS_COLUMNA = {
+    'col_producto': 'producto',
+    'col_stock': 'stock',
+    'col_minimo': 'minimo',
+    'col_lista': 'lista',
+    'col_cash': 'cash',
+}
+NINGUNA_COLUMNA = -1
+
+
+def _campo_columna(obligatoria=False):
+    return serializers.IntegerField(
+        required=False,
+        min_value=0 if obligatoria else NINGUNA_COLUMNA,
+        max_value=MAX_COLUMNAS,
+    )
+
+
 class AnalizarImportacionSerializer(serializers.Serializer):
     """Entrada de POST /stock/importar/analizar/: la planilla de una sucursal."""
 
     sucursal = _campo_sucursal()
     archivo = serializers.FileField()
+    col_producto = _campo_columna(obligatoria=True)
+    col_stock = _campo_columna(obligatoria=True)
+    col_minimo = _campo_columna()
+    col_lista = _campo_columna()
+    col_cash = _campo_columna()
+
+    def validate(self, data):
+        elegidas = {
+            campo: (None if data[clave] == NINGUNA_COLUMNA else data[clave])
+            for clave, campo in CAMPOS_COLUMNA.items()
+            if clave in data
+        }
+        data['columnas'] = elegidas or None
+        return data
 
     def validate_archivo(self, value):
         if not value.name.lower().endswith('.xlsx'):
@@ -277,6 +312,33 @@ class AnalizarImportacionSerializer(serializers.Serializer):
                 f'El archivo pesa demasiado (máximo {MAX_MB_PLANILLA} MB).'
             )
         return value
+
+
+def _con_precios_redondeados(data, *campos):
+    """El payload con sus precios redondeados a centavos ANTES de validar.
+
+    Excel entrega 7.14 como 7.140000000000001 y el catalogo guarda dos
+    decimales: sin esto, una sola fila asi tiraba abajo la importacion entera.
+    Lo que no es un precio se deja intacto, para que el error sea el de siempre.
+    """
+    if not isinstance(data, dict):
+        return data
+    cambios = {}
+    for campo in campos:
+        if data.get(campo) in (None, ''):
+            continue
+        redondeado = precio_planilla(data[campo])
+        if redondeado is not None:
+            cambios[campo] = redondeado
+    return {**data, **cambios} if cambios else data
+
+
+def _campo_precio():
+    """Un precio en dolares del catalogo, opcional (null = sin precio)."""
+    return serializers.DecimalField(
+        max_digits=12, decimal_places=2, min_value=Decimal('0'),
+        required=False, allow_null=True,
+    )
 
 
 class ProductoNuevoImportacionSerializer(serializers.Serializer):
@@ -292,22 +354,15 @@ class ProductoNuevoImportacionSerializer(serializers.Serializer):
     calidad = serializers.CharField(
         max_length=60, required=False, allow_blank=True, default='',
     )
-    lista_usd = serializers.DecimalField(
-        max_digits=12, decimal_places=2, min_value=Decimal('0'),
-        required=False, allow_null=True,
-    )
+    lista_usd = _campo_precio()
+    # El cash SOLO cuando la planilla no sigue la formula de la categoria: si
+    # coincide viaja vacio y el catalogo lo deriva, como con cualquier producto.
+    cash_usd = _campo_precio()
 
     def to_internal_value(self, data):
-        # El precio puede llegar con la basura de coma flotante del Excel
-        # (7.14 viaja como 7.140000000000001): se redondea ANTES de validar,
-        # porque el campo rechaza mas decimales de los que guarda el catalogo y
-        # una sola fila asi tiraba abajo la importacion entera. Lo que no es un
-        # precio se deja pasar tal cual, para que el error sea el de siempre.
-        if isinstance(data, dict) and data.get('lista_usd') not in (None, ''):
-            redondeado = precio_planilla(data['lista_usd'])
-            if redondeado is not None:
-                data = {**data, 'lista_usd': redondeado}
-        return super().to_internal_value(data)
+        return super().to_internal_value(
+            _con_precios_redondeados(data, 'lista_usd', 'cash_usd')
+        )
 
     def validate_nombre(self, value):
         value = value.strip()
@@ -325,13 +380,35 @@ class ItemImportacionSerializer(serializers.Serializer):
         queryset=Producto.objects.all(), required=False, allow_null=True,
     )
     crear = ProductoNuevoImportacionSerializer(required=False, allow_null=True)
-    cantidad = serializers.IntegerField(min_value=0, max_value=MAX_UNIDADES)
+    # Opcional: sin cantidad la fila NO toca el stock (asi se importa solo la
+    # lista de precios, o solo la alerta de minimo).
+    cantidad = serializers.IntegerField(min_value=0, max_value=MAX_UNIDADES, required=False)
     stock_minimo = serializers.IntegerField(required=False, allow_null=True, min_value=0)
+    # El precio en DOLARES del producto del catalogo. Omitido no lo toca; en
+    # `cash_usd`, null borra el override para que vuelva a salir de la formula.
+    # Los precios en pesos no se importan: los calcula el catalogo con el dolar.
+    lista_usd = _campo_precio()
+    cash_usd = _campo_precio()
+
+    def to_internal_value(self, data):
+        return super().to_internal_value(
+            _con_precios_redondeados(data, 'lista_usd', 'cash_usd')
+        )
 
     def validate(self, data):
+        if data.get('crear') and ('lista_usd' in data or 'cash_usd' in data):
+            raise serializers.ValidationError(
+                'El precio de un producto nuevo va adentro del alta, no suelto en la fila.'
+            )
         if not data.get('producto') and not data.get('crear'):
             raise serializers.ValidationError(
                 'Cada fila tiene que apuntar a un producto del catálogo o traer el alta.'
+            )
+        if not data.get('crear') and not any(
+            campo in data for campo in ('cantidad', 'stock_minimo', 'lista_usd', 'cash_usd')
+        ):
+            raise serializers.ValidationError(
+                'Esta fila no cambia nada: mandá la cantidad, el mínimo o el precio.'
             )
         if data.get('producto') and data.get('crear'):
             raise serializers.ValidationError(

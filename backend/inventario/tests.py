@@ -723,12 +723,14 @@ class SeedInventarioTests(TestCase):
 
 # ===== Importacion de stock por sucursal =====
 
-def _planilla(filas, encabezado=None):
+def _planilla(filas, encabezado=None, dolar=None):
     """Un .xlsx en memoria con la forma de la planilla del negocio.
 
-    `filas` son tuplas (seccion, producto, lista_usd, stock, minimo); un None en
-    `producto` genera una fila de sub-encabezado (la que en MODULOS reusa la
-    columna STOCK para los precios CO/AO).
+    `filas` son tuplas (seccion, producto, lista_usd, stock, minimo) y, si hace
+    falta, un sexto valor con el PRECIO CASH USD; un None en `producto` genera
+    una fila de sub-encabezado (la que en MODULOS reusa la columna STOCK para
+    los precios CO/AO). `dolar` deja la cotizacion suelta en el encabezado, como
+    la planilla real.
     """
     import io
 
@@ -736,13 +738,16 @@ def _planilla(filas, encabezado=None):
 
     libro = openpyxl.Workbook()
     hoja = libro.active
-    hoja.append(encabezado or [
+    rotulos = encabezado or [
         None, 'PRODUCTOS', 'COSTO USD', 'COSTO $', 'PRECIO DE LISTA USD',
         'PRECIO CASH USD (20% OFF)', 'PRECIO DE LISTA CREDITO', '$/DEBITO/TRANSF',
         'STOCK', 'STOCK MINIMO',
-    ])
-    for seccion, producto, lista, stock, minimo in filas:
-        hoja.append([seccion, producto, None, None, lista, None, None, None, stock, minimo])
+    ]
+    hoja.append([*rotulos, dolar] if dolar is not None else rotulos)
+    for datos in filas:
+        seccion, producto, lista, stock, minimo = datos[:5]
+        cash = datos[5] if len(datos) > 5 else None
+        hoja.append([seccion, producto, None, None, lista, cash, None, None, stock, minimo])
     buffer = io.BytesIO()
     libro.save(buffer)
     buffer.seek(0)
@@ -807,6 +812,111 @@ class PlanillaImportacionTests(TestCase):
         self.assertEqual(filas[2]['estado'], 'actualiza')
         self.assertEqual(filas[4]['estado'], 'invalida')
         self.assertIn('CO/AO', filas[4]['motivo'])
+
+    # --- Precios: la planilla manda, pero SOLO en dolares -------------------
+
+    def test_el_precio_de_la_planilla_pisa_al_del_catalogo(self):
+        """Aunque la cantidad sea la misma: otro precio ya es un cambio."""
+        StockProducto.objects.create(
+            producto=self.producto, sucursal=self.sucursal, cantidad=3, sin_dato=False,
+        )
+        filas = self._filas(_planilla([
+            ('ZETATEST ACCESORIOS', 'Zetatest Cable 1M - CO', 12, 3, None),
+        ]))
+        fila = filas[2]
+        self.assertEqual(fila['estado'], 'actualiza')
+        self.assertTrue(fila['precio']['cambia'])
+        self.assertEqual(fila['precio']['lista_actual'], '10.00')
+        self.assertEqual(fila['precio']['aplicar'], {'lista_usd': '12.00'})
+
+    def test_mismo_precio_no_es_un_cambio(self):
+        filas = self._filas(_planilla([
+            ('ZETATEST ACCESORIOS', 'Zetatest Cable 1M - CO', 10, 3, None),
+        ]))
+        self.assertIsNone(filas[2]['precio']['aplicar'])
+        self.assertFalse(filas[2]['precio']['cambia'])
+
+    def test_el_cash_que_sale_de_la_formula_no_se_guarda(self):
+        """20 % off es lo que el catalogo ya calcula: guardarlo seria fijarlo."""
+        filas = self._filas(_planilla([
+            ('ZETATEST ACCESORIOS', 'Zetatest Cable 1M - CO', 10, 3, None, 8),
+        ]))
+        precio = filas[2]['precio']
+        self.assertIsNone(precio['aplicar'])
+        self.assertFalse(precio['excepcion'])
+        self.assertEqual(precio['cash_actual'], '8.00')
+
+    def test_el_cash_distinto_de_la_formula_se_fija(self):
+        filas = self._filas(_planilla([
+            ('ZETATEST ACCESORIOS', 'Zetatest Cable 1M - CO', 10, 3, None, 9),
+        ]))
+        precio = filas[2]['precio']
+        self.assertEqual(precio['aplicar'], {'cash_usd': '9.00'})
+        self.assertTrue(precio['excepcion'])
+
+    def test_el_cash_que_vuelve_a_la_formula_borra_lo_fijado(self):
+        """Si la planilla coincide con la formula, el producto vuelve a seguir
+        el descuento de su categoria en vez de quedar clavado."""
+        self.producto.precio_cash_usd = Decimal('7')
+        self.producto.save(update_fields=['precio_cash_usd'])
+        filas = self._filas(_planilla([
+            ('ZETATEST ACCESORIOS', 'Zetatest Cable 1M - CO', 10, 3, None, 8),
+        ]))
+        self.assertEqual(filas[2]['precio']['aplicar'], {'cash_usd': None})
+        self.assertFalse(filas[2]['precio']['excepcion'])
+
+    def test_avisa_cuando_el_precio_esta_fijado_en_pesos(self):
+        """Un override en $ se come el precio nuevo: hay que verlo antes."""
+        self.producto.precio_lista_ars = Decimal('15000')
+        self.producto.save(update_fields=['precio_lista_ars'])
+        analisis = self.analizar(_planilla([
+            ('ZETATEST ACCESORIOS', 'Zetatest Cable 1M - CO', 12, 3, None),
+        ]), self.sucursal)
+        self.assertTrue(analisis['filas'][0]['precio']['fijado_en_pesos'])
+        self.assertEqual(analisis['resumen']['fijado_en_pesos'], 1)
+
+    def test_el_dolar_del_encabezado_sale_en_el_resumen(self):
+        """Solo para avisar: los pesos se calculan con el dolar del negocio."""
+        resumen = self.analizar(_planilla([
+            ('ZETATEST ACCESORIOS', 'Zetatest Cable 1M - CO', 10, 3, None),
+        ], dolar=1580), self.sucursal)['resumen']
+        self.assertEqual(resumen['dolar_planilla'], '1580.00')
+        self.assertIsNotNone(resumen['dolar_negocio'])
+
+    def test_una_fila_sin_cantidad_igual_trae_su_precio(self):
+        """El precio es independiente del conteo: la celda de stock vacia no
+        toca el stock, pero el precio sigue estando y se puede aplicar a mano
+        (es lo que permite importar SOLO la lista de precios). Eso si: la fila
+        no viene marcada sola."""
+        filas = self._filas(_planilla([
+            ('ZETATEST ACCESORIOS', 'Zetatest Cable 1M - CO', 12, None, None),
+        ]))
+        self.assertEqual(filas[2]['estado'], 'sin_valor')
+        self.assertFalse(filas[2]['sugerido'])
+        self.assertEqual(filas[2]['precio']['aplicar'], {'lista_usd': '12.00'})
+
+    def test_el_descuento_cash_es_el_mismo_que_el_del_catalogo(self):
+        """El indice resuelve el descuento en memoria (una consulta por fila
+        seria carisimo): tiene que dar SIEMPRE lo mismo que el catalogo."""
+        from productos.models import ConfiguracionProductos, resolver_descuento_cash
+
+        from .importacion import IndiceCatalogo
+
+        hija = CategoriaProducto.objects.create(
+            nombre='Zetatest hija', padre=self.producto.categoria,
+        )
+        CategoriaProducto.objects.filter(pk=self.producto.categoria_id).update(
+            descuento_cash_pct=Decimal('30'),
+        )
+        indice = IndiceCatalogo()
+        config = ConfiguracionProductos.obtener()
+        for categoria in CategoriaProducto.objects.all():
+            self.assertEqual(
+                indice.descuento_cash(categoria),
+                resolver_descuento_cash(categoria, config),
+                f'difiere en {categoria.nombre}',
+            )
+        self.assertEqual(indice.descuento_cash(hija), Decimal('30'))
 
     def test_precio_del_excel_llega_redondeado_a_centavos(self):
         """Excel devuelve 7.14 como 7.140000000000001 y el catalogo guarda dos
@@ -973,6 +1083,20 @@ class PlanillaModulosTests(TestCase):
         self.assertEqual(filas['Zetamodulo 11 PRO Calidad original']['minimo_nuevo'], 2)
         # Siempre en centavos: es como lo guarda el catalogo.
         self.assertEqual(filas['Zetamodulo 11 PRO Calidad Apple']['lista_usd'], '224.40')
+
+    def test_apagar_un_dato_vale_tambien_en_modulos(self):
+        """MODULOS vuelve a escribir su encabezado y tiene sus propias columnas,
+        pero "este dato no se importa" es una decision de toda la planilla."""
+        filas = {
+            f['nombre_planilla']: f
+            for f in self.analizar(
+                self._una_fila(), self.sucursal, columnas={'lista': None},
+            )['filas']
+        }
+        self.assertTrue(filas)
+        self.assertTrue(all(f['lista_usd'] is None for f in filas.values()))
+        # El stock sigue entrando: solo se apago el precio.
+        self.assertEqual(filas['Zetamodulo 11 PRO Calidad certificada']['cantidad_nueva'], 9)
 
     def test_matchea_exacto_contra_el_producto_de_esa_calidad(self):
         """El nombre que arma la planilla es el mismo que rearma el catalogo."""
@@ -1232,6 +1356,53 @@ class ImportarStockApiTests(TestCase):
     def test_requiere_autenticacion(self):
         self.assertEqual(APIClient().post(self.ANALIZAR, {}).status_code, 401)
 
+    def test_analizar_dice_de_que_columna_saco_cada_dato(self):
+        """Para poder corregirlo a mano desde «Opciones avanzadas»."""
+        r = self._subir(self.empleado, [('ZETATEST API', 'Zetatest Api Cable', 12, 7, 2)])
+        columnas = r.data['columnas']
+        self.assertEqual(columnas['fila'], 1)
+        self.assertEqual(columnas['elegidas']['producto'], 1)
+        self.assertEqual(columnas['elegidas']['stock'], 8)
+        self.assertEqual(columnas['elegidas']['lista'], 4)
+        self.assertEqual(columnas['elegidas']['cash'], 5)
+        disponibles = {c['letra']: c['rotulo'] for c in columnas['disponibles']}
+        self.assertEqual(disponibles['B'], 'PRODUCTOS')
+        self.assertEqual(disponibles['I'], 'STOCK')
+
+    def test_se_puede_elegir_otra_columna_a_mano(self):
+        """La válvula de escape: si la planilla viene con otra forma, se le dice
+        de dónde sacar cada dato en vez de pelear con el detector."""
+        # La cantidad de verdad esta en STOCK MINIMO (columna J = 9).
+        r = self._cliente(self.empleado).post(self.ANALIZAR, {
+            'sucursal': self.sucursal.id,
+            'archivo': _planilla([('ZETATEST API', 'Zetatest Api Cable', 12, 7, 3)]),
+            'col_stock': 9,
+            'col_minimo': -1,
+        }, format='multipart')
+        self.assertEqual(r.status_code, 200)
+        fila = r.data['filas'][0]
+        self.assertEqual(fila['cantidad_nueva'], 3)
+        self.assertIsNone(fila['minimo_nuevo'])
+        self.assertEqual(r.data['columnas']['elegidas']['stock'], 9)
+
+    def test_apagar_la_columna_del_precio(self):
+        r = self._cliente(self.empleado).post(self.ANALIZAR, {
+            'sucursal': self.sucursal.id,
+            'archivo': _planilla([('ZETATEST API', 'Zetatest Api Cable', 99, 7, None)]),
+            'col_lista': -1,
+        }, format='multipart')
+        self.assertEqual(r.status_code, 200)
+        self.assertIsNone(r.data['filas'][0]['lista_usd'])
+        self.assertEqual(r.data['resumen']['precio'], 0)
+
+    def test_una_columna_que_no_existe_da_400(self):
+        r = self._cliente(self.empleado).post(self.ANALIZAR, {
+            'sucursal': self.sucursal.id,
+            'archivo': _planilla([('ZETATEST API', 'Zetatest Api Cable', 12, 7, None)]),
+            'col_stock': 9999,
+        }, format='multipart')
+        self.assertEqual(r.status_code, 400)
+
     def test_aplicar_fija_stock_y_deja_kardex(self):
         cliente = self._cliente(self.empleado)
         r = cliente.post(self.APLICAR, {
@@ -1277,6 +1448,129 @@ class ImportarStockApiTests(TestCase):
         self.assertEqual(creado.categoria, self.categoria)
         self.assertEqual(creado.precio_lista_usd, Decimal('15'))
         self.assertEqual(creado.stocks.get(sucursal=self.sucursal).cantidad, 3)
+
+    def test_importar_solo_precios_no_toca_el_stock(self):
+        """Sin cantidad, la fila cambia el precio y deja el conteo como estaba."""
+        aplicar_ajuste(self.producto, self.sucursal, cantidad=9)
+        r = self._cliente(self.admin).post(self.APLICAR, {
+            'sucursal': self.sucursal.id,
+            'items': [{'producto': self.producto.id, 'lista_usd': '30'}],
+        }, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['precios'], 1)
+        self.assertEqual(r.data['actualizados'], 0)
+        self.producto.refresh_from_db()
+        self.assertEqual(self.producto.precio_lista_usd, Decimal('30'))
+        fila = StockProducto.objects.get(producto=self.producto, sucursal=self.sucursal)
+        self.assertEqual(fila.cantidad, 9)
+        # Y no invento un movimiento en el kardex.
+        self.assertEqual(
+            MovimientoStock.objects.filter(producto=self.producto, nota__startswith='Import').count(),
+            0,
+        )
+
+    def test_una_fila_que_no_cambia_nada_da_400(self):
+        r = self._cliente(self.admin).post(self.APLICAR, {
+            'sucursal': self.sucursal.id,
+            'items': [{'producto': self.producto.id}],
+        }, format='json')
+        self.assertEqual(r.status_code, 400)
+
+    def test_solo_el_minimo_sin_tocar_la_cantidad(self):
+        r = self._cliente(self.empleado).post(self.APLICAR, {
+            'sucursal': self.sucursal.id,
+            'items': [{'producto': self.producto.id, 'stock_minimo': 5}],
+        }, format='json')
+        self.assertEqual(r.status_code, 200)
+        fila = StockProducto.objects.get(producto=self.producto, sucursal=self.sucursal)
+        self.assertEqual(fila.stock_minimo, 5)
+        # La fila nace "sin dato": no se informo ninguna cantidad.
+        self.assertEqual(fila.cantidad, 0)
+        self.assertTrue(fila.sin_dato)
+
+    def test_aplicar_actualiza_el_precio_en_dolares(self):
+        """Lo que faltaba: al producto que YA existe tambien se le pasa el precio."""
+        self.producto.precio_lista_ars = Decimal('19000')
+        self.producto.save(update_fields=['precio_lista_ars'])
+        r = self._cliente(self.admin).post(self.APLICAR, {
+            'sucursal': self.sucursal.id,
+            'items': [{
+                'producto': self.producto.id, 'cantidad': 4,
+                'lista_usd': '15.50', 'cash_usd': '13',
+            }],
+        }, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['precios'], 1)
+        self.producto.refresh_from_db()
+        self.assertEqual(self.producto.precio_lista_usd, Decimal('15.50'))
+        self.assertEqual(self.producto.precio_cash_usd, Decimal('13'))
+        # Los pesos NO se importan: el catalogo los calcula con el dolar.
+        self.assertEqual(self.producto.precio_lista_ars, Decimal('19000'))
+        self.assertEqual(self.producto.actualizado_por, self.admin)
+
+    def test_aplicar_borra_el_cash_fijado_cuando_viaja_en_null(self):
+        self.producto.precio_cash_usd = Decimal('7')
+        self.producto.save(update_fields=['precio_cash_usd'])
+        r = self._cliente(self.admin).post(self.APLICAR, {
+            'sucursal': self.sucursal.id,
+            'items': [{'producto': self.producto.id, 'cantidad': 4, 'cash_usd': None}],
+        }, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.producto.refresh_from_db()
+        self.assertIsNone(self.producto.precio_cash_usd)
+
+    def test_el_mismo_precio_no_cuenta_como_cambio(self):
+        """Reimportar la misma planilla no tiene que ensuciar la auditoria."""
+        r = self._cliente(self.admin).post(self.APLICAR, {
+            'sucursal': self.sucursal.id,
+            'items': [{'producto': self.producto.id, 'cantidad': 4, 'lista_usd': '12'}],
+        }, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['precios'], 0)
+
+    def test_cambiar_precios_es_solo_admin(self):
+        """Ajustar cantidades es de mostrador; tocar la lista de precios no."""
+        item = {'producto': self.producto.id, 'cantidad': 4, 'lista_usd': '99'}
+        r = self._cliente(self.empleado).post(self.APLICAR, {
+            'sucursal': self.sucursal.id, 'items': [item],
+        }, format='json')
+        self.assertEqual(r.status_code, 403)
+        self.producto.refresh_from_db()
+        self.assertEqual(self.producto.precio_lista_usd, Decimal('12'))
+        self.assertEqual(StockProducto.objects.filter(sucursal=self.sucursal).count(), 0)
+
+        # Sin precio, la misma fila la aplica cualquiera con `ver_inventario`.
+        r = self._cliente(self.empleado).post(self.APLICAR, {
+            'sucursal': self.sucursal.id,
+            'items': [{'producto': self.producto.id, 'cantidad': 4}],
+        }, format='json')
+        self.assertEqual(r.status_code, 200)
+
+    def test_el_precio_de_un_alta_va_adentro_del_alta(self):
+        r = self._cliente(self.admin).post(self.APLICAR, {
+            'sucursal': self.sucursal.id,
+            'items': [{
+                'crear': {'nombre': 'Zetatest Suelto', 'categoria': self.categoria.id},
+                'cantidad': 1, 'lista_usd': '10',
+            }],
+        }, format='json')
+        self.assertEqual(r.status_code, 400)
+        self.assertFalse(Producto.objects.filter(nombre='Zetatest Suelto').exists())
+
+    def test_alta_con_cash_fijado(self):
+        r = self._cliente(self.admin).post(self.APLICAR, {
+            'sucursal': self.sucursal.id,
+            'items': [{
+                'crear': {
+                    'nombre': 'Zetatest Con Cash', 'categoria': self.categoria.id,
+                    'lista_usd': '20', 'cash_usd': '18',
+                },
+                'cantidad': 1,
+            }],
+        }, format='json')
+        self.assertEqual(r.status_code, 200)
+        creado = Producto.objects.get(nombre='Zetatest Con Cash')
+        self.assertEqual(creado.precio_cash_usd, Decimal('18'))
 
     def test_alta_con_el_precio_crudo_del_excel(self):
         """Una planilla vieja (o una pestaña abierta antes) puede mandar el
@@ -1382,8 +1676,10 @@ class ExportarEnFormatoImportadorTests(TestCase):
         libro = openpyxl.Workbook()
         hoja = libro.active
         hoja.append(self.ENCABEZADO)
-        for categoria, nombre, lista, stock, minimo in filas:
-            hoja.append([categoria, nombre, None, None, lista, None, None, None, stock, minimo])
+        for datos in filas:
+            categoria, nombre, lista, stock, minimo = datos[:5]
+            cash = datos[5] if len(datos) > 5 else None
+            hoja.append([categoria, nombre, None, None, lista, cash, None, None, stock, minimo])
         # La nota que el exportador deja en la columna K: NO tiene que leerse
         # como un renglon de producto.
         hoja.cell(1, 11).value = 'Stock de Export ida y vuelta. Completa la columna STOCK y volve a subirlo.'
@@ -1392,6 +1688,26 @@ class ExportarEnFormatoImportadorTests(TestCase):
         buffer.seek(0)
         buffer.name = 'inventario-export.xlsx'
         return buffer
+
+    def test_la_nota_del_exportador_no_se_lee_como_dolar(self):
+        """El exportador deja un texto en la columna K, justo donde la planilla
+        del negocio pone la cotizacion: no puede confundirse con un dolar."""
+        analisis = self.analizar(self._archivo_del_exportador([
+            ('Zetaexport fuentes', 'Zetaexport Cable 2M', 8, 3, None),
+        ]), self.sucursal)
+        self.assertIsNone(analisis['resumen']['dolar_planilla'])
+
+    def test_el_ida_y_vuelta_no_fija_el_cash(self):
+        """El exportador escribe el cash que YA calcula el catalogo: volver a
+        subirlo no puede clavarlo como si fuera una excepcion."""
+        analisis = self.analizar(self._archivo_del_exportador([
+            # 8 USD con el 20 % global = 6,40: exactamente lo que da la formula.
+            ('Zetaexport fuentes', 'Zetaexport Cable 2M', 8, 3, None, Decimal('6.40')),
+        ]), self.sucursal)
+        precio = analisis['filas'][0]['precio']
+        self.assertFalse(precio['excepcion'])
+        self.assertIsNone(precio['aplicar'])
+        self.assertEqual(analisis['resumen']['precio'], 0)
 
     def test_el_archivo_exportado_vuelve_a_entrar_sin_revisar(self):
         # Asi lo escribe el exportador: la categoria solo en la primera fila del

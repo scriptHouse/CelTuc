@@ -164,6 +164,12 @@ export interface FilaImportacion {
   minimo_actual: number | null
   minimo_nuevo: number | null
   lista_usd: string | null
+  /** El cash USD que trae la planilla (informativo). */
+  cash_usd: string | null
+  /** El override de cash que hay que guardar si esta fila se da de alta. */
+  cash_alta: string | null
+  /** El antes → después del precio (null si la fila no matcheó un producto). */
+  precio: PrecioImportacion | null
   candidatos: CandidatoImportacion[]
   /**
    * Otras filas de la planilla que caen en el MISMO producto del catálogo (la
@@ -175,6 +181,29 @@ export interface FilaImportacion {
   sugerido: boolean
   /** Se puede dar de alta: es nueva y su sección tiene categoría. */
   puede_crear: boolean
+}
+
+/**
+ * El antes → después del PRECIO de una fila que matcheó un producto.
+ *
+ * De la planilla solo entran los dólares: los pesos los calcula el catálogo con
+ * el dólar del negocio, y escribirlos los congelaría (dejarían de seguir la
+ * cotización). Los precios viajan como texto para no perder centavos.
+ */
+export interface PrecioImportacion {
+  lista_actual: string | null
+  /** Lo que dice la planilla (null si esa fila no trae precio). */
+  lista_nueva: string | null
+  /** El cash efectivo de hoy: el fijado a mano, o el que sale de la fórmula. */
+  cash_actual: string | null
+  cash_nuevo: string | null
+  /** El cash queda fijado a mano: deja de seguir al descuento de la categoría. */
+  excepcion: boolean
+  /** El producto tiene el precio en $ fijado a mano: este cambio no se va a ver. */
+  fijado_en_pesos: boolean
+  cambia: boolean
+  /** Lo que hay que mandar en el ítem al aplicar (null = no tocar el precio). */
+  aplicar: { lista_usd?: string; cash_usd?: string | null } | null
 }
 
 export interface ResumenImportacion {
@@ -195,6 +224,28 @@ export interface ResumenImportacion {
   unidades_despues: number
   /** Productos del catálogo que la planilla no menciona: quedan como están. */
   catalogo_sin_planilla: number
+  /** Filas que van a cambiar el precio del catálogo. */
+  precio: number
+  /** De esas, las que tienen el precio en $ fijado a mano (no se va a ver). */
+  fijado_en_pesos: number
+  /** De esas, las que fijan el cash porque no coincide con el descuento. */
+  excepcion_cash: number
+  /** El dólar con el que se armó la planilla (null si no lo trae). */
+  dolar_planilla: string | null
+  /** El dólar del negocio, con el que el catálogo calcula los pesos. */
+  dolar_negocio: string | null
+}
+
+/** Los datos que la planilla puede aportar, cada uno con su columna. */
+export type CampoColumna = 'producto' | 'stock' | 'minimo' | 'lista' | 'cash'
+
+/** De qué columna del Excel salió cada dato, y qué otras columnas hay. */
+export interface ColumnasImportacion {
+  /** Número de fila del encabezado en el Excel. */
+  fila: number
+  /** La columna de la que sale cada dato (0 = A); null = ese dato no se lee. */
+  elegidas: Record<CampoColumna, number | null>
+  disponibles: Array<{ indice: number; letra: string; rotulo: string }>
 }
 
 export interface AnalisisImportacion {
@@ -202,6 +253,7 @@ export interface AnalisisImportacion {
   sucursal_nombre: string
   archivo: string
   resumen: ResumenImportacion
+  columnas: ColumnasImportacion
   filas: FilaImportacion[]
 }
 
@@ -216,10 +268,17 @@ export interface ItemImportacionInput {
     /** Solo la trae MÓDULOS, que reparte las calidades en columnas. */
     calidad?: string
     lista_usd?: string | null
+    /** Solo si la planilla no sigue la fórmula de la categoría. */
+    cash_usd?: string | null
   }
-  cantidad: number
+  /** Omitida, la fila NO toca el stock (así se importa solo el precio). */
+  cantidad?: number
   /** null borra la alerta; omitido no la toca. */
   stock_minimo?: number | null
+  /** Precio de lista USD del producto del catálogo; omitido no lo toca. */
+  lista_usd?: string
+  /** Override de cash USD; null lo borra (vuelve a salir de la fórmula). */
+  cash_usd?: string | null
 }
 
 export interface ResultadoImportacion {
@@ -228,8 +287,16 @@ export interface ResultadoImportacion {
   actualizados: number
   creados: number
   sin_cambio: number
+  /** Productos del catálogo a los que se les actualizó el precio en dólares. */
+  precios: number
   unidades_delta: number
-  detalle: Array<{ producto: number; nombre: string; cantidad: number; delta: number }>
+  detalle: Array<{
+    producto: number
+    nombre: string
+    /** null cuando la fila no tocó el stock (importación de solo precios). */
+    cantidad: number | null
+    delta: number
+  }>
 }
 
 /**
@@ -239,10 +306,21 @@ export interface ResultadoImportacion {
 export function analizarImportacionStock(input: {
   sucursal: number
   archivo: File
+  /**
+   * De qué columna sacar cada dato, cuando quien importa lo corrige a mano.
+   * Sin esto, el servidor las detecta por los rótulos (el caso normal).
+   */
+  columnas?: Record<CampoColumna, number | null> | null
 }): Promise<AnalisisImportacion> {
   const form = new FormData()
   form.append('sucursal', String(input.sucursal))
   form.append('archivo', input.archivo)
+  if (input.columnas) {
+    for (const [campo, posicion] of Object.entries(input.columnas)) {
+      // -1 es «no leer ese dato de ninguna columna».
+      form.append(`col_${campo}`, String(posicion ?? -1))
+    }
+  }
   return api.post<AnalisisImportacion>('/inventario/stock/importar/analizar/', form, token())
 }
 

@@ -34,7 +34,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Max
 
-from productos.models import CategoriaProducto, Producto
+from productos.models import CategoriaProducto, ConfiguracionProductos, Producto
 
 from .models import MovimientoStock, StockProducto, aplicar_ajuste
 
@@ -65,6 +65,9 @@ ENCABEZADO_PRODUCTO = 'productos'
 ENCABEZADO_STOCK = 'stock'
 ENCABEZADO_MINIMO = 'stock minimo'
 ENCABEZADO_LISTA = 'precio de lista usd'
+# El rotulo del cash lleva el descuento adentro ("PRECIO CASH USD (20% OFF)"),
+# asi que se reconoce por como EMPIEZA: si manana dice 25% sigue entrando.
+ENCABEZADO_CASH = 'precio cash usd'
 
 # Las calidades que la planilla reparte EN COLUMNAS (hoy solo MODULOS): arriba
 # va el titulo del grupo combinado sobre las tres (STOCK, PRECIO DE LISTA USD)
@@ -154,7 +157,81 @@ def _columnas_de(fila):
         'stock': rotulos.index(ENCABEZADO_STOCK),
         'minimo': rotulos.index(ENCABEZADO_MINIMO) if ENCABEZADO_MINIMO in rotulos else None,
         'lista': rotulos.index(ENCABEZADO_LISTA) if ENCABEZADO_LISTA in rotulos else None,
+        'cash': next(
+            (i for i, r in enumerate(rotulos) if r.startswith(ENCABEZADO_CASH)), None,
+        ),
     }
+
+
+# Rango en el que un numero suelto del encabezado puede ser la cotizacion. Es
+# una guarda, no una validacion: si no cae aca, no se toma como dolar.
+DOLAR_MINIMO = Decimal('100')
+DOLAR_MAXIMO = Decimal('100000')
+
+
+def _dolar_de_encabezado(fila, columnas):
+    """La cotizacion suelta que la planilla deja al lado de los rotulos, o None.
+
+    En el archivo del negocio el dolar con el que se armaron los precios en pesos
+    vive en una celda del encabezado, despues de la ultima columna rotulada. NO
+    se usa para calcular nada: solo sirve para avisar cuando la planilla se armo
+    con un dolar distinto al que tiene cargado el sistema.
+    """
+    posiciones = [p for p in columnas.values() if p is not None]
+    for celda in fila[max(posiciones) + 1:]:
+        numero = precio_planilla(celda)
+        if numero is not None and DOLAR_MINIMO <= numero <= DOLAR_MAXIMO:
+            return numero
+    return None
+
+
+# Los datos que la planilla puede aportar, en el orden en que se muestran. Los
+# dos primeros son obligatorios: sin PRODUCTOS y STOCK no hay planilla que leer.
+CAMPOS_COLUMNA = ('producto', 'stock', 'minimo', 'lista', 'cash')
+CAMPOS_OBLIGATORIOS = ('producto', 'stock')
+# Techo de columnas que se ofrecen para elegir a mano (la planilla usa 20).
+MAX_COLUMNAS = 40
+
+
+def _letra_columna(indice):
+    """Como nombra Excel a la columna numero `indice` (0 = A, 26 = AA)."""
+    letras, numero = '', indice + 1
+    while numero:
+        numero, resto = divmod(numero - 1, 26)
+        letras = chr(65 + resto) + letras
+    return letras
+
+
+def _encabezado_visible(fila):
+    """Las columnas del encabezado, para poder elegir a mano de donde sale cada
+    dato: `[{'indice': 1, 'letra': 'B', 'rotulo': 'PRODUCTOS'}, ...]`."""
+    return [
+        {
+            'indice': i,
+            'letra': _letra_columna(i),
+            'rotulo': str(celda).strip() if celda is not None else '',
+        }
+        for i, celda in enumerate(fila[:MAX_COLUMNAS])
+    ]
+
+
+def _con_eleccion(columnas, elegidas):
+    """Las columnas detectadas, pisadas por las que eligio quien importa.
+
+    Es la valvula para cuando la planilla cambia de forma: si el lector agarro
+    la columna equivocada, se le puede decir de cual sacar cada dato. `None`
+    apaga una columna opcional; PRODUCTOS y STOCK no se pueden apagar.
+    """
+    if not elegidas:
+        return columnas
+    salida = dict(columnas)
+    for campo, posicion in elegidas.items():
+        if campo not in salida:
+            continue
+        if posicion is None and campo in CAMPOS_OBLIGATORIOS:
+            continue
+        salida[campo] = posicion
+    return salida
 
 
 def _indice_encabezado(filas):
@@ -210,13 +287,21 @@ def _informa(valor):
     return True
 
 
-def leer_planilla(archivo):
-    """Devuelve las filas de producto de la planilla, ya ubicadas por columna.
+def leer_planilla(archivo, elegidas=None):
+    """`(filas, hoja)`: las filas de producto ya ubicadas por columna y los
+    datos de la hoja (encabezado, columnas usadas y cotizacion).
+
+    Con `elegidas` se le dice de que columna sacar cada dato en vez de las que
+    detecto solo: es la valvula de escape para una planilla con otra forma. Las
+    POSICIONES valen para el encabezado de arriba (si la hoja vuelve a empezar
+    en el medio —MODULOS— ese bloque tiene sus propias columnas y se sigue
+    detectando solo), pero APAGAR un dato vale para toda la planilla: "esto no
+    se importa" no depende de en que bloque este la fila.
 
     Cada fila es un dict con `fila` (numero real en el Excel, para que quien
     revisa pueda ir a buscarla), `seccion`, `nombre`, `nombre_base`, `calidad`,
-    `stock_crudo`, `minimo_crudo`, `lista_usd` y `columna_ocupada` (la seccion
-    reusa la columna STOCK para otra cosa).
+    `stock_crudo`, `minimo_crudo`, `lista_usd`, `cash_usd` y `columna_ocupada`
+    (la seccion reusa la columna STOCK para otra cosa).
 
     La hoja puede cambiar de forma en el medio: cada encabezado nuevo manda
     desde su fila hacia abajo y, si abajo reparte las calidades en columnas,
@@ -261,6 +346,16 @@ def leer_planilla(archivo):
         pos += salto
         return fila[pos] if pos < len(fila) else None
 
+    dolar = _dolar_de_encabezado(crudas[indice], columnas)
+    columnas = _con_eleccion(columnas, elegidas)
+    # Lo que se apago a mano sigue apagado aunque la hoja vuelva a empezar.
+    apagadas = {campo: None for campo, pos in (elegidas or {}).items() if pos is None}
+    hoja = {
+        'dolar': dolar,
+        'fila_encabezado': indice + 1,
+        'encabezado': _encabezado_visible(crudas[indice]),
+        'columnas': dict(columnas),
+    }
     base = columnas
     filas = []
     seccion = ''
@@ -290,7 +385,7 @@ def leer_planilla(archivo):
         if otro_encabezado is not None:
             # La hoja vuelve a empezar con otras columnas (asi entra MODULOS):
             # de aca para abajo se lee con este mapa.
-            columnas = otro_encabezado
+            columnas = _con_eleccion(otro_encabezado, apagadas)
             calidades = []
             buscando_calidades = True
             columna_ocupada = False
@@ -324,9 +419,10 @@ def leer_planilla(archivo):
             'stock_crudo': celda(cruda, 'stock'),
             'minimo_crudo': celda(cruda, 'minimo'),
             'lista_usd': precio_planilla(celda(cruda, 'lista')),
+            'cash_usd': precio_planilla(celda(cruda, 'cash')),
             'columna_ocupada': columna_ocupada,
         })
-    return filas
+    return filas, hoja
 
 
 def _filas_por_calidad(cruda, celda, numero, seccion, nombre, calidades):
@@ -354,6 +450,7 @@ def _filas_por_calidad(cruda, celda, numero, seccion, nombre, calidades):
             'stock_crudo': stock,
             'minimo_crudo': celda(cruda, 'minimo', salto),
             'lista_usd': lista,
+            'cash_usd': precio_planilla(celda(cruda, 'cash', salto)),
             'columna_ocupada': False,
         })
     return salidas
@@ -423,6 +520,10 @@ class IndiceCatalogo:
     """El catalogo preparado para buscar: por nombre exacto y por parecido."""
 
     def __init__(self):
+        # Los parametros con los que el catalogo deriva los precios (descuento
+        # cash, redondeos) y el dolar unico del negocio.
+        self.config = ConfiguracionProductos.obtener()
+        self.dolar = self.config.dolar
         self.categorias = {c.id: c for c in CategoriaProducto.objects.all()}
         self.raices = [c for c in self.categorias.values() if c.padre_id is None]
         self.productos = list(
@@ -444,6 +545,32 @@ class IndiceCatalogo:
     def raiz(self, categoria_id):
         categoria = self.categorias[categoria_id]
         return self.categorias[categoria.padre_id] if categoria.padre_id else categoria
+
+    def descuento_cash(self, categoria):
+        """El descuento cash efectivo de una categoria, sin ir a la base.
+
+        Es la MISMA regla del catalogo (`resolver_descuento_cash`: el propio, si
+        no el de la madre, si no el global), resuelta contra el diccionario ya
+        cargado para no hacer una consulta por cada fila de la planilla.
+        """
+        descuento = categoria.descuento_cash_pct
+        if descuento is None and categoria.padre_id:
+            madre = self.categorias.get(categoria.padre_id)
+            descuento = madre.descuento_cash_pct if madre else None
+        if descuento is None:
+            descuento = self.config.descuento_cash_pct
+        return descuento
+
+    def cash_de_formula(self, lista_usd, categoria):
+        """El cash USD que el catalogo calcula solo para ese precio de lista.
+
+        None cuando la categoria no muestra cash (Samsung y Apple van lista +
+        cuotas) o cuando no hay lista de la que sacarlo.
+        """
+        if lista_usd is None or not categoria.muestra_cash:
+            return None
+        factor = (Decimal('100') - Decimal(self.descuento_cash(categoria))) / Decimal('100')
+        return (lista_usd * factor).quantize(CENTAVO, rounding=ROUND_HALF_UP)
 
     def categoria_de_seccion(self, seccion):
         """La categoria raiz que corresponde al titulo de seccion de la planilla.
@@ -556,6 +683,64 @@ def _detalle(producto):
     return ' · '.join(p for p in partes if p)
 
 
+def _texto(valor):
+    """Decimal -> str (o None). Los precios viajan como texto: en JSON un
+    Decimal se convierte en float y ahi se pierden centavos."""
+    return str(valor) if valor is not None else None
+
+
+def _precio_de_fila(cruda, producto, indice):
+    """El antes -> despues del precio de una fila que matcheo un producto.
+
+    La planilla manda, pero SOLO en dolares. Los pesos no se importan nunca: el
+    catalogo los calcula con el dolar del negocio y escribirlos los congelaria
+    justo cuando cambie la cotizacion.
+
+    El cash es un caso aparte porque el catalogo lo guarda como OVERRIDE: se
+    escribe unicamente cuando la planilla dice algo distinto de lo que da la
+    formula (una excepcion real, como las baterias), y se BORRA cuando coincide,
+    para que el producto vuelva a seguir el descuento de su categoria.
+    """
+    categoria = producto.categoria
+    lista_planilla, cash_planilla = cruda['lista_usd'], cruda['cash_usd']
+    lista_actual = producto.precio_lista_usd
+    lista_nueva = lista_planilla if lista_planilla is not None else lista_actual
+
+    override_actual = producto.precio_cash_usd
+    override_nuevo = override_actual
+    if cash_planilla is not None:
+        esperado = indice.cash_de_formula(lista_nueva, categoria)
+        override_nuevo = None if cash_planilla == esperado else cash_planilla
+
+    aplicar = {}
+    if lista_planilla is not None and lista_planilla != lista_actual:
+        aplicar['lista_usd'] = _texto(lista_planilla)
+    if override_nuevo != override_actual:
+        aplicar['cash_usd'] = _texto(override_nuevo)
+
+    return {
+        'lista_actual': _texto(lista_actual),
+        'lista_nueva': _texto(lista_planilla),
+        'cash_actual': _texto(
+            override_actual if override_actual is not None
+            else indice.cash_de_formula(lista_actual, categoria)
+        ),
+        'cash_nuevo': _texto(
+            override_nuevo if override_nuevo is not None
+            else indice.cash_de_formula(lista_nueva, categoria)
+        ),
+        # El cash queda fijado a mano: deja de salir del descuento de la categoria.
+        'excepcion': override_nuevo is not None,
+        # El producto tiene el precio en PESOS fijado a mano: hasta que alguien
+        # lo saque desde Productos, no sigue ni a este precio ni al dolar.
+        'fijado_en_pesos': (
+            producto.precio_lista_ars is not None or producto.precio_cash_ars is not None
+        ),
+        'cambia': bool(aplicar),
+        'aplicar': aplicar or None,
+    }
+
+
 def _resumen_producto(producto, indice):
     return {
         'id': producto.id,
@@ -565,14 +750,14 @@ def _resumen_producto(producto, indice):
     }
 
 
-def analizar(archivo, sucursal):
+def analizar(archivo, sucursal, columnas=None):
     """El diff completo de la planilla contra el stock de una sucursal.
 
     No escribe nada. Devuelve `{'filas': [...], 'resumen': {...}}` donde cada
     fila dice en que estado quedo y por que, con la cantidad de antes y la de
     despues para que se pueda revisar item por item.
     """
-    crudas = leer_planilla(archivo)
+    crudas, hoja = leer_planilla(archivo, columnas)
     if not crudas:
         raise ValidationError(
             'La planilla no tiene filas de producto. Revisá que sea la planilla '
@@ -596,6 +781,13 @@ def analizar(archivo, sucursal):
         )
         categoria = indice.categoria_de_seccion(cruda['seccion'])
         actual = actuales.get(producto.id) if producto is not None else None
+        precio = _precio_de_fila(cruda, producto, indice) if producto is not None else None
+        # En un alta el cash tambien es override: solo se guarda si la planilla
+        # dice algo distinto de lo que daria la formula en esa categoria.
+        cash_alta = None
+        if producto is None and categoria is not None and cruda['cash_usd'] is not None:
+            if cruda['cash_usd'] != indice.cash_de_formula(cruda['lista_usd'], categoria):
+                cash_alta = cruda['cash_usd']
 
         fila = {
             'fila': cruda['fila'],
@@ -623,7 +815,12 @@ def analizar(archivo, sucursal):
             'cantidad_nueva': cantidad,
             'minimo_actual': actual.stock_minimo if actual else None,
             'minimo_nuevo': minimo,
-            'lista_usd': str(cruda['lista_usd']) if cruda['lista_usd'] is not None else None,
+            'lista_usd': _texto(cruda['lista_usd']),
+            'cash_usd': _texto(cruda['cash_usd']),
+            # Lo que hay que guardar como override si esta fila se da de alta.
+            'cash_alta': _texto(cash_alta),
+            # El antes -> despues del precio (None si la fila no matcheo nada).
+            'precio': precio,
             'candidatos': [_resumen_producto(p, indice) for p in candidatos],
             # Otras filas de la planilla que caen en el MISMO producto (se
             # completa al final, cuando ya estan todas leidas).
@@ -657,10 +854,20 @@ def analizar(archivo, sucursal):
             )
         elif actual is not None and actual.cantidad == cantidad and not fila['sin_dato_actual'] and (
             minimo is None or actual.stock_minimo == minimo
-        ):
+        ) and not (precio and precio['cambia']):
             fila['estado'] = 'igual'
         else:
             fila['estado'] = 'actualiza'
+
+        # El precio es INDEPENDIENTE del conteo: una fila sin cantidad (o cuya
+        # celda de stock no es un conteo) igual puede traer el precio bien, y
+        # quien importa decide si lo aplica. Nunca viene marcada sola.
+        if precio and precio['aplicar']:
+            resumen['precio'] += 1
+            if precio['fijado_en_pesos']:
+                resumen['fijado_en_pesos'] += 1
+            if 'cash_usd' in precio['aplicar'] and precio['excepcion']:
+                resumen['excepcion_cash'] += 1
 
         # Marcada por defecto: solo lo que cambia algo y no necesita decision.
         # Lo demas se puede marcar a mano, pero nunca entra solo.
@@ -706,6 +913,13 @@ def analizar(archivo, sucursal):
     matcheados = {f['producto'] for f in filas if f['producto']}
     return {
         'filas': filas,
+        # De donde salio cada dato y que otras columnas hay: con esto se puede
+        # corregir a mano una planilla que venga con otra forma.
+        'columnas': {
+            'fila': hoja['fila_encabezado'],
+            'elegidas': hoja['columnas'],
+            'disponibles': hoja['encabezado'],
+        },
         'resumen': {
             'filas': len(filas),
             'actualiza': resumen['actualiza'],
@@ -718,6 +932,18 @@ def analizar(archivo, sucursal):
             'duplicada': resumen['duplicada'],
             'sin_valor': resumen['sin_valor'],
             'invalida': resumen['invalida'],
+            # Filas que van a cambiar el precio del catalogo, y cuantas de esas
+            # tienen ademas el precio en pesos fijado a mano (no se va a ver).
+            'precio': resumen['precio'],
+            'fijado_en_pesos': resumen['fijado_en_pesos'],
+            # Filas donde el cash queda FIJADO a mano porque la planilla no
+            # coincide con el descuento de la categoria (ahi hay que decidir:
+            # o la planilla tiene razon, o el descuento esta mal cargado).
+            'excepcion_cash': resumen['excepcion_cash'],
+            # Para avisar cuando la planilla se armo con OTRO dolar que el que
+            # tiene cargado el negocio (los pesos salen del segundo, no de este).
+            'dolar_planilla': _texto(hoja['dolar']),
+            'dolar_negocio': _texto(indice.dolar),
             'unidades_antes': unidades_antes,
             'unidades_despues': unidades_despues,
             'catalogo_sin_planilla': max(len(indice.productos) - len(matcheados), 0),
@@ -732,10 +958,11 @@ def _crear_producto(datos, usuario):
 
     Nace con lo unico que la planilla sabe: nombre, categoria de su seccion y
     precio de lista en dolares (los demas precios los deriva el catalogo, como
-    con cualquier producto). Se suma la calidad cuando la planilla la trae en
-    una columna (MODULOS: CC / CO / CA), porque ahi si la sabe y sin ella los
-    tres modulos de un mismo modelo serian el mismo producto. Lo fino —marca,
-    notas— se completa despues desde Productos.
+    con cualquier producto). El cash solo se guarda cuando la planilla no sigue
+    la formula de su categoria: si coincide, se deja derivar. Se suma la calidad
+    cuando la planilla la trae en una columna (MODULOS: CC / CO / CA), porque
+    ahi si la sabe y sin ella los tres modulos de un mismo modelo serian el
+    mismo producto. Lo fino —marca, notas— se completa despues desde Productos.
     """
     categoria = datos['categoria']
     ultimo = Producto.objects.filter(categoria=categoria).aggregate(m=Max('orden'))['m'] or 0
@@ -744,10 +971,34 @@ def _crear_producto(datos, usuario):
         nombre=datos['nombre'][:200],
         calidad=(datos.get('calidad') or '')[:60],
         precio_lista_usd=datos.get('lista_usd'),
+        precio_cash_usd=datos.get('cash_usd'),
         orden=ultimo + 1,
         creado_por=usuario,
         actualizado_por=usuario,
     )
+
+
+def _actualizar_precio(producto, item, usuario):
+    """Escribe el precio en dolares de un producto que ya existe. True si cambio.
+
+    Solo toca los campos que el item trae: `lista_usd` (el precio de lista) y
+    `cash_usd` (el override del cash, donde None significa "que vuelva a salir
+    de la formula"). Si el valor ya era ese, no se guarda nada: asi una
+    importacion sin cambios de precio no ensucia la auditoria.
+    """
+    campos = {}
+    if 'lista_usd' in item:
+        campos['precio_lista_usd'] = item['lista_usd']
+    if 'cash_usd' in item:
+        campos['precio_cash_usd'] = item['cash_usd']
+    cambios = {c: v for c, v in campos.items() if getattr(producto, c) != v}
+    if not cambios:
+        return False
+    for campo, valor in cambios.items():
+        setattr(producto, campo, valor)
+    producto.actualizado_por = usuario
+    producto.save(update_fields=[*cambios, 'actualizado_por'])
+    return True
 
 
 def aplicar(sucursal, items, *, usuario=None, nota=''):
@@ -756,9 +1007,17 @@ def aplicar(sucursal, items, *, usuario=None, nota=''):
     Todo o nada (una sola transaccion): si una fila falla no queda media
     planilla aplicada. Cada cambio de cantidad deja su movimiento en el kardex
     con la nota de la importacion, asi despues se puede ver de donde salio.
+
+    El item puede traer ademas el precio en DOLARES del producto que ya existe
+    (`lista_usd` / `cash_usd`): se escribe solo si de verdad cambia, y queda en
+    la auditoria como cualquier edicion del catalogo. Los precios en pesos no se
+    tocan nunca: el catalogo los calcula con el dolar del negocio.
+
+    `cantidad` es opcional: un item sin cantidad NO toca el stock de la sucursal
+    (es como se importa solo la lista de precios).
     """
     nota = (nota or 'Importacion por sucursal')[:200]
-    actualizados = creados = sin_cambio = 0
+    actualizados = creados = sin_cambio = precios = 0
     delta_total = 0
     detalle = []
 
@@ -768,26 +1027,41 @@ def aplicar(sucursal, items, *, usuario=None, nota=''):
             if producto is None:
                 producto = _crear_producto(item['crear'], usuario)
                 creados += 1
-            fila, movimiento = aplicar_ajuste(
-                producto, sucursal,
-                cantidad=item['cantidad'],
-                tipo=MovimientoStock.Tipo.AJUSTE,
-                nota=nota,
-                usuario=usuario,
-            )
-            if 'stock_minimo' in item:
+            elif _actualizar_precio(producto, item, usuario):
+                precios += 1
+
+            fila = movimiento = None
+            if 'cantidad' in item:
+                fila, movimiento = aplicar_ajuste(
+                    producto, sucursal,
+                    cantidad=item['cantidad'],
+                    tipo=MovimientoStock.Tipo.AJUSTE,
+                    nota=nota,
+                    usuario=usuario,
+                )
+            elif 'stock_minimo' in item:
+                # Sin cantidad el conteo no se toca, pero la alerta vive en la
+                # misma fila: hay que tenerla (queda como "no informado").
+                fila, _ = StockProducto.objects.get_or_create(
+                    producto=producto, sucursal=sucursal,
+                    # Nace como "(no informado)": no se conto nada, y un 0 que
+                    # no es un conteo es justo lo que este importador evita.
+                    defaults={'sin_dato': True},
+                )
+            if fila is not None and 'stock_minimo' in item:
                 fila.stock_minimo = item['stock_minimo']
                 fila.actualizado_por = usuario
                 fila.save(update_fields=['stock_minimo', 'actualizado_por'])
+
             if movimiento is not None:
                 actualizados += 1
                 delta_total += movimiento.delta
-            else:
+            elif 'cantidad' in item:
                 sin_cambio += 1
             detalle.append({
                 'producto': producto.id,
                 'nombre': producto.nombre,
-                'cantidad': fila.cantidad,
+                'cantidad': fila.cantidad if fila is not None else None,
                 'delta': movimiento.delta if movimiento else 0,
             })
 
@@ -795,6 +1069,7 @@ def aplicar(sucursal, items, *, usuario=None, nota=''):
         'actualizados': actualizados,
         'creados': creados,
         'sin_cambio': sin_cambio,
+        'precios': precios,
         'unidades_delta': delta_total,
         'detalle': detalle,
     }

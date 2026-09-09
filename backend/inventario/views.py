@@ -345,7 +345,9 @@ class ImportarStockAnalizarView(_BaseInventario, APIView):
         datos = entrada.validated_data
         archivo = datos['archivo']
         try:
-            resultado = analizar_planilla(archivo, datos['sucursal'])
+            resultado = analizar_planilla(
+                archivo, datos['sucursal'], columnas=datos.get('columnas'),
+            )
         except ValidationError as e:
             return Response({'detail': ' '.join(e.messages)}, status=400)
         except Exception:
@@ -364,8 +366,8 @@ class ImportarStockAplicarView(_BaseInventario, APIView):
     """Aplica las filas confirmadas de la planilla (todo o nada).
 
     Ajustar cantidades es trabajo de mostrador; CREAR productos en el catalogo
-    no: esas filas solo las puede aplicar un administrador, igual que en el
-    resto del catalogo.
+    —o cambiarles el precio— no: esas filas solo las puede aplicar un
+    administrador, igual que en el resto del catalogo.
     """
 
     permission_classes = [LecturaYEscrituraConPermiso]
@@ -382,6 +384,16 @@ class ImportarStockAplicarView(_BaseInventario, APIView):
                 {'detail': (
                     f'{len(altas)} filas darían de alta productos nuevos en el catálogo y '
                     'eso lo hace un administrador. Desmarcalas y volvé a aplicar.'
+                )},
+                status=403,
+            )
+
+        precios = [i for i in items if 'lista_usd' in i or 'cash_usd' in i]
+        if precios and not request.user.es_administrador:
+            return Response(
+                {'detail': (
+                    f'{len(precios)} filas cambiarían el precio del catálogo y eso lo hace '
+                    'un administrador. Apagá "Actualizar también los precios" y volvé a aplicar.'
                 )},
                 status=403,
             )

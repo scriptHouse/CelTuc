@@ -7,6 +7,7 @@ import {
   ArrowRight,
   Boxes,
   Check,
+  ChevronDown,
   CheckCircle2,
   Copy,
   FileSpreadsheet,
@@ -14,6 +15,7 @@ import {
   Loader2,
   PackagePlus,
   Search,
+  SlidersHorizontal,
   Sparkles,
   Store,
   TrendingDown,
@@ -25,14 +27,18 @@ import {
   analizarImportacionStock,
   aplicarImportacionStock,
   type AnalisisImportacion,
+  type CampoColumna,
+  type ColumnasImportacion,
   type EstadoFilaImportacion,
   type FilaImportacion,
   type ItemImportacionInput,
+  type PrecioImportacion,
   type ResultadoImportacion,
+  type ResumenImportacion,
   type Sucursal,
 } from '@/services/inventario'
 import { ApiError, textoDeError } from '@/lib/api'
-import { num } from '@/lib/format'
+import { money0, num, usd } from '@/lib/format'
 import { cn, coincideBusqueda } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -97,12 +103,22 @@ const ESTADO_INFO: Record<
   },
 }
 
-type FiltroId = 'cambios' | 'sube' | 'baja' | 'nuevas' | 'revisar' | 'igual' | 'fuera' | 'todas'
+type FiltroId =
+  | 'cambios'
+  | 'sube'
+  | 'baja'
+  | 'precio'
+  | 'nuevas'
+  | 'revisar'
+  | 'igual'
+  | 'fuera'
+  | 'todas'
 
 const FILTROS: Array<{ id: FiltroId; label: string }> = [
   { id: 'cambios', label: 'Cambian' },
   { id: 'sube', label: 'Suben' },
   { id: 'baja', label: 'Bajan' },
+  { id: 'precio', label: 'Cambian de precio' },
   { id: 'nuevas', label: 'Nuevos' },
   { id: 'revisar', label: 'A revisar' },
   { id: 'igual', label: 'Sin cambios' },
@@ -112,6 +128,61 @@ const FILTROS: Array<{ id: FiltroId; label: string }> = [
 
 /** Cuántas filas se pintan de una: el resto entra con "Ver más". */
 const PAGINA = 120
+
+/**
+ * Qué datos de la planilla se aplican. TODO PRENDIDO es la importación de
+ * siempre; «Opciones avanzadas» solo sirve para dejar algo afuera.
+ */
+interface Opciones {
+  stock: boolean
+  minimo: boolean
+  lista: boolean
+  cash: boolean
+  altas: boolean
+}
+
+const TODO: Opciones = { stock: true, minimo: true, lista: true, cash: true, altas: true }
+
+/** Los datos que se pueden dejar afuera, en el orden en que se muestran. */
+const DATOS: Array<{ id: keyof Opciones; label: string; ayuda: string; soloAdmin?: boolean }> = [
+  {
+    id: 'stock',
+    label: 'Cantidad (stock)',
+    ayuda: 'Lo que hay en la sucursal. Apagado, la planilla no toca el inventario.',
+  },
+  {
+    id: 'minimo',
+    label: 'Stock mínimo',
+    ayuda: 'La alerta de reposición de cada fila.',
+  },
+  {
+    id: 'lista',
+    label: 'Precio de lista USD',
+    ayuda: 'El precio del catálogo. Los pesos los sigue calculando el sistema.',
+    soloAdmin: true,
+  },
+  {
+    id: 'cash',
+    label: 'Precio cash USD',
+    ayuda: 'Solo se guarda si no coincide con el descuento de su categoría.',
+    soloAdmin: true,
+  },
+  {
+    id: 'altas',
+    label: 'Dar de alta productos nuevos',
+    ayuda: 'Las filas de la planilla que todavía no están en el catálogo.',
+    soloAdmin: true,
+  },
+]
+
+/** De qué columna del Excel sale cada dato (el orden de la planilla). */
+const COLUMNAS: Array<{ id: CampoColumna; label: string; obligatoria?: boolean }> = [
+  { id: 'producto', label: 'Productos', obligatoria: true },
+  { id: 'stock', label: 'Stock', obligatoria: true },
+  { id: 'minimo', label: 'Stock mínimo' },
+  { id: 'lista', label: 'Precio de lista USD' },
+  { id: 'cash', label: 'Precio cash USD' },
+]
 
 /**
  * El detalle del error de aplicar, en criollo.
@@ -178,6 +249,11 @@ export function ImportarStockModal({
   const [visibles, setVisibles] = useState(PAGINA)
   const [resultado, setResultado] = useState<ResultadoImportacion | null>(null)
   const [avance, setAvance] = useState(0)
+  // Opciones avanzadas: qué datos se aplican y de qué columna sale cada uno.
+  // Arrancan en "todo, como lo detectó el servidor": son puramente aditivas.
+  const [opciones, setOpciones] = useState<Opciones>(TODO)
+  const [columnas, setColumnas] = useState<Record<CampoColumna, number | null> | null>(null)
+  const [avanzadas, setAvanzadas] = useState(false)
 
   const sucursal = sucursales.find((s) => s.id === sucursalId) ?? null
 
@@ -195,27 +271,38 @@ export function ImportarStockModal({
     setVisibles(PAGINA)
     setResultado(null)
     setAvance(0)
+    setOpciones(TODO)
+    setColumnas(null)
+    setAvanzadas(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [abierto])
 
   // --- Análisis ---------------------------------------------------------------
 
   const analizar = useMutation({
-    mutationFn: () => analizarImportacionStock({ sucursal: sucursalId!, archivo: archivo! }),
-    onSuccess: (data) => {
+    // Las columnas viajan como argumento (y no desde el estado) porque al
+    // corregir una a mano hay que releer la planilla con la nueva EN EL ACTO.
+    mutationFn: (elegidas: Record<CampoColumna, number | null> | null) =>
+      analizarImportacionStock({ sucursal: sucursalId!, archivo: archivo!, columnas: elegidas }),
+    onSuccess: (data, elegidas) => {
       const iniciales: Record<number, Decision> = {}
       for (const fila of data.filas) {
         iniciales[fila.fila] = { marcada: fila.sugerido, producto: fila.producto }
       }
       setDecisiones(iniciales)
       setAnalisis(data)
+      setColumnas(elegidas)
       setAvance(100)
       // Un respiro para que se vea el 100 % antes de pasar a la revisión.
       setTimeout(() => setPaso('revision'), 350)
     },
     onError: (e) => {
-      setPaso('archivo')
-      setAvance(0)
+      // Si se estaba releyendo desde la revisión (cambió una columna), se queda
+      // ahí con el análisis anterior: no se pierde lo que ya estaba marcado.
+      if (paso === 'procesando') {
+        setPaso('archivo')
+        setAvance(0)
+      }
       toast.error('No se pudo leer la planilla', e instanceof ApiError ? e.message : undefined)
     },
   })
@@ -232,7 +319,13 @@ export function ImportarStockModal({
     if (!archivo || !sucursalId) return
     setAvance(6)
     setPaso('procesando')
-    analizar.mutate()
+    analizar.mutate(columnas)
+  }
+
+  /** Corrige a mano de qué columna sale un dato: relee la planilla con eso. */
+  function elegirColumna(campo: CampoColumna, posicion: number | null) {
+    if (!analisis) return
+    analizar.mutate({ ...(columnas ?? analisis.columnas.elegidas), [campo]: posicion })
   }
 
   // --- Filas ------------------------------------------------------------------
@@ -249,12 +342,34 @@ export function ImportarStockModal({
     return decisiones[fila.fila]?.producto ?? fila.producto
   }
 
+  // --- Qué escribe cada fila con las opciones de ahora ------------------------
+
+  /** La planilla informó una cantidad usable y las opciones la dejan pasar. */
+  function tocaStock(fila: FilaImportacion): boolean {
+    if (!opciones.stock || fila.cantidad_nueva === null) return false
+    return fila.estado !== 'invalida' && fila.estado !== 'sin_valor'
+  }
+
+  function tocaMinimo(fila: FilaImportacion): boolean {
+    return opciones.minimo && fila.minimo_nuevo !== null
+  }
+
+  /** El precio que esta fila escribiría, o null si no toca ninguno. */
+  function precioDeFila(fila: FilaImportacion) {
+    const cambio = fila.precio?.aplicar
+    if (!admin || !cambio) return null
+    const salida: { lista_usd?: string; cash_usd?: string | null } = {}
+    if (opciones.lista && cambio.lista_usd !== undefined) salida.lista_usd = cambio.lista_usd
+    if (opciones.cash && cambio.cash_usd !== undefined) salida.cash_usd = cambio.cash_usd
+    return Object.keys(salida).length > 0 ? salida : null
+  }
+
   /** Si la fila puede aplicarse tal como está decidida ahora. */
   function aplicable(fila: FilaImportacion): boolean {
-    if (fila.cantidad_nueva === null) return false
-    if (fila.estado === 'invalida' || fila.estado === 'sin_valor') return false
-    if (fila.estado === 'nueva') return admin && fila.puede_crear
-    return productoElegido(fila) !== null
+    if (fila.estado === 'nueva') return admin && opciones.altas && fila.puede_crear
+    if (productoElegido(fila) === null) return false
+    // Alcanza con que escriba ALGO: la cantidad, el mínimo o el precio.
+    return tocaStock(fila) || tocaMinimo(fila) || precioDeFila(fila) !== null
   }
 
   const listadas = useMemo(() => {
@@ -273,6 +388,8 @@ export function ImportarStockModal({
           return estado === 'actualiza' && delta > 0
         case 'baja':
           return estado === 'actualiza' && delta < 0
+        case 'precio':
+          return fila.precio?.aplicar != null
         case 'nuevas':
           return estado === 'nueva'
         case 'revisar':
@@ -293,7 +410,7 @@ export function ImportarStockModal({
   const marcadas = useMemo(
     () => filas.filter((f) => decisiones[f.fila]?.marcada && aplicable(f)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [filas, decisiones, admin],
+    [filas, decisiones, admin, opciones],
   )
 
   /**
@@ -316,16 +433,24 @@ export function ImportarStockModal({
     let antes = 0
     let despues = 0
     let altas = 0
+    let precios = 0
     for (const fila of marcadas) {
-      antes += fila.cantidad_actual ?? 0
-      despues += fila.cantidad_nueva ?? 0
+      if (tocaStock(fila)) {
+        antes += fila.cantidad_actual ?? 0
+        despues += fila.cantidad_nueva ?? 0
+      }
       if (fila.estado === 'nueva') altas += 1
+      if (precioDeFila(fila)) precios += 1
     }
-    return { antes, despues, altas, delta: despues - antes }
-  }, [marcadas])
+    return { antes, despues, altas, precios, delta: despues - antes }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [marcadas, opciones, admin])
 
   const conteos = useMemo(() => {
-    const c = { cambios: 0, sube: 0, baja: 0, nuevas: 0, revisar: 0, igual: 0, fuera: 0, todas: filas.length }
+    const c = {
+      cambios: 0, sube: 0, baja: 0, precio: 0, nuevas: 0, revisar: 0, igual: 0, fuera: 0,
+      todas: filas.length,
+    }
     for (const fila of filas) {
       const estado = estadoDe(fila)
       const delta = (fila.cantidad_nueva ?? 0) - (fila.cantidad_actual ?? 0)
@@ -333,6 +458,7 @@ export function ImportarStockModal({
       if (estado === 'actualiza' && delta > 0) c.sube += 1
       if (estado === 'actualiza' && delta < 0) c.baja += 1
       if (estado === 'nueva') c.nuevas += 1
+      if (fila.precio?.aplicar) c.precio += 1
       if (estado === 'revisar' || fila.duplicada_con.length > 0) c.revisar += 1
       if (estado === 'igual') c.igual += 1
       if (estado === 'sin_valor' || estado === 'invalida') c.fuera += 1
@@ -391,13 +517,18 @@ export function ImportarStockModal({
   const aplicar = useMutation({
     mutationFn: () => {
       const items: ItemImportacionInput[] = marcadas.map((fila) => {
-        const base: ItemImportacionInput = {
-          fila: fila.fila,
-          cantidad: fila.cantidad_nueva ?? 0,
-        }
-        if (fila.minimo_nuevo !== null) base.stock_minimo = fila.minimo_nuevo
+        // Cada dato entra solo si su opción está prendida: sin cantidad la fila
+        // no toca el stock, sin precio no toca el catálogo.
+        const base: ItemImportacionInput = { fila: fila.fila }
+        if (tocaStock(fila)) base.cantidad = fila.cantidad_nueva ?? 0
+        if (tocaMinimo(fila)) base.stock_minimo = fila.minimo_nuevo
         const producto = productoElegido(fila)
-        if (producto !== null) return { ...base, producto }
+        if (producto !== null) {
+          // El precio viaja tal cual lo resolvió el servidor: qué escribir y
+          // qué dejar derivando lo decide el backend, que es el que conoce la
+          // fórmula del catálogo. Los pesos no viajan nunca.
+          return { ...base, producto, ...(precioDeFila(fila) ?? {}) }
+        }
         return {
           ...base,
           crear: {
@@ -407,7 +538,11 @@ export function ImportarStockModal({
             nombre: fila.nombre_base,
             categoria: fila.categoria_id!,
             calidad: fila.calidad,
-            lista_usd: fila.lista_usd,
+            // El alta nace con el precio de la planilla (no hay precio anterior
+            // que cuidar), salvo que se haya apagado ese dato a propósito.
+            lista_usd: opciones.lista ? fila.lista_usd : null,
+            // Solo cuando la planilla no sigue el descuento de su categoría.
+            cash_usd: opciones.cash ? fila.cash_alta : null,
           },
         }
       })
@@ -693,6 +828,27 @@ export function ImportarStockModal({
                 detalle="quedan como están"
               />
             </div>
+            <AvisosImportacion
+              resumen={analisis.resumen}
+              admin={admin}
+              opciones={opciones}
+              onVerPrecios={() => {
+                setBusqueda('')
+                setFiltro('precio')
+              }}
+            />
+            <OpcionesAvanzadas
+              abierto={avanzadas}
+              onAbrir={setAvanzadas}
+              admin={admin}
+              opciones={opciones}
+              onOpciones={setOpciones}
+              columnas={analisis.columnas}
+              personalizadas={columnas !== null}
+              onColumna={elegirColumna}
+              onRestablecer={() => analizar.mutate(null)}
+              releyendo={analizar.isPending}
+            />
           </div>
 
           <div className="border-b border-line px-5 py-3">
@@ -753,6 +909,7 @@ export function ImportarStockModal({
                       productoElegido={productoElegido(fila)}
                       aplicable={aplicable(fila)}
                       admin={admin}
+                      precioActivo={precioDeFila(fila) !== null}
                       onCambiar={(cambio) => cambiarDecision(fila, cambio)}
                     />
                   ))}
@@ -801,6 +958,7 @@ export function ImportarStockModal({
                 <p className="tnum font-medium text-ink-900">
                   {num(marcadas.length)} filas marcadas
                   {impacto.altas > 0 && ` · ${num(impacto.altas)} altas nuevas`}
+                  {impacto.precios > 0 && ` · ${num(impacto.precios)} precios`}
                 </p>
                 <p className="tnum truncate">
                   {num(impacto.antes)} → <b className="text-ink-800">{num(impacto.despues)}</b>{' '}
@@ -862,6 +1020,12 @@ export function ImportarStockModal({
                 icono={resultado.unidades_delta >= 0 ? TrendingUp : TrendingDown}
               />
             </div>
+            {resultado.precios > 0 && (
+              <Aviso icono={Sparkles}>
+                Se actualizó el precio en dólares de <b>{num(resultado.precios)}</b> productos del
+                catálogo. Los precios en pesos se recalculan solos con el dólar del negocio.
+              </Aviso>
+            )}
             {resultado.sin_cambio > 0 && (
               <Aviso icono={Check}>
                 Otras {num(resultado.sin_cambio)} filas ya tenían esa misma cantidad: quedaron{' '}
@@ -889,6 +1053,276 @@ export function ImportarStockModal({
 }
 
 // ===== Subcomponentes =====
+
+/**
+ * Lo que hay que saber ANTES de aplicar: qué pasa con los precios, con qué
+ * dólar está armada la planilla y qué productos no van a reflejar el cambio.
+ *
+ * De la planilla entran solo los dólares. Los pesos los calcula el catálogo con
+ * el dólar del negocio: si se importaran, quedarían congelados y dejarían de
+ * seguir la cotización, que es justo lo contrario de lo que se quiere.
+ */
+function AvisosImportacion({
+  resumen,
+  admin,
+  opciones,
+  onVerPrecios,
+}: {
+  resumen: ResumenImportacion
+  admin: boolean
+  opciones: Opciones
+  onVerPrecios: () => void
+}) {
+  const planilla = Number(resumen.dolar_planilla ?? 0)
+  const negocio = Number(resumen.dolar_negocio ?? 0)
+  const otroDolar = planilla > 0 && negocio > 0 && planilla !== negocio
+  const tocaPrecios = admin && (opciones.lista || opciones.cash)
+  if (resumen.precio === 0 && !otroDolar) return null
+
+  return (
+    <ul className="mt-3 space-y-1.5 rounded-xl border border-line bg-ink-50/40 px-3.5 py-3 text-xs leading-relaxed text-ink-600">
+      {resumen.precio > 0 && (
+        <li>
+          {!admin ? (
+            <>
+              {num(resumen.precio)} productos de esta planilla tienen otro precio, pero{' '}
+              <b className="text-ink-900">cambiar precios lo hace un administrador</b>: se importa
+              solo el stock.
+            </>
+          ) : tocaPrecios ? (
+            <>
+              <button
+                type="button"
+                onClick={onVerPrecios}
+                className="font-semibold text-ink-900 underline underline-offset-2"
+              >
+                {num(resumen.precio)} productos cambian de precio
+              </button>{' '}
+              en dólares. Los pesos los sigue calculando el sistema con el dólar del negocio.
+            </>
+          ) : (
+            <>
+              {num(resumen.precio)} productos cambian de precio, pero el precio está apagado en
+              opciones avanzadas: <b className="text-ink-900">no se va a tocar</b>.
+            </>
+          )}
+        </li>
+      )}
+      {otroDolar && (
+        <li className="text-ink-500">
+          La planilla está armada con un dólar de <b>{money0(planilla)}</b> y el negocio tiene{' '}
+          <b>{money0(negocio)}</b>: los pesos salen del segundo. Se cambia en «Gestor de dólar».
+        </li>
+      )}
+      {tocaPrecios && resumen.excepcion_cash > 0 && (
+        <li className="text-ink-500">
+          En {num(resumen.excepcion_cash)} filas el precio cash de la planilla no coincide con el
+          descuento de su categoría: se guarda <b>fijado a mano</b> (deja de seguir al descuento).
+        </li>
+      )}
+      {tocaPrecios && resumen.fijado_en_pesos > 0 && (
+        <li className="text-ink-500">
+          {num(resumen.fijado_en_pesos)}{' '}
+          {resumen.fijado_en_pesos === 1 ? 'producto tiene' : 'productos tienen'} el precio en $
+          fijado a mano: hasta que se saque desde Productos, ese precio nuevo{' '}
+          <b>no se va a ver</b>.
+        </li>
+      )}
+    </ul>
+  )
+}
+
+/**
+ * Opciones avanzadas: qué datos se aplican y de qué columna sale cada uno.
+ *
+ * Viene plegado y con TODO como está hoy: nada de acá cambia el comportamiento
+ * por defecto. Sirve para dos cosas puntuales —dejar un dato afuera (importar
+ * solo precios, o solo stock) y corregir a mano de qué columna sale cada dato
+ * cuando la planilla viene con otra forma.
+ */
+function OpcionesAvanzadas({
+  abierto,
+  onAbrir,
+  admin,
+  opciones,
+  onOpciones,
+  columnas,
+  personalizadas,
+  onColumna,
+  onRestablecer,
+  releyendo,
+}: {
+  abierto: boolean
+  onAbrir: (valor: boolean) => void
+  admin: boolean
+  opciones: Opciones
+  onOpciones: (valor: Opciones) => void
+  columnas: ColumnasImportacion
+  /** Alguna columna se eligió a mano (no es lo que detectó el servidor). */
+  personalizadas: boolean
+  onColumna: (campo: CampoColumna, posicion: number | null) => void
+  onRestablecer: () => void
+  releyendo: boolean
+}) {
+  const datos = DATOS.filter((d) => admin || !d.soloAdmin)
+  const apagados = datos.filter((d) => !opciones[d.id]).length
+  const cambios = apagados + (personalizadas ? 1 : 0)
+
+  const deColumna = columnas.disponibles.map((c) => ({
+    value: String(c.indice),
+    label: `${c.letra} · ${c.rotulo || '(sin rótulo)'}`,
+  }))
+
+  return (
+    <div className="mt-2.5">
+      <button
+        type="button"
+        onClick={() => onAbrir(!abierto)}
+        aria-expanded={abierto}
+        className="flex w-full items-center gap-2 rounded-xl px-1.5 py-1.5 text-xs font-medium text-ink-500 transition-colors hover:bg-ink-50 hover:text-ink-900"
+      >
+        <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        Opciones avanzadas
+        {cambios > 0 && (
+          <span className="tnum rounded-full bg-ink-900 px-1.5 py-0.5 text-[0.6rem] font-semibold text-on-ink">
+            {cambios}
+          </span>
+        )}
+        <span className="ml-auto flex items-center gap-1.5 font-normal text-ink-400">
+          <span className="hidden sm:inline">
+            {cambios === 0 ? 'todo como viene la planilla' : 'hay cambios'}
+          </span>
+          <ChevronDown
+            className={cn('h-3.5 w-3.5 transition-transform', abierto && 'rotate-180')}
+            aria-hidden
+          />
+        </span>
+      </button>
+
+      {abierto && (
+        <div className="mt-1.5 max-h-[42vh] space-y-4 overflow-y-auto rounded-xl border border-line bg-surface px-3.5 py-3.5">
+          <section>
+            <p className="mb-2 text-[0.7rem] font-semibold uppercase tracking-wide text-ink-400">
+              Qué se importa
+            </p>
+            <div className="space-y-1.5">
+              {datos.map((dato) => (
+                <label
+                  key={dato.id}
+                  className="flex cursor-pointer items-start gap-2.5 rounded-lg px-1.5 py-1 hover:bg-ink-50"
+                >
+                  <input
+                    type="checkbox"
+                    checked={opciones[dato.id]}
+                    onChange={(e) => onOpciones({ ...opciones, [dato.id]: e.target.checked })}
+                    className="mt-0.5 h-4.5 w-4.5 shrink-0 cursor-pointer rounded border-line-strong text-ink-950 accent-ink-950"
+                  />
+                  <span className="min-w-0 text-xs leading-relaxed">
+                    <b className="font-medium text-ink-900">{dato.label}</b>
+                    <span className="block text-ink-400">{dato.ayuda}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </section>
+
+          <section className="border-t border-line pt-3.5">
+            <div className="mb-2 flex items-center gap-2">
+              <p className="text-[0.7rem] font-semibold uppercase tracking-wide text-ink-400">
+                De qué columna sale cada dato
+              </p>
+              {releyendo && <Loader2 className="h-3 w-3 animate-spin text-ink-400" aria-hidden />}
+              {personalizadas && !releyendo && (
+                <button
+                  type="button"
+                  onClick={onRestablecer}
+                  className="ml-auto text-[0.7rem] font-medium text-ink-500 underline underline-offset-2 hover:text-ink-900"
+                >
+                  Volver a lo detectado
+                </button>
+              )}
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {COLUMNAS.map((columna) => {
+                const elegida = columnas.elegidas[columna.id]
+                return (
+                  <label key={columna.id} className="block text-xs">
+                    <span className="mb-1 block text-ink-500">{columna.label}</span>
+                    <Select
+                      options={
+                        columna.obligatoria
+                          ? deColumna
+                          : [{ value: '-1', label: '— No importar' }, ...deColumna]
+                      }
+                      value={elegida === null ? '-1' : String(elegida)}
+                      onChange={(v) => onColumna(columna.id, Number(v) < 0 ? null : Number(v))}
+                      disabled={releyendo}
+                      searchable
+                      searchPlaceholder="Buscar columna"
+                    />
+                  </label>
+                )
+              })}
+            </div>
+            <p className="mt-2 text-[0.7rem] leading-relaxed text-ink-400">
+              El encabezado está en la fila {columnas.fila} de la planilla. Cambiar una columna
+              vuelve a leer el archivo, así que las marcas que hayas hecho arrancan de cero.
+            </p>
+          </section>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** El precio de la fila: antes → después, en dólares (los pesos los deriva el
+ * catálogo). Tachada cuando la importación va sin precios. */
+function LineaPrecio({ precio, activa }: { precio: PrecioImportacion; activa: boolean }) {
+  const plata = (valor: string | null) => (valor === null ? '—' : usd(Number(valor)))
+  const cambiaLista = precio.aplicar?.lista_usd !== undefined
+  const cambiaCash = precio.aplicar?.cash_usd !== undefined
+
+  return (
+    <p
+      className={cn(
+        'mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs',
+        activa ? 'text-ink-500' : 'text-ink-300 line-through',
+      )}
+    >
+      {cambiaLista && (
+        <>
+          <span className="tnum">{plata(precio.lista_actual)}</span>
+          <ArrowRight className="h-3 w-3 shrink-0 text-ink-300" aria-hidden />
+          <span className={cn('tnum font-semibold', activa && 'text-ink-900')}>
+            {plata(precio.lista_nueva)}
+          </span>
+        </>
+      )}
+      {cambiaCash && (
+        <span
+          className="tnum"
+          title={
+            precio.excepcion
+              ? 'La planilla no sigue el descuento de la categoría: este cash queda fijado a mano.'
+              : 'Vuelve a salir del descuento de la categoría.'
+          }
+        >
+          {cambiaLista && '· '}
+          cash {plata(precio.cash_actual)} → {plata(precio.cash_nuevo)}
+        </span>
+      )}
+      {precio.fijado_en_pesos && (
+        <span
+          title="Este producto tiene el precio en $ fijado a mano: no sigue al dólar ni a este precio hasta que se saque desde Productos."
+          className="inline-flex shrink-0 items-center gap-1 rounded-full border border-line-strong px-1.5 py-0.5 text-[0.6rem] font-medium text-ink-500"
+        >
+          <AlertTriangle className="h-3 w-3" aria-hidden />
+          precio fijo en $
+        </span>
+      )}
+    </p>
+  )
+}
 
 const PASOS: Array<{ id: Paso; label: string }> = [
   { id: 'sucursal', label: 'Sucursal' },
@@ -970,6 +1404,7 @@ function FilaRevision({
   productoElegido,
   aplicable,
   admin,
+  precioActivo,
   onCambiar,
 }: {
   fila: FilaImportacion
@@ -978,6 +1413,8 @@ function FilaRevision({
   productoElegido: number | null
   aplicable: boolean
   admin: boolean
+  /** El precio de ESTA fila se va a aplicar (si no, se ve tachado). */
+  precioActivo: boolean
   onCambiar: (cambio: Partial<Decision>) => void
 }) {
   const info = ESTADO_INFO[estado]
@@ -1036,6 +1473,7 @@ function FilaRevision({
           {fila.seccion && ` · ${fila.seccion}`}
           {renombrado && ` · planilla: "${fila.nombre_planilla}"`}
         </p>
+        {fila.precio?.aplicar && <LineaPrecio precio={fila.precio} activa={precioActivo} />}
         {fila.motivo && (estado !== 'actualiza' || repetida) && (
           <p className="mt-0.5 text-xs text-ink-500">{fila.motivo}</p>
         )}
