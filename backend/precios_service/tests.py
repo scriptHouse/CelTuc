@@ -318,3 +318,457 @@ class SeedDispositivosTests(TestCase):
         )
         # El PATCH parcial no toco los precios.
         self.assertEqual(item.precios.count(), 1)
+
+
+# ===== Importacion de la lista de precios =====
+
+def _lista(filas, encabezado=None, titulo=True, grupo=None, totales=True, hoja_extra=True):
+    """Un .xlsx con la forma EXACTA del que baja «Exportar».
+
+    `filas` son tuplas (item, seccion, variante, lista_usd, lista_ars, cash_ars)
+    o las columnas que diga `encabezado`. Con `grupo` se antepone el renglon de
+    seccion combinado que escribe el exportador ("Baterías  (3)").
+    """
+    import io
+
+    import openpyxl
+
+    libro = openpyxl.Workbook()
+    hoja = libro.active
+    hoja.title = 'Precios de service'
+    if titulo:
+        # Las cuatro filas de cortesia que el exportador deja arriba.
+        hoja.append(['Precios de service'])
+        hoja.append([''])
+        hoja.append(['Generado el 08/09/2026, 02:14 por nicolas · 35 filas'])
+        hoja.append(['Filtros: Sección: Baterías'])
+        hoja.append([])
+    hoja.append(encabezado or ['Ítem', 'Sección', 'Variante', 'Lista USD', 'Lista $', 'Cash $'])
+    if grupo:
+        hoja.append([f'{grupo}  ({len(filas)})'])
+    for fila in filas:
+        hoja.append(list(fila))
+    if totales:
+        hoja.append([f'Subtotal {grupo or "Todo"}'])
+        hoja.append([])
+        hoja.append([f'TOTAL · {len(filas)} filas'])
+    if hoja_extra:
+        otra = libro.create_sheet('Cómo se generó')
+        otra.append(['Cómo se generó este archivo'])
+        otra.append(['Título', 'Precios de service'])
+        otra.append(['Columnas', 'Ítem · Sección · Variante · Lista USD'])
+    buffer = io.BytesIO()
+    libro.save(buffer)
+    buffer.seek(0)
+    buffer.name = 'service-2026-09-08.xlsx'
+    return buffer
+
+
+class ImportarListaServiceTests(TestCase):
+    """Leer la lista: el archivo del exportador tiene que volver a entrar."""
+
+    def setUp(self):
+        from .importacion import analizar
+
+        self.analizar = analizar
+        self.config = ConfiguracionService.obtener()  # dolar 1550, cash 20 %, redondeo 1000
+        self.seccion = SeccionService.objects.create(nombre='Baterías Zeta')
+        self.simple = VarianteSeccion.objects.create(seccion=self.seccion, nombre='Estándar')
+        self.item = ItemService.objects.create(seccion=self.seccion, etiqueta='Zeta iPhone 11')
+        self.precio = PrecioItemService.objects.create(
+            item=self.item, variante=self.simple, precio_lista_usd=Decimal('70'),
+        )
+
+    def _filas(self, archivo, **kwargs):
+        return {f['fila']: f for f in self.analizar(archivo, **kwargs)['filas']}
+
+    # --- lectura del formato del exportador ---
+
+    def test_saltea_titulo_grupo_subtotal_y_total(self):
+        """Arriba hay titulo y filtros, y abajo subtotales: nada de eso es un precio."""
+        res = self.analizar(_lista(
+            [('Zeta iPhone 11', 'Baterías Zeta', '', 70, 109000, 88000)],
+            grupo='Baterías Zeta',
+        ))
+        self.assertEqual(res['resumen']['filas'], 1)
+        self.assertEqual(res['filas'][0]['etiqueta'], 'Zeta iPhone 11')
+        self.assertEqual(res['columnas']['hoja'], 'Precios de service')
+        self.assertEqual(res['columnas']['fila'], 6)
+
+    def test_el_ida_y_vuelta_no_cambia_nada(self):
+        """Bajar la lista y volver a subirla sin tocarla no cambia un peso."""
+        res = self.analizar(_lista([
+            ('Zeta iPhone 11', 'Baterías Zeta', '', 70, 109000, 88000),
+        ]))
+        fila = res['filas'][0]
+        self.assertEqual(fila['estado'], 'igual')
+        self.assertIsNone(fila['opciones'][0]['precio']['aplicar'])
+        self.assertEqual(res['resumen']['actualiza'], 0)
+
+    def test_el_precio_editado_a_mano_entra(self):
+        filas = self._filas(_lista([
+            ('Zeta iPhone 11', 'Baterías Zeta', '', 85, 109000, 88000),
+        ]))
+        fila = filas[7]
+        self.assertEqual(fila['estado'], 'actualiza')
+        opcion = fila['opciones'][0]
+        self.assertEqual(opcion['precio']['aplicar'], {'precio_lista_usd': '85.00'})
+        # Los pesos se recalculan solos: 85 x 1550 redondeado al millar.
+        self.assertEqual(opcion['precio']['despues']['lista_ars'], '132000')
+
+    def test_la_seccion_sale_del_renglon_de_grupo(self):
+        """Si no se exporto la columna Sección, la dice el renglon del grupo."""
+        res = self.analizar(_lista(
+            [('Zeta iPhone 11', '', 85, 109000)],
+            encabezado=['Ítem', 'Variante', 'Lista USD', 'Lista $'],
+            grupo='Baterías Zeta',
+        ))
+        fila = res['filas'][0]
+        self.assertTrue(fila['seccion_de_grupo'])
+        self.assertEqual(fila['seccion_nombre'], 'Baterías Zeta')
+        self.assertEqual(fila['estado'], 'actualiza')
+
+    def test_una_fila_con_el_nombre_solo_no_abre_una_seccion(self):
+        """Sin el "(N)" no es un renglon de grupo: es una fila sin precio. Si se
+        tomara como seccion, todo lo de abajo se buscaria en una que no existe."""
+        res = self.analizar(_lista(
+            [('Zeta iPhone 11', '', ''), ('Zeta iPhone 11', 'Baterías Zeta', 85)],
+            encabezado=['Ítem', 'Sección', 'Lista USD'],
+            grupo='Baterías Zeta',
+        ))
+        estados = [f['estado'] for f in res['filas']]
+        self.assertEqual(estados, ['sin_valor', 'actualiza'])
+
+    def test_columnas_de_mas_y_de_menos(self):
+        """Alcanza con el ítem y un precio; lo que sobra se ignora."""
+        res = self.analizar(_lista(
+            [('Zeta iPhone 11', 85, 'lo que sea')],
+            encabezado=['Ítem', 'Lista USD', 'Comentario interno'],
+        ))
+        self.assertEqual(res['filas'][0]['estado'], 'actualiza')
+        self.assertEqual(res['columnas']['detectadas']['lista_usd'], 1)
+        self.assertIsNone(res['columnas']['detectadas']['seccion'])
+
+    def test_rotulos_que_no_son_los_del_exportador(self):
+        """"PRECIO DE LISTA EN DOLARES" tambien se entiende."""
+        res = self.analizar(_lista(
+            [('Zeta iPhone 11', 85)],
+            encabezado=['MODELO', 'PRECIO DE LISTA EN DOLARES'],
+        ))
+        self.assertEqual(res['columnas']['detectadas']['etiqueta'], 0)
+        self.assertEqual(res['columnas']['detectadas']['lista_usd'], 1)
+        self.assertEqual(res['filas'][0]['estado'], 'actualiza')
+
+    def test_sin_encabezado_reconocible_error_legible(self):
+        from django.core.exceptions import ValidationError
+
+        with self.assertRaises(ValidationError) as ctx:
+            self.analizar(_lista([('x', 'y')], encabezado=['Una cosa', 'Otra']))
+        self.assertIn('Ítem', ' '.join(ctx.exception.messages))
+
+    def test_se_puede_elegir_otra_columna_a_mano(self):
+        """La valvula: si el lector agarro la columna equivocada, se le dice."""
+        res = self.analizar(
+            _lista([('Zeta iPhone 11', 999, 85)], encabezado=['Ítem', 'Lista USD', 'Otra']),
+            columnas={'lista_usd': 2},
+        )
+        self.assertEqual(
+            res['filas'][0]['opciones'][0]['precio']['aplicar'],
+            {'precio_lista_usd': '85.00'},
+        )
+
+    # --- los pesos ---
+
+    def test_los_pesos_no_se_importan_por_defecto(self):
+        """La planilla vieja trae pesos de otro dolar: importarlos los congelaria."""
+        filas = self._filas(_lista([
+            ('Zeta iPhone 11', 'Baterías Zeta', '', 70, 999000, 800000),
+        ]))
+        fila = filas[7]
+        self.assertEqual(fila['estado'], 'igual')
+        self.assertEqual(fila['opciones'][0]['precio']['ignorados'], ['lista_ars', 'cash_ars'])
+        self.assertEqual(self.analizar(_lista([
+            ('Zeta iPhone 11', 'Baterías Zeta', '', 70, 999000, 800000),
+        ]))['resumen']['pesos_ignorados'], 1)
+
+    def test_los_pesos_entran_si_se_piden(self):
+        filas = self._filas(_lista([
+            ('Zeta iPhone 11', 'Baterías Zeta', '', 70, 999000, 800000),
+        ]), con_pesos=True)
+        aplicar = filas[7]['opciones'][0]['precio']['aplicar']
+        self.assertEqual(aplicar['precio_lista_ars'], '999000.00')
+        self.assertIn('lista_ars', filas[7]['opciones'][0]['precio']['fijados'])
+
+    def test_la_fila_que_solo_tiene_pesos_los_importa_igual(self):
+        """Sin precio en dolares, los pesos son el UNICO precio que hay."""
+        solo_pesos = ItemService.objects.create(
+            seccion=self.seccion, etiqueta='Zeta solo pesos',
+        )
+        PrecioItemService.objects.create(item=solo_pesos, variante=self.simple)
+        filas = self._filas(_lista([
+            ('Zeta solo pesos', 'Baterías Zeta', '', None, 150000, None),
+        ]))
+        aplicar = filas[7]['opciones'][0]['precio']['aplicar']
+        self.assertEqual(aplicar['precio_lista_ars'], '150000.00')
+
+    def test_deduce_el_dolar_con_el_que_se_armo_la_planilla(self):
+        """No viene escrito: se deduce de los pesos para poder avisar."""
+        for etiqueta in ('Zeta A', 'Zeta B', 'Zeta C'):
+            item = ItemService.objects.create(seccion=self.seccion, etiqueta=etiqueta)
+            PrecioItemService.objects.create(item=item, variante=self.simple)
+        res = self.analizar(_lista([
+            # 1600 de dolar: 40 -> 64.000, 70 -> 112.000, 100 -> 160.000.
+            ('Zeta A', 'Baterías Zeta', '', 40, 64000, None),
+            ('Zeta B', 'Baterías Zeta', '', 70, 112000, None),
+            ('Zeta C', 'Baterías Zeta', '', 100, 160000, None),
+        ]))
+        self.assertEqual(res['resumen']['dolar_planilla'], '1600.00')
+        self.assertEqual(res['resumen']['dolar_negocio'], '1550.00')
+
+    # --- calidades e items nuevos ---
+
+    def test_varias_calidades_sin_decir_cual_se_elige_en_la_revision(self):
+        otra = VarianteSeccion.objects.create(seccion=self.seccion, nombre='Original')
+        PrecioItemService.objects.create(
+            item=self.item, variante=otra, precio_lista_usd=Decimal('120'),
+        )
+        filas = self._filas(_lista([
+            ('Zeta iPhone 11', 'Baterías Zeta', '', 85, None, None),
+        ]))
+        fila = filas[7]
+        self.assertEqual(fila['estado'], 'revisar')
+        self.assertEqual(len(fila['opciones']), 2)
+        self.assertEqual(
+            {o['variante_nombre'] for o in fila['opciones']}, {'Estándar', 'Original'},
+        )
+        # Cada opcion ya trae lo que escribiria: elegir no vuelve a consultar.
+        for opcion in fila['opciones']:
+            self.assertEqual(opcion['precio']['aplicar'], {'precio_lista_usd': '85.00'})
+
+    def test_la_calidad_que_dice_la_planilla_manda(self):
+        otra = VarianteSeccion.objects.create(seccion=self.seccion, nombre='Original')
+        PrecioItemService.objects.create(
+            item=self.item, variante=otra, precio_lista_usd=Decimal('120'),
+        )
+        filas = self._filas(_lista([
+            ('Zeta iPhone 11', 'Baterías Zeta', 'Original', 130, None, None),
+        ]))
+        fila = filas[7]
+        self.assertEqual(fila['estado'], 'actualiza')
+        self.assertEqual(fila['opciones'][0]['variante'], otra.id)
+
+    def test_item_que_no_esta_en_la_lista_es_un_alta(self):
+        filas = self._filas(_lista([
+            ('Zeta iPhone 17 Pro', 'Baterías Zeta', '', 200, None, None),
+        ]))
+        fila = filas[7]
+        self.assertEqual(fila['estado'], 'nueva')
+        self.assertTrue(fila['puede_crear'])
+        opcion = fila['opciones'][0]
+        self.assertIsNone(opcion['item'])
+        self.assertEqual(opcion['variante'], self.simple.id)
+        self.assertEqual(opcion['precio']['aplicar'], {'precio_lista_usd': '200.00'})
+
+    def test_seccion_desconocida_no_se_inventa(self):
+        filas = self._filas(_lista([
+            ('Zeta lo que sea', 'Sección que no existe', '', 200, None, None),
+        ]))
+        self.assertEqual(filas[7]['estado'], 'revisar')
+        self.assertFalse(filas[7]['puede_crear'])
+        self.assertIn('sección', filas[7]['motivo'])
+
+    def test_dos_filas_para_el_mismo_precio_se_marcan(self):
+        filas = self._filas(_lista([
+            ('Zeta iPhone 11', 'Baterías Zeta', '', 85, None, None),
+            ('Zeta iPhone 11', 'Baterías Zeta', '', 90, None, None),
+        ]))
+        self.assertEqual(filas[7]['duplicada_con'], [8])
+        self.assertEqual(filas[8]['duplicada_con'], [7])
+        self.assertFalse(filas[7]['sugerido'])
+
+    def test_una_fila_sin_ningun_precio_queda_afuera(self):
+        filas = self._filas(_lista([
+            ('Zeta iPhone 11', 'Baterías Zeta', '', None, None, None),
+        ]))
+        self.assertEqual(filas[7]['estado'], 'sin_valor')
+        self.assertEqual(filas[7]['opciones'], [])
+
+
+class ImportarListaServiceApiTests(TestCase):
+    """Los dos endpoints: analizar (no escribe) y aplicar (todo o nada)."""
+
+    ANALIZAR = '/api/precios-service/importar/analizar/'
+    APLICAR = '/api/precios-service/importar/aplicar/'
+
+    def setUp(self):
+        from usuarios.models import Permiso, Rol, Usuario
+
+        self.seccion = SeccionService.objects.create(nombre='Baterías Api')
+        self.variante = VarianteSeccion.objects.create(seccion=self.seccion, nombre='Estándar')
+        self.item = ItemService.objects.create(seccion=self.seccion, etiqueta='Api iPhone 11')
+        self.precio = PrecioItemService.objects.create(
+            item=self.item, variante=self.variante, precio_lista_usd=Decimal('70'),
+        )
+        self.admin = Usuario.objects.create_superuser(
+            email='admin@service.test', username='admin.service', password='x',
+        )
+        rol = Rol.objects.create(nombre='Mostrador service test')
+        rol.permisos.set(Permiso.objects.filter(codigo='ver_precios_service'))
+        self.empleado = Usuario.objects.create_user(
+            email='emp@service.test', username='empleado.service', password='x', rol=rol,
+        )
+
+    def _cliente(self, usuario):
+        cliente = APIClient()
+        cliente.force_authenticate(usuario)
+        return cliente
+
+    def test_analizar_devuelve_el_diff_y_no_escribe(self):
+        r = self._cliente(self.admin).post(self.ANALIZAR, {
+            'archivo': _lista([('Api iPhone 11', 'Baterías Api', '', 85, None, None)]),
+        }, format='multipart')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['resumen']['actualiza'], 1)
+        self.assertEqual(r.data['columnas']['elegidas']['lista_usd'], 3)
+        self.precio.refresh_from_db()
+        self.assertEqual(self.precio.precio_lista_usd, Decimal('70'))
+
+    def test_analizar_acepta_las_columnas_elegidas_a_mano(self):
+        """La válvula, por la API: se manda de qué columna sale cada dato."""
+        r = self._cliente(self.admin).post(self.ANALIZAR, {
+            'archivo': _lista(
+                [('Api iPhone 11', 999, 85)], encabezado=['Ítem', 'Lista USD', 'Otra'],
+            ),
+            'col_lista_usd': 2,
+            'col_seccion': -1,
+        }, format='multipart')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['columnas']['elegidas']['lista_usd'], 2)
+        self.assertIsNone(r.data['columnas']['elegidas']['seccion'])
+        self.assertEqual(
+            r.data['filas'][0]['opciones'][0]['precio']['aplicar'],
+            {'precio_lista_usd': '85.00'},
+        )
+
+    def test_analizar_con_los_pesos_prendidos(self):
+        r = self._cliente(self.admin).post(self.ANALIZAR, {
+            'archivo': _lista([('Api iPhone 11', 'Baterías Api', '', 70, 999000, None)]),
+            'con_pesos': 'true',
+        }, format='multipart')
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.data['resumen']['con_pesos'])
+        self.assertEqual(
+            r.data['filas'][0]['opciones'][0]['precio']['aplicar'],
+            {'precio_lista_ars': '999000.00'},
+        )
+        # Y sin prenderlos, ese mismo peso no entra.
+        r = self._cliente(self.admin).post(self.ANALIZAR, {
+            'archivo': _lista([('Api iPhone 11', 'Baterías Api', '', 70, 999000, None)]),
+        }, format='multipart')
+        self.assertIsNone(r.data['filas'][0]['opciones'][0]['precio']['aplicar'])
+        self.assertEqual(r.data['resumen']['pesos_ignorados'], 1)
+
+    def test_importar_es_solo_admin(self):
+        """Tocar la lista de precios lo hace un administrador."""
+        for url, datos, formato in (
+            (self.ANALIZAR, {'archivo': _lista([('Api iPhone 11', 'B', '', 85, None, None)])}, 'multipart'),
+            (self.APLICAR, {'items': []}, 'json'),
+        ):
+            r = self._cliente(self.empleado).post(url, datos, format=formato)
+            self.assertEqual(r.status_code, 403, url)
+
+    def test_archivo_que_no_es_xlsx(self):
+        import io
+
+        archivo = io.BytesIO(b'no soy un excel')
+        archivo.name = 'lista.csv'
+        r = self._cliente(self.admin).post(
+            self.ANALIZAR, {'archivo': archivo}, format='multipart',
+        )
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('.xlsx', str(r.data))
+
+    def test_aplicar_escribe_el_precio(self):
+        r = self._cliente(self.admin).post(self.APLICAR, {
+            'items': [{
+                'item': self.item.id, 'variante': self.variante.id,
+                'precio_lista_usd': '85',
+            }],
+        }, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['actualizados'], 1)
+        self.precio.refresh_from_db()
+        self.assertEqual(self.precio.precio_lista_usd, Decimal('85'))
+        self.assertEqual(self.precio.actualizado_por, self.admin)
+
+    def test_aplicar_borra_el_precio_fijado_a_mano(self):
+        self.precio.precio_lista_ars = Decimal('999000')
+        self.precio.save(update_fields=['precio_lista_ars'])
+        r = self._cliente(self.admin).post(self.APLICAR, {
+            'items': [{
+                'item': self.item.id, 'variante': self.variante.id,
+                'precio_lista_ars': None,
+            }],
+        }, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.precio.refresh_from_db()
+        self.assertIsNone(self.precio.precio_lista_ars)
+
+    def test_aplicar_da_de_alta_el_item_y_su_precio(self):
+        r = self._cliente(self.admin).post(self.APLICAR, {
+            'items': [{
+                'crear': {'seccion': self.seccion.id, 'etiqueta': 'Api iPhone 17'},
+                'variante': self.variante.id,
+                'precio_lista_usd': '200',
+            }],
+        }, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['altas'], 1)
+        self.assertEqual(r.data['creados'], 1)
+        creado = ItemService.objects.get(etiqueta='Api iPhone 17')
+        self.assertEqual(creado.seccion, self.seccion)
+        self.assertEqual(
+            creado.precios.get(variante=self.variante).precio_lista_usd, Decimal('200'),
+        )
+
+    def test_una_calidad_de_otra_seccion_da_400(self):
+        otra = SeccionService.objects.create(nombre='Otra Api')
+        ajena = VarianteSeccion.objects.create(seccion=otra, nombre='Estándar')
+        r = self._cliente(self.admin).post(self.APLICAR, {
+            'items': [{
+                'item': self.item.id, 'variante': ajena.id, 'precio_lista_usd': '85',
+            }],
+        }, format='json')
+        self.assertEqual(r.status_code, 400)
+
+    def test_una_fila_invalida_no_aplica_ninguna(self):
+        """Todo o nada: la lista no queda a medio actualizar."""
+        r = self._cliente(self.admin).post(self.APLICAR, {
+            'items': [
+                {'item': self.item.id, 'variante': self.variante.id, 'precio_lista_usd': '85'},
+                {'item': 999999, 'variante': self.variante.id, 'precio_lista_usd': '90'},
+            ],
+        }, format='json')
+        self.assertEqual(r.status_code, 400)
+        self.precio.refresh_from_db()
+        self.assertEqual(self.precio.precio_lista_usd, Decimal('70'))
+
+    def test_el_mismo_precio_repetido_da_400(self):
+        r = self._cliente(self.admin).post(self.APLICAR, {
+            'items': [
+                {'item': self.item.id, 'variante': self.variante.id, 'precio_lista_usd': '85'},
+                {'item': self.item.id, 'variante': self.variante.id, 'precio_lista_usd': '90'},
+            ],
+        }, format='json')
+        self.assertEqual(r.status_code, 400)
+
+    def test_el_precio_crudo_del_excel_se_redondea(self):
+        r = self._cliente(self.admin).post(self.APLICAR, {
+            'items': [{
+                'item': self.item.id, 'variante': self.variante.id,
+                'precio_lista_usd': '7.140000000000001',
+            }],
+        }, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.precio.refresh_from_db()
+        self.assertEqual(self.precio.precio_lista_usd, Decimal('7.14'))

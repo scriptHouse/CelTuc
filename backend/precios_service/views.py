@@ -1,13 +1,19 @@
+import logging
+
 import requests
 from django.core.cache import cache
+from django.core.exceptions import ValidationError
 from django.db.models import Prefetch
 from rest_framework import generics
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from comun.mixins import AuditoriaMixin
 from usuarios.permissions import LecturaConPermisoEscrituraAdmin
 
+from .importacion import analizar as analizar_lista
+from .importacion import aplicar as aplicar_lista
 from .models import (
     ConfiguracionService,
     CotizacionDolarBlue,
@@ -16,11 +22,16 @@ from .models import (
     SeccionService,
 )
 from .serializers import (
+    AnalizarListaServiceSerializer,
+    AplicarListaServiceSerializer,
     ConfiguracionServiceSerializer,
     DispositivoSerializer,
     ItemServiceSerializer,
     SeccionServiceSerializer,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class _BaseService:
@@ -151,3 +162,53 @@ class DispositivoDetailView(_BaseService, AuditoriaMixin, generics.RetrieveUpdat
     queryset = Dispositivo.objects.all()
     serializer_class = DispositivoSerializer
     permiso_requerido = ('ver_precios_service', 'ver_equipos')
+
+
+class ImportarListaAnalizarView(_BaseService, APIView):
+    """Lee una lista de precios (.xlsx) y devuelve el diff, SIN escribir nada.
+
+    Entra el archivo que baja «Exportar» —o cualquier planilla parecida: las
+    columnas se reconocen por su rotulo y se puede corregir cual es cual. Como
+    tocar la lista de precios es tarea de administrador, el paso de revision
+    tambien lo es.
+    """
+
+    permiso_requerido = 'ver_precios_service'
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        entrada = AnalizarListaServiceSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        datos = entrada.validated_data
+        try:
+            resultado = analizar_lista(
+                datos['archivo'],
+                columnas=datos.get('columnas'),
+                con_pesos=datos['con_pesos'],
+            )
+        except ValidationError as e:
+            return Response({'detail': ' '.join(e.messages)}, status=400)
+        except Exception:
+            logger.exception('No se pudo analizar la lista de precios de service')
+            return Response(
+                {'detail': 'No se pudo leer el archivo. Revisá que sea el .xlsx que '
+                           'baja «Exportar» y volvé a intentar.'},
+                status=400,
+            )
+        resultado['archivo'] = datos['archivo'].name
+        return Response(resultado)
+
+
+class ImportarListaAplicarView(_BaseService, APIView):
+    """Aplica las filas confirmadas de la lista (todo o nada)."""
+
+    permiso_requerido = 'ver_precios_service'
+
+    def post(self, request):
+        entrada = AplicarListaServiceSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        try:
+            resultado = aplicar_lista(entrada.validated_data['items'], usuario=request.user)
+        except ValidationError as e:
+            return Response({'detail': ' '.join(e.messages)}, status=400)
+        return Response(resultado)

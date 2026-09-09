@@ -1,5 +1,9 @@
 from rest_framework import serializers
 
+from comun.planillas import MAX_COLUMNAS
+from comun.planillas import precio as precio_planilla
+
+from .importacion import CAMPOS as CAMPOS_IMPORTACION
 from .models import (
     ConfiguracionService,
     Dispositivo,
@@ -249,3 +253,161 @@ class SeccionServiceSerializer(serializers.ModelSerializer):
                 )
             self._reemplazar_variantes(instance, variantes)
         return instance
+
+
+# ===== Importacion de la lista de precios (el archivo que baja «Exportar») =====
+
+# La lista del negocio pesa unos pocos cientos de KB; el techo deja margen de
+# sobra sin dejar que una subida enorme ocupe memoria del servidor.
+MAX_MB_LISTA = 10
+
+# De que columna sale cada dato. Solo viaja cuando quien importa lo corrige a
+# mano desde «Opciones avanzadas»: el numero es la columna del Excel (0 = A) y
+# -1 significa "no leer ese dato de ninguna columna".
+NINGUNA_COLUMNA = -1
+CAMPOS_COLUMNA = {f'col_{campo}': campo for campo in CAMPOS_IMPORTACION}
+
+
+def _campo_columna(obligatoria=False):
+    return serializers.IntegerField(
+        required=False,
+        min_value=0 if obligatoria else NINGUNA_COLUMNA,
+        max_value=MAX_COLUMNAS,
+    )
+
+
+class AnalizarListaServiceSerializer(serializers.Serializer):
+    """Entrada de POST /importar/analizar/: la lista de precios a revisar."""
+
+    archivo = serializers.FileField()
+    # Los pesos son un valor derivado del dolar: entran solo si se pide.
+    con_pesos = serializers.BooleanField(required=False, default=False)
+    col_etiqueta = _campo_columna(obligatoria=True)
+    col_seccion = _campo_columna()
+    col_variante = _campo_columna()
+    col_lista_usd = _campo_columna()
+    col_cash_usd = _campo_columna()
+    col_lista_ars = _campo_columna()
+    col_cash_ars = _campo_columna()
+
+    def validate_archivo(self, value):
+        if not value.name.lower().endswith('.xlsx'):
+            raise serializers.ValidationError(
+                'El archivo tiene que ser un Excel .xlsx. Si lo abriste en Google '
+                'Sheets, descargalo como .xlsx y volvé a subirlo.'
+            )
+        if value.size > MAX_MB_LISTA * 1024 * 1024:
+            raise serializers.ValidationError(
+                f'El archivo pesa demasiado (máximo {MAX_MB_LISTA} MB).'
+            )
+        return value
+
+    def validate(self, data):
+        elegidas = {
+            campo: (None if data[clave] == NINGUNA_COLUMNA else data[clave])
+            for clave, campo in CAMPOS_COLUMNA.items()
+            if clave in data
+        }
+        data['columnas'] = elegidas or None
+        return data
+
+
+# Los cuatro precios que puede traer una fila confirmada.
+PRECIOS_ITEM = (
+    'precio_lista_usd', 'precio_cash_usd', 'precio_lista_ars', 'precio_cash_ars',
+)
+
+
+class ItemNuevoListaSerializer(serializers.Serializer):
+    """El alta de una fila que la planilla trae y la lista no tiene."""
+
+    seccion = serializers.PrimaryKeyRelatedField(
+        queryset=SeccionService.objects.filter(activo=True),
+    )
+    etiqueta = serializers.CharField(max_length=200)
+    nota = serializers.CharField(max_length=200, required=False, allow_blank=True, default='')
+
+    def validate_etiqueta(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError('La fila necesita un nombre.')
+        return value
+
+
+class ItemListaServiceSerializer(serializers.Serializer):
+    """Un precio confirmado: contra que item y calidad va, y que se escribe.
+
+    Los cuatro precios son opcionales: el que no viaja no se toca, y `null`
+    BORRA el valor fijado a mano (el precio vuelve a salir de la formula).
+    """
+
+    fila = serializers.IntegerField(required=False)
+    item = serializers.PrimaryKeyRelatedField(
+        queryset=ItemService.objects.all(), required=False, allow_null=True,
+    )
+    crear = ItemNuevoListaSerializer(required=False, allow_null=True)
+    variante = serializers.PrimaryKeyRelatedField(queryset=VarianteSeccion.objects.all())
+    precio_lista_usd = _campo_precio()
+    precio_cash_usd = _campo_precio()
+    precio_lista_ars = _campo_precio()
+    precio_cash_ars = _campo_precio()
+
+    def to_internal_value(self, data):
+        # Excel entrega 7.14 como 7.140000000000001: se redondea ANTES de
+        # validar, porque el campo guarda dos decimales y una sola fila asi
+        # tiraria abajo la importacion entera.
+        if isinstance(data, dict):
+            cambios = {}
+            for campo in PRECIOS_ITEM:
+                if data.get(campo) in (None, ''):
+                    continue
+                redondeado = precio_planilla(data[campo])
+                if redondeado is not None:
+                    cambios[campo] = redondeado
+            if cambios:
+                data = {**data, **cambios}
+        return super().to_internal_value(data)
+
+    def validate(self, data):
+        if not data.get('item') and not data.get('crear'):
+            raise serializers.ValidationError(
+                'Cada fila tiene que apuntar a un precio de la lista o traer el alta.'
+            )
+        if data.get('item') and data.get('crear'):
+            raise serializers.ValidationError(
+                'Una fila no puede ser a la vez un ítem existente y uno nuevo.'
+            )
+        if not any(campo in data for campo in PRECIOS_ITEM):
+            raise serializers.ValidationError(
+                'Esta fila no cambia ningún precio.'
+            )
+        # La calidad tiene que ser de la MISMA seccion que el item: si no, el
+        # precio quedaria colgado de un bloque que no es el suyo.
+        seccion = data['item'].seccion_id if data.get('item') else data['crear']['seccion'].id
+        if data['variante'].seccion_id != seccion:
+            raise serializers.ValidationError(
+                'La calidad elegida es de otra sección.'
+            )
+        return data
+
+
+class AplicarListaServiceSerializer(serializers.Serializer):
+    """Entrada de POST /importar/aplicar/: las filas que se confirmaron."""
+
+    items = ItemListaServiceSerializer(many=True)
+
+    def validate_items(self, value):
+        if not value:
+            raise serializers.ValidationError('No hay ninguna fila marcada para aplicar.')
+        vistos = set()
+        for item in value:
+            if not item.get('item'):
+                continue
+            clave = (item['item'].pk, item['variante'].pk)
+            if clave in vistos:
+                raise serializers.ValidationError(
+                    f'El precio de "{item["item"].etiqueta}" viene repetido: '
+                    'dejá una sola fila.'
+                )
+            vistos.add(clave)
+        return value

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Aperture,
   BatteryCharging,
@@ -18,6 +18,7 @@ import {
   Smartphone,
   SmartphoneNfc,
   SwitchCamera,
+  Upload,
   Volume2,
   Watch,
   Wrench,
@@ -42,8 +43,10 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { AyudaInfo } from '@/components/ui/AyudaInfo'
 import { AyudaServicePagina } from '@/components/AyudaContenidos'
+import { useToast } from '@/components/ToastProvider'
 import { PreciosServiceManager } from '@/components/PreciosServiceManager'
 import { ExportarTablaModal, type GestorExport } from '@/components/exportar/ExportarTablaModal'
+import { ImportarListaModal } from '@/components/service/ImportarListaModal'
 
 /** Ícono para el chip de cada sección, por palabra clave del nombre.
  * Así las secciones nuevas que cargue el admin reciben un ícono razonable
@@ -166,12 +169,15 @@ export function opcionesDeEquipo(
 export function PreciosServicePage() {
   const usuario = useAuth((s) => s.usuario)
   const admin = esAdmin(usuario)
+  const queryClient = useQueryClient()
+  const toast = useToast()
 
   const [busqueda, setBusqueda] = useState('')
   const [filtroEquipo, setFiltroEquipo] = useState('')
   const [seccionId, setSeccionId] = useState<number | null>(null)
   const [configOpen, setConfigOpen] = useState(false)
   const [exportarAbierto, setExportarAbierto] = useState(false)
+  const [importarAbierto, setImportarAbierto] = useState(false)
 
   const { data: secciones = [], isLoading } = useQuery({
     queryKey: ['service-secciones'],
@@ -298,6 +304,12 @@ export function PreciosServicePage() {
               <Download className="h-4 w-4" />
               Exportar
             </Button>
+            {admin && (
+              <Button variant="outline" onClick={() => setImportarAbierto(true)}>
+                <Upload className="h-4 w-4" />
+                Importar
+              </Button>
+            )}
             {admin && (
               <Button variant="outline" onClick={() => setConfigOpen(true)}>
                 <SlidersHorizontal className="h-4 w-4" />
@@ -501,6 +513,18 @@ export function PreciosServicePage() {
       )}
 
       <PreciosServiceManager open={configOpen} onClose={() => setConfigOpen(false)} />
+      <ImportarListaModal
+        abierto={importarAbierto}
+        onCerrar={() => setImportarAbierto(false)}
+        onAplicado={(resultado) => {
+          // La lista cambió en bloque: se recarga entera.
+          queryClient.invalidateQueries({ queryKey: ['service-secciones'] })
+          toast.success(
+            'Lista actualizada',
+            `${num(resultado.actualizados + resultado.creados)} precios importados.`,
+          )
+        }}
+      />
       <ExportarTablaModal
         abierto={exportarAbierto}
         onCerrar={() => setExportarAbierto(false)}
