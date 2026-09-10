@@ -10,8 +10,10 @@ dolar del negocio como siempre.
 """
 from decimal import ROUND_HALF_UP, Decimal
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
+from django.utils import timezone
 
 from comun.models import ModeloBase
 
@@ -137,6 +139,123 @@ class MovimientoStock(ModeloBase):
 
     def __str__(self):
         return f'{self.get_tipo_display()} {self.delta:+d} · {self.producto} en {self.sucursal}'
+
+
+class VaciadoStock(ModeloBase):
+    """Un borrado masivo del stock de una o varias sucursales, CON respaldo.
+
+    Vaciar una sucursal pone en cero todas sus cantidades de una sola vez (para
+    arrancar un conteo desde cero, o para dejar de mostrar un stock que ya no
+    existe). No se pierde nada: antes de tocar el inventario se guarda una foto
+    fila por fila (`VaciadoStockItem`) y desde ahi el superadministrador puede
+    devolver todo a como estaba.
+
+    Lo que NO se toca: el catalogo (los productos y sus precios siguen igual),
+    las demas sucursales y el historial. Lo unico que cambia son las cantidades
+    de las sucursales elegidas, y cada una deja su movimiento en el kardex.
+    """
+
+    class Estado(models.TextChoices):
+        GUARDADO = 'guardado', 'Guardado (se puede restaurar)'
+        RESTAURADO = 'restaurado', 'Restaurado'
+
+    class Modo(models.TextChoices):
+        """Como vuelve el stock guardado cuando alguien restaura."""
+
+        REEMPLAZAR = 'reemplazar', 'Dejar el stock como estaba'
+        SUMAR = 'sumar', 'Sumar lo guardado a lo que hay hoy'
+
+    sucursales = models.ManyToManyField(
+        Sucursal,
+        related_name='vaciados',
+        verbose_name='sucursales vaciadas',
+    )
+    # Foto de los nombres: el historial se sigue leyendo aunque despues
+    # renombren o eliminen una sucursal.
+    sucursales_nombres = models.CharField('sucursales (foto)', max_length=300, blank=True)
+    motivo = models.CharField('motivo', max_length=200, blank=True)
+    productos = models.PositiveIntegerField('productos respaldados', default=0)
+    unidades = models.IntegerField('unidades borradas', default=0)
+    valor_lista = models.DecimalField(
+        'valor a lista ($)', max_digits=16, decimal_places=2, default=0,
+        help_text='Cuanta plata representaba lo borrado, a precio de lista del momento.',
+    )
+    estado = models.CharField(
+        'estado', max_length=12, choices=Estado.choices, default=Estado.GUARDADO,
+    )
+    modo_restauracion = models.CharField(
+        'modo de restauracion', max_length=12, choices=Modo.choices, blank=True,
+    )
+    restaurado = models.DateTimeField('fecha de restauracion', null=True, blank=True)
+    restaurado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='+',
+        verbose_name='restaurado por',
+    )
+
+    class Meta:
+        db_table = 'inventario_vaciados'
+        verbose_name = 'vaciado de stock'
+        verbose_name_plural = 'vaciados de stock'
+        ordering = ('-creado', '-id')
+
+    def __str__(self):
+        return (
+            f'Vaciado #{self.pk} · {self.sucursales_nombres or "sin sucursales"} · '
+            f'{self.productos} productos'
+        )
+
+    @property
+    def puede_restaurar(self) -> bool:
+        return self.estado == self.Estado.GUARDADO
+
+
+class VaciadoStockItem(models.Model):
+    """Una fila del respaldo: cuanto tenia UN producto en UNA sucursal.
+
+    Tabla plana a proposito (sin `ModeloBase`): es una foto de solo lectura, se
+    escribe una vez en bloque y no se audita fila por fila — el vaciado entero
+    ya queda registrado como una sola accion.
+    """
+
+    vaciado = models.ForeignKey(
+        VaciadoStock,
+        on_delete=models.CASCADE,
+        related_name='items',
+        verbose_name='vaciado',
+    )
+    producto = models.ForeignKey(
+        'productos.Producto',
+        on_delete=models.CASCADE,
+        related_name='+',
+        verbose_name='producto',
+    )
+    sucursal = models.ForeignKey(
+        Sucursal,
+        on_delete=models.CASCADE,
+        related_name='+',
+        verbose_name='sucursal',
+    )
+    # Foto del nombre: el respaldo se lee igual aunque despues lo renombren.
+    producto_nombre = models.CharField('producto (foto)', max_length=200, blank=True)
+    cantidad = models.IntegerField('cantidad guardada')
+    stock_minimo = models.PositiveIntegerField('stock minimo', null=True, blank=True)
+    sin_dato = models.BooleanField('sin dato', default=False)
+
+    class Meta:
+        db_table = 'inventario_vaciados_items'
+        verbose_name = 'fila respaldada'
+        verbose_name_plural = 'filas respaldadas'
+        ordering = ('-cantidad', 'id')
+        indexes = [
+            models.Index(fields=('vaciado', 'sucursal')),
+        ]
+
+    def __str__(self):
+        return f'{self.producto_nombre or self.producto_id}: {self.cantidad}'
 
 
 class Venta(ModeloBase):
@@ -599,3 +718,246 @@ def aplicar_transferencia(producto, origen, destino, cantidad, *, nota='', usuar
             nota=nota or f'← {origen.nombre}', usuario=usuario,
         )
     return salida, entrada
+
+
+# ===== Vaciar el stock de una sucursal (y poder volver atras) =====
+
+def _valor_a_lista(filas):
+    """Cuanta plata representa lo que se esta borrando, a precio de lista.
+
+    Es informativo (queda en el respaldo para que el historial diga de que
+    tamaño fue el vaciado): usa los precios vivos del catalogo, los mismos que
+    muestra la pantalla de Inventario.
+    """
+    # Import tardio: el stock no depende del catalogo para existir, y asi
+    # `inventario.models` no se acopla a `productos` al importarse.
+    from productos.models import ConfiguracionProductos, resolver_precio_producto
+
+    config = ConfiguracionProductos.obtener()
+    total = Decimal('0')
+    for fila in filas:
+        if fila.cantidad <= 0:
+            continue
+        lista = resolver_precio_producto(fila.producto, config)['lista_ars']
+        if lista is not None:
+            total += Decimal(lista) * fila.cantidad
+    return total.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+
+def vaciar_stock(sucursales, *, motivo='', usuario=None):
+    """Pone en CERO el stock de esas sucursales, guardando antes el respaldo.
+
+    Todo o nada (una sola transaccion): primero se guarda la foto de cada fila
+    con cantidad, despues se registran los movimientos del kardex y recien ahi
+    quedan las cantidades en cero. Si algo falla, no se borro nada.
+
+    Solo se tocan las filas que tienen cantidad (las que ya estan en 0 —o "no
+    informado"— quedan igual: no hay nada que borrar ni que respaldar). Los
+    stock minimos NO se tocan: son configuracion de la fila, no stock.
+
+    Devuelve el `VaciadoStock` creado. Si en las sucursales elegidas no hay
+    ninguna unidad, lanza ValidationError en vez de guardar un respaldo vacio.
+    """
+    sucursales = list(sucursales)
+    if not sucursales:
+        raise ValidationError('Elegí al menos una sucursal.')
+
+    with transaction.atomic():
+        filas = list(
+            StockProducto.objects
+            .select_for_update(of=('self',))
+            .filter(sucursal_id__in=[s.pk for s in sucursales], producto__borrado=False)
+            .exclude(cantidad=0)
+            .select_related('producto', 'producto__categoria')
+        )
+        if not filas:
+            nombres = ', '.join(s.nombre for s in sucursales)
+            raise ValidationError(
+                f'No hay unidades cargadas en {nombres}: no hay stock para borrar.'
+            )
+
+        ahora = timezone.now()
+        vaciado = VaciadoStock.objects.create(
+            motivo=(motivo or '').strip()[:200],
+            sucursales_nombres=', '.join(s.nombre for s in sucursales)[:300],
+            productos=len(filas),
+            unidades=sum(f.cantidad for f in filas),
+            valor_lista=_valor_a_lista(filas),
+            creado_por=usuario,
+            actualizado_por=usuario,
+        )
+        vaciado.sucursales.set(sucursales)
+
+        VaciadoStockItem.objects.bulk_create([
+            VaciadoStockItem(
+                vaciado=vaciado,
+                producto_id=fila.producto_id,
+                sucursal_id=fila.sucursal_id,
+                producto_nombre=fila.producto.nombre[:200],
+                cantidad=fila.cantidad,
+                stock_minimo=fila.stock_minimo,
+                sin_dato=fila.sin_dato,
+            )
+            for fila in filas
+        ])
+
+        nota = f'Vaciado #{vaciado.pk}'
+        if vaciado.motivo:
+            nota = f'{nota} — {vaciado.motivo}'
+        # `bulk_create` no dispara señales: el kardex queda completo (un renglon
+        # por producto) sin inundar la auditoria — el vaciado ya es UNA accion.
+        MovimientoStock.objects.bulk_create([
+            MovimientoStock(
+                producto_id=fila.producto_id,
+                sucursal_id=fila.sucursal_id,
+                tipo=MovimientoStock.Tipo.AJUSTE,
+                delta=-fila.cantidad,
+                resultante=0,
+                nota=nota[:200],
+                creado=ahora,
+                actualizado=ahora,
+                creado_por=usuario,
+                actualizado_por=usuario,
+            )
+            for fila in filas
+        ])
+
+        # `update()` no pasa por save(): `actualizado` se fija a mano.
+        StockProducto.objects.filter(pk__in=[f.pk for f in filas]).update(
+            cantidad=0, sin_dato=False, actualizado=ahora, actualizado_por=usuario,
+        )
+
+    return vaciado
+
+
+def stock_actual_de(items):
+    """Las filas de stock de hoy para las combinaciones de un respaldo."""
+    if not items:
+        return {}
+    filas = StockProducto.objects.filter(
+        producto_id__in={i.producto_id for i in items},
+        sucursal_id__in={i.sucursal_id for i in items},
+    )
+    return {(f.producto_id, f.sucursal_id): f for f in filas}
+
+
+def conflictos_vaciado(vaciado):
+    """Que cambio desde el vaciado: filas que HOY vuelven a tener unidades.
+
+    Es lo que hay que avisar antes de restaurar: si alguien ya volvio a cargar
+    stock, restaurar «dejando todo como estaba» pisa ese conteo nuevo.
+    Devuelve (cantidad de filas, unidades que hay hoy en ellas).
+    """
+    items = list(vaciado.items.all())
+    actuales = stock_actual_de(items)
+    filas = 0
+    unidades = 0
+    for item in items:
+        fila = actuales.get((item.producto_id, item.sucursal_id))
+        if fila is not None and fila.cantidad != 0:
+            filas += 1
+            unidades += fila.cantidad
+    return filas, unidades
+
+
+def restaurar_vaciado(vaciado, *, usuario=None, modo=VaciadoStock.Modo.REEMPLAZAR):
+    """Devuelve a las sucursales el stock guardado en un vaciado.
+
+    Dos maneras de volver:
+
+    - `reemplazar` (la normal): cada producto queda con la cantidad que tenia
+      antes del vaciado, aunque despues alguien haya cargado otra.
+    - `sumar`: lo guardado se SUMA a lo que hay hoy (sirve cuando el conteo
+      nuevo es real y lo borrado eran unidades aparte).
+
+    Cada fila que cambia deja su movimiento en el kardex. Se puede restaurar
+    una sola vez: despues el vaciado queda marcado como restaurado.
+    """
+    if not vaciado.puede_restaurar:
+        raise ValidationError('Este vaciado ya fue restaurado.')
+    modo = modo or VaciadoStock.Modo.REEMPLAZAR
+    if modo not in VaciadoStock.Modo.values:
+        raise ValidationError('No entiendo cómo restaurar: elegí una de las dos opciones.')
+
+    ahora = timezone.now()
+    nota = f'Restauración del vaciado #{vaciado.pk}'
+    with transaction.atomic():
+        items = list(vaciado.items.all())
+        actuales = stock_actual_de(items)
+        por_actualizar = []
+        nuevas = []
+        movimientos = []
+        unidades = 0
+
+        for item in items:
+            fila = actuales.get((item.producto_id, item.sucursal_id))
+            antes = fila.cantidad if fila is not None else 0
+            nueva = (
+                item.cantidad if modo == VaciadoStock.Modo.REEMPLAZAR else antes + item.cantidad
+            )
+            delta = nueva - antes
+            if fila is None:
+                # La fila ya no existe (se borro el producto de esa sucursal y
+                # nunca se volvio a tocar): se recrea con lo guardado.
+                nuevas.append(StockProducto(
+                    producto_id=item.producto_id,
+                    sucursal_id=item.sucursal_id,
+                    cantidad=nueva,
+                    stock_minimo=item.stock_minimo,
+                    sin_dato=item.sin_dato and nueva == 0,
+                    creado=ahora,
+                    actualizado=ahora,
+                    creado_por=usuario,
+                    actualizado_por=usuario,
+                ))
+            else:
+                fila.cantidad = nueva
+                if modo == VaciadoStock.Modo.REEMPLAZAR:
+                    fila.sin_dato = item.sin_dato and nueva == 0
+                # El minimo es configuracion: solo se repone si hoy no hay uno
+                # (nunca se pisa una alerta que alguien configuro despues).
+                if fila.stock_minimo is None and item.stock_minimo is not None:
+                    fila.stock_minimo = item.stock_minimo
+                fila.actualizado = ahora
+                fila.actualizado_por = usuario
+                por_actualizar.append(fila)
+            if delta:
+                unidades += delta
+                movimientos.append(MovimientoStock(
+                    producto_id=item.producto_id,
+                    sucursal_id=item.sucursal_id,
+                    tipo=MovimientoStock.Tipo.AJUSTE,
+                    delta=delta,
+                    resultante=nueva,
+                    nota=nota,
+                    creado=ahora,
+                    actualizado=ahora,
+                    creado_por=usuario,
+                    actualizado_por=usuario,
+                ))
+
+        if nuevas:
+            StockProducto.objects.bulk_create(nuevas)
+        if por_actualizar:
+            StockProducto.objects.bulk_update(
+                por_actualizar,
+                ['cantidad', 'sin_dato', 'stock_minimo', 'actualizado', 'actualizado_por'],
+            )
+        if movimientos:
+            MovimientoStock.objects.bulk_create(movimientos)
+
+        vaciado.estado = VaciadoStock.Estado.RESTAURADO
+        vaciado.modo_restauracion = modo
+        vaciado.restaurado = ahora
+        vaciado.restaurado_por = usuario
+        vaciado.actualizado_por = usuario
+        vaciado.save(update_fields=[
+            'estado', 'modo_restauracion', 'restaurado', 'restaurado_por', 'actualizado_por',
+        ])
+
+    return {
+        'filas': len(items),
+        'cambiadas': len(movimientos),
+        'recreadas': len(nuevas),
+        'unidades': unidades,
+    }

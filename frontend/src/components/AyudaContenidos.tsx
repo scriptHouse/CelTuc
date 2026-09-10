@@ -412,6 +412,7 @@ export function AyudaInventario() {
             [<><b>Editar</b> ✎</>, <>Abre el detalle: cantidad exacta, stock mínimo y los últimos movimientos.</>],
             [<><b>Nuevo producto</b></>, <>(Solo administradores) Da de alta un producto del catálogo sin salir de acá. Nace sin unidades: después se las cargás con el <b>+</b>.</>],
             [<><b>Importar por sucursal</b></>, <>Sube la planilla de un local y actualiza su stock de una vez, mostrándote antes qué cambia en cada fila.</>],
+            [<><b>Borrar stock</b> 🗑</>, <>(Solo administradores) Pone en cero el stock de una o varias sucursales de una vez. Antes guarda un respaldo completo, que solo el superadministrador puede restaurar.</>],
           ]}
         />
       </AyudaSeccion>
@@ -477,6 +478,36 @@ export function AyudaInventario() {
             Importar por sucursal → Solar → subir «Stock Solar.xlsx» → analizar → 201 suben, 57
             bajan, 2 nuevos → Aplicar. Cada cambio queda en el historial del producto con el
             nombre de la planilla.
+          </p>
+        </AyudaEjemplo>
+      </AyudaSeccion>
+
+      <AyudaSeccion titulo="Borrar el stock de una sucursal (y volver atrás)">
+        <p>
+          Cuando un local arranca el conteo <b>de cero</b> —o lo que figura ya no existe—, el
+          botón <b>Borrar stock</b> de arriba (solo administradores) pone en <b>0</b> todas las
+          cantidades de las sucursales que elijas, de una sola vez. Se pueden marcar{' '}
+          <b>varias juntas</b>.
+        </p>
+        <AyudaPasos
+          pasos={[
+            <>Marcá <b>una o más sucursales</b>. Cada tarjeta te dice cuántos productos, cuántas unidades y cuánta plata a lista tiene hoy.</>,
+            <>Revisá el resumen: qué se borra, lo que más pesa y —sobre todo— <b>lo que NO se toca</b>.</>,
+            <>Escribí <b>BORRAR</b> para confirmar. Recién ahí las cantidades se ponen en cero.</>,
+          ]}
+        />
+        <AyudaCampos
+          campos={[
+            [<>Qué NO se borra</>, <>Los productos del catálogo, sus precios, las otras sucursales y el historial de movimientos y ventas. Lo único que cambia son las cantidades.</>],
+            [<><b>Respaldo</b></>, <>Antes de borrar se guarda una foto producto por producto. Queda en la solapa <b>Respaldos</b>, con quién lo hizo, cuándo, el motivo y cuánto se borró.</>],
+            [<><b>Restaurar</b></>, <>Devuelve el stock a como estaba. Lo hace <b>solo el superadministrador</b>. Si alguien volvió a cargar unidades desde entonces, te lo avisa y elegís: dejar todo como estaba o sumar lo guardado a lo de hoy.</>],
+          ]}
+        />
+        <AyudaEjemplo titulo="Salta rehace el inventario desde cero">
+          <p className="tnum">
+            Borrar stock → marcar Salta (312 productos · 1.048 u.) → revisar → escribir BORRAR.
+            Queda en 0 y con el respaldo guardado; si hizo falta volver atrás, el
+            superadministrador lo restaura entero desde <b>Respaldos</b>.
           </p>
         </AyudaEjemplo>
       </AyudaSeccion>

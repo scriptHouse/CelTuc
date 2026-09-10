@@ -5,7 +5,16 @@ from comun.admin import ModeloBaseAdminMixin
 
 from unfold.admin import TabularInline
 
-from .models import ItemVenta, MovimientoStock, PagoVenta, StockProducto, Sucursal, Venta
+from .models import (
+    ItemVenta,
+    MovimientoStock,
+    PagoVenta,
+    StockProducto,
+    Sucursal,
+    VaciadoStock,
+    VaciadoStockItem,
+    Venta,
+)
 
 _AUDITORIA = (
     'creado', 'actualizado', 'creado_por', 'actualizado_por',
@@ -55,6 +64,29 @@ class VentaAdmin(ModeloBaseAdminMixin, ModelAdmin):
     raw_id_fields = ('cliente', 'comprobante')
     inlines = (ItemVentaInline, PagoVentaInline)
     readonly_fields = _AUDITORIA
+
+
+class VaciadoStockItemInline(TabularInline):
+    """La foto del stock borrado: solo lectura (es un respaldo, no un formulario)."""
+
+    model = VaciadoStockItem
+    extra = 0
+    fields = ('producto_nombre', 'sucursal', 'cantidad', 'stock_minimo', 'sin_dato')
+    readonly_fields = fields
+    can_delete = False
+    max_num = 0
+
+
+@admin.register(VaciadoStock)
+class VaciadoStockAdmin(ModeloBaseAdminMixin, ModelAdmin):
+    list_display = (
+        'id', 'creado', 'sucursales_nombres', 'productos', 'unidades', 'estado', 'creado_por',
+    )
+    list_filter = ('estado', 'sucursales')
+    search_fields = ('sucursales_nombres', 'motivo')
+    filter_horizontal = ('sucursales',)
+    inlines = (VaciadoStockItemInline,)
+    readonly_fields = _AUDITORIA + ('restaurado', 'restaurado_por', 'modo_restauracion')
 
 
 @admin.register(MovimientoStock)

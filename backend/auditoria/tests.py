@@ -4,15 +4,19 @@ Cubren dos cosas: el ACCESO (el endpoint es solo del superadministrador) y la
 ESCRITURA automatica (las acciones de la API dejan registro con su antes y
 despues, sin ruido de infraestructura).
 """
+from unittest import mock
+
 from django.core.cache import cache
+from django.db import transaction
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
 
+from inventario.models import Sucursal
 from usuarios.models import Rol, Usuario
 
 from .models import RegistroAuditoria
-from .registro import MASCARA
+from .registro import MASCARA, _escribir
 
 
 class AccesoAuditoriaTests(TestCase):
@@ -180,3 +184,31 @@ class EscrituraAuditoriaTests(TestCase):
         self.assertEqual(vacio['total'], 0)
         por_usuario = self.client.get(url, {'usuario': 'sup'}).data
         self.assertEqual(por_usuario['total'], 1)
+
+
+class AuditoriaNoRompeLaOperacionTests(TestCase):
+    """La promesa del modulo: si el registro falla, la operacion sigue viva.
+
+    El caso real: la tabla de auditoria quedo atras respecto del codigo. El
+    INSERT revienta, el try/except lo traga... pero el error de base ya dejo la
+    transaccion marcada para rollback, y la operacion observada moria despues
+    con un TransactionManagementError. Por eso el registro va en su propio
+    punto de guardado.
+    """
+
+    def test_un_error_al_auditar_no_tumba_la_transaccion(self):
+        usuario = Usuario.objects.create_superuser(
+            email='sup@audit.test', username='sup.audit', password='clave-segura-123',
+        )
+        sucursal = Sucursal.objects.create(nombre='Sucursal auditada')
+
+        with transaction.atomic():
+            # La tabla no existe: el INSERT del registro falla de verdad.
+            with mock.patch.object(RegistroAuditoria._meta, 'db_table', 'auditoria_inexistente'):
+                self.assertIsNone(_escribir('crear', usuario, None, instancia=sucursal))
+            # La transaccion tiene que seguir usable: esto es lo que antes
+            # explotaba con "You can't execute queries until the end of the
+            # 'atomic' block".
+            Sucursal.objects.create(nombre='Sucursal posterior')
+
+        self.assertTrue(Sucursal.objects.filter(nombre='Sucursal posterior').exists())

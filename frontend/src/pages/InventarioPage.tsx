@@ -37,7 +37,7 @@ import {
 } from '@/services/inventario'
 import { ApiError } from '@/lib/api'
 import { useAuth } from '@/store/auth'
-import { esAdmin } from '@/lib/permisos'
+import { esAdmin, esSuperAdmin } from '@/lib/permisos'
 import { money0, num, tiempoRelativo, usd } from '@/lib/format'
 import { cn, coincideBusqueda, ctStagger } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -54,6 +54,7 @@ import { AyudaInfo } from '@/components/ui/AyudaInfo'
 import { AyudaInventario } from '@/components/AyudaContenidos'
 import { ProductoForm } from '@/components/ProductosManager'
 import { ImportarStockModal } from '@/components/inventario/ImportarStockModal'
+import { VaciarStockModal } from '@/components/inventario/VaciarStockModal'
 import { ExportarInventarioModal } from '@/components/inventario/exportar/ExportarInventarioModal'
 import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
@@ -99,6 +100,7 @@ export function InventarioPage() {
   const toast = useToast()
   const usuario = useAuth((s) => s.usuario)
   const admin = esAdmin(usuario)
+  const superadmin = esSuperAdmin(usuario)
 
   const { data: sucursales = [], isLoading: cargandoSucursales } = useQuery({
     queryKey: ['inv-sucursales'],
@@ -278,6 +280,7 @@ export function InventarioPage() {
   const [nuevoProducto, setNuevoProducto] = useState(false)
   const [importar, setImportar] = useState(false)
   const [exportar, setExportar] = useState(false)
+  const [vaciar, setVaciar] = useState(false)
 
   // Lo que el exportador necesita saber de la pantalla para poder ofrecer
   // «exportar lo que estoy viendo»: qué productos quedaron a la vista y con qué
@@ -368,6 +371,20 @@ export function InventarioPage() {
               >
                 <Store className="h-4 w-4" />
                 <span className="hidden lg:inline">Sucursales</span>
+              </Button>
+            )}
+            {/* Acción destructiva: se tiñe de rojo recién al apuntarla, para
+                que se distinga de las demás sin gritar en la barra. */}
+            {admin && (
+              <Button
+                variant="outline"
+                onClick={() => setVaciar(true)}
+                aria-label="Borrar stock por sucursal"
+                title="Borrar el stock de una o varias sucursales (se guarda un respaldo)"
+                className="px-3.5 hover:border-red-500/50 hover:bg-red-500/[0.07] hover:text-red-700 focus-visible:ring-red-600 dark:hover:text-red-400 lg:px-5"
+              >
+                <Trash2 className="h-4 w-4" />
+                <span className="hidden lg:inline">Borrar stock</span>
               </Button>
             )}
             <AyudaInfo titulo="Cómo usar el inventario">
@@ -562,6 +579,34 @@ export function InventarioPage() {
         contextoVista={contextoVista}
         seleccion={sel}
       />
+      {admin && (
+        <VaciarStockModal
+          abierto={vaciar}
+          sucursales={activas}
+          productos={productos}
+          stock={stock}
+          esSuper={superadmin}
+          sucursalInicial={sel === 'todas' ? null : sel}
+          onCerrar={() => setVaciar(false)}
+          onVaciado={(vaciado) => {
+            // El stock cambió en bloque: se recarga entero, junto con el kardex.
+            queryClient.invalidateQueries({ queryKey: ['inv-stock'] })
+            queryClient.invalidateQueries({ queryKey: ['inv-movimientos'] })
+            toast.success(
+              `${vaciado.sucursales_nombres} quedó en cero`,
+              `${num(vaciado.productos)} productos borrados · respaldo #${vaciado.id} guardado.`,
+            )
+          }}
+          onRestaurado={(resultado) => {
+            queryClient.invalidateQueries({ queryKey: ['inv-stock'] })
+            queryClient.invalidateQueries({ queryKey: ['inv-movimientos'] })
+            toast.success(
+              'Stock restaurado',
+              `${num(resultado.cambiadas)} productos volvieron a ${resultado.vaciado.sucursales_nombres}.`,
+            )
+          }}
+        />
+      )}
       {admin && (
         <SucursalesModal open={gestionarSucursales} onClose={() => setGestionarSucursales(false)} />
       )}

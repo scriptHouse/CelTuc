@@ -11,7 +11,12 @@ from rest_framework.views import APIView
 from comun.mixins import AuditoriaMixin
 from productos.models import CategoriaProducto, ConfiguracionProductos, Producto
 from productos.serializers import ProductoSerializer
-from usuarios.permissions import LecturaConPermisoEscrituraAdmin, LecturaYEscrituraConPermiso
+from usuarios.permissions import (
+    EsAdministrador,
+    EsSuperadministrador,
+    LecturaConPermisoEscrituraAdmin,
+    LecturaYEscrituraConPermiso,
+)
 
 from .importacion import analizar as analizar_planilla
 from .importacion import aplicar as aplicar_planilla
@@ -19,10 +24,15 @@ from .models import (
     MovimientoStock,
     StockProducto,
     Sucursal,
+    VaciadoStock,
     Venta,
     aplicar_ajuste,
     aplicar_transferencia,
+    conflictos_vaciado,
     registrar_venta,
+    restaurar_vaciado,
+    stock_actual_de,
+    vaciar_stock,
 )
 from .serializers import (
     AjusteStockSerializer,
@@ -31,9 +41,13 @@ from .serializers import (
     CrearVentaSerializer,
     IngresoCompraventaSerializer,
     MovimientoStockSerializer,
+    RestaurarVaciadoSerializer,
     StockProductoSerializer,
     SucursalSerializer,
     TransferenciaStockSerializer,
+    VaciadoStockItemSerializer,
+    VaciadoStockSerializer,
+    VaciarStockSerializer,
     VentaSerializer,
 )
 
@@ -430,3 +444,104 @@ class MovimientoListView(_BaseInventario, generics.ListAPIView):
         except ValueError:
             limite = 100
         return qs[:limite]
+
+
+# ===== Vaciar el stock de una sucursal (y restaurarlo) =====
+
+# Cuantas filas del respaldo viajan en el detalle: alcanzan de sobra para ver
+# QUE se borro (las mas pesadas primero) sin mandar miles de renglones.
+MAX_ITEMS_VACIADO = 200
+
+# Cuantos vaciados devuelve el historial.
+MAX_VACIADOS = 60
+
+
+class VaciarStockView(APIView):
+    """POST /stock/vaciar/: pone en CERO el stock de una o varias sucursales.
+
+    Es una operacion destructiva y masiva: la hace un ADMINISTRADOR (no el
+    mostrador) y pide la palabra de confirmacion tambien del lado del servidor.
+    Antes de tocar nada se guarda el respaldo completo; restaurarlo, en cambio,
+    queda reservado al superadministrador.
+    """
+
+    permission_classes = [EsAdministrador]
+
+    def post(self, request):
+        entrada = VaciarStockSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        datos = entrada.validated_data
+        try:
+            vaciado = vaciar_stock(
+                datos['sucursales'],
+                motivo=datos.get('motivo', ''),
+                usuario=request.user,
+            )
+        except ValidationError as e:
+            return Response({'detail': ' '.join(e.messages)}, status=400)
+        return Response(VaciadoStockSerializer(vaciado).data, status=201)
+
+
+class VaciadosStockView(APIView):
+    """GET /stock/vaciados/: el historial de vaciados, con su estado."""
+
+    permission_classes = [EsAdministrador]
+
+    def get(self, request):
+        qs = (
+            VaciadoStock.objects
+            .select_related('creado_por', 'restaurado_por')
+            .prefetch_related('sucursales')[:MAX_VACIADOS]
+        )
+        return Response(VaciadoStockSerializer(qs, many=True).data)
+
+
+class VaciadoStockDetalleView(APIView):
+    """GET /stock/vaciados/<id>/: que guardo ese vaciado y que hay hoy.
+
+    Es la pantalla previa a restaurar: muestra fila por fila la cantidad
+    guardada contra la actual, y cuantas volvieron a tener stock desde
+    entonces (restaurar «como estaba» pisaria ese conteo nuevo).
+    """
+
+    permission_classes = [EsAdministrador]
+
+    def get(self, request, pk):
+        vaciado = VaciadoStock.objects.filter(pk=pk).first()
+        if vaciado is None:
+            return Response({'detail': 'Ese vaciado no existe.'}, status=404)
+        items = list(vaciado.items.select_related('sucursal')[:MAX_ITEMS_VACIADO])
+        filas, unidades_hoy = conflictos_vaciado(vaciado)
+        contexto = {'actuales': stock_actual_de(items)}
+        return Response({
+            'vaciado': VaciadoStockSerializer(vaciado).data,
+            'items': VaciadoStockItemSerializer(items, many=True, context=contexto).data,
+            'total_items': vaciado.items.count(),
+            'conflictos': filas,
+            'unidades_hoy': unidades_hoy,
+        })
+
+
+class RestaurarVaciadoStockView(APIView):
+    """POST /stock/vaciados/<id>/restaurar/: devuelve el stock guardado.
+
+    SOLO el superadministrador: vaciar es una decision de administracion, pero
+    deshacerla —volver a escribir cantidades sobre todo un local— es del dueño.
+    """
+
+    permission_classes = [EsSuperadministrador]
+
+    def post(self, request, pk):
+        vaciado = VaciadoStock.objects.filter(pk=pk).first()
+        if vaciado is None:
+            return Response({'detail': 'Ese vaciado no existe.'}, status=404)
+        entrada = RestaurarVaciadoSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        try:
+            resultado = restaurar_vaciado(
+                vaciado, usuario=request.user, modo=entrada.validated_data['modo'],
+            )
+        except ValidationError as e:
+            return Response({'detail': ' '.join(e.messages)}, status=400)
+        vaciado.refresh_from_db()
+        return Response({**resultado, 'vaciado': VaciadoStockSerializer(vaciado).data})

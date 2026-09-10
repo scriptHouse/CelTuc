@@ -1,8 +1,10 @@
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 from rest_framework.test import APIClient
 
+from auditoria.models import RegistroAuditoria
 from productos.models import CategoriaProducto, Producto
 from usuarios.models import Permiso, Rol, Usuario
 
@@ -10,10 +12,14 @@ from .models import (
     MovimientoStock,
     StockProducto,
     Sucursal,
+    VaciadoStock,
     Venta,
     aplicar_ajuste,
     aplicar_transferencia,
+    conflictos_vaciado,
     registrar_venta,
+    restaurar_vaciado,
+    vaciar_stock,
 )
 
 
@@ -1758,3 +1764,231 @@ class ExportarEnFormatoImportadorTests(TestCase):
         self.assertEqual(columnas['stock'], 8)      # columna I
         self.assertEqual(columnas['minimo'], 9)     # columna J
         self.assertEqual(columnas['lista'], 4)      # columna E
+
+
+class VaciarStockTests(TestCase):
+    """Vaciar el stock de una sucursal: se borra, queda el respaldo, se restaura."""
+
+    def setUp(self):
+        self.uno = _producto('Vidrio test')
+        self.dos = _producto('Funda test')
+        self.solar = Sucursal.objects.create(nombre='Solar vaciado', orden=1)
+        self.salta = Sucursal.objects.create(nombre='Salta vaciado', orden=2)
+        aplicar_ajuste(self.uno, self.solar, delta=10)
+        aplicar_ajuste(self.dos, self.solar, delta=4)
+        aplicar_ajuste(self.uno, self.salta, delta=7)
+
+    def _cantidad(self, producto, sucursal):
+        return StockProducto.objects.get(producto=producto, sucursal=sucursal).cantidad
+
+    def test_vacia_solo_la_sucursal_elegida(self):
+        vaciado = vaciar_stock([self.solar], motivo='conteo desde cero')
+
+        self.assertEqual(self._cantidad(self.uno, self.solar), 0)
+        self.assertEqual(self._cantidad(self.dos, self.solar), 0)
+        # La otra sucursal ni se entera.
+        self.assertEqual(self._cantidad(self.uno, self.salta), 7)
+        # El catalogo queda intacto: vaciar stock no borra productos.
+        self.assertEqual(Producto.objects.filter(pk__in=[self.uno.pk, self.dos.pk]).count(), 2)
+
+        self.assertEqual(vaciado.productos, 2)
+        self.assertEqual(vaciado.unidades, 14)
+        self.assertEqual(vaciado.sucursales_nombres, 'Solar vaciado')
+        self.assertTrue(vaciado.puede_restaurar)
+
+    def test_guarda_el_respaldo_y_el_kardex(self):
+        vaciado = vaciar_stock([self.solar])
+
+        guardado = {i.producto_id: i.cantidad for i in vaciado.items.all()}
+        self.assertEqual(guardado, {self.uno.id: 10, self.dos.id: 4})
+        self.assertEqual(vaciado.items.first().producto_nombre, 'Vidrio test')
+
+        movimientos = MovimientoStock.objects.filter(
+            sucursal=self.solar, nota__startswith=f'Vaciado #{vaciado.pk}',
+        )
+        self.assertEqual(movimientos.count(), 2)
+        self.assertEqual(sorted(m.delta for m in movimientos), [-10, -4])
+        self.assertTrue(all(m.resultante == 0 for m in movimientos))
+
+    def test_varias_sucursales_de_una(self):
+        vaciado = vaciar_stock([self.solar, self.salta])
+        self.assertEqual(self._cantidad(self.uno, self.salta), 0)
+        self.assertEqual(vaciado.productos, 3)
+        self.assertEqual(vaciado.unidades, 21)
+        self.assertEqual(vaciado.sucursales.count(), 2)
+
+    def test_sin_unidades_no_guarda_respaldo_vacio(self):
+        vaciar_stock([self.solar])
+        with self.assertRaises(ValidationError):
+            vaciar_stock([self.solar])
+        self.assertEqual(VaciadoStock.objects.count(), 1)
+
+    def test_las_filas_en_cero_no_se_tocan(self):
+        # Una fila "(no informado)" no es stock: no entra al respaldo.
+        tres = _producto('Cable test')
+        StockProducto.objects.create(producto=tres, sucursal=self.solar, sin_dato=True)
+        vaciado = vaciar_stock([self.solar])
+        self.assertEqual(vaciado.productos, 2)
+        fila = StockProducto.objects.get(producto=tres, sucursal=self.solar)
+        self.assertTrue(fila.sin_dato)
+
+    def test_restaurar_deja_todo_como_estaba(self):
+        vaciado = vaciar_stock([self.solar])
+        resultado = restaurar_vaciado(vaciado)
+
+        self.assertEqual(self._cantidad(self.uno, self.solar), 10)
+        self.assertEqual(self._cantidad(self.dos, self.solar), 4)
+        self.assertEqual(resultado['unidades'], 14)
+        self.assertEqual(resultado['cambiadas'], 2)
+        vaciado.refresh_from_db()
+        self.assertEqual(vaciado.estado, VaciadoStock.Estado.RESTAURADO)
+        self.assertFalse(vaciado.puede_restaurar)
+        movs = MovimientoStock.objects.filter(nota=f'Restauración del vaciado #{vaciado.pk}')
+        self.assertEqual(movs.count(), 2)
+
+    def test_restaurar_reemplaza_lo_cargado_despues(self):
+        vaciado = vaciar_stock([self.solar])
+        aplicar_ajuste(self.uno, self.solar, delta=3)  # alguien volvio a cargar
+
+        filas, unidades = conflictos_vaciado(vaciado)
+        self.assertEqual((filas, unidades), (1, 3))
+
+        restaurar_vaciado(vaciado)
+        self.assertEqual(self._cantidad(self.uno, self.solar), 10)
+
+    def test_restaurar_sumando(self):
+        vaciado = vaciar_stock([self.solar])
+        aplicar_ajuste(self.uno, self.solar, delta=3)
+
+        restaurar_vaciado(vaciado, modo=VaciadoStock.Modo.SUMAR)
+        self.assertEqual(self._cantidad(self.uno, self.solar), 13)
+        self.assertEqual(self._cantidad(self.dos, self.solar), 4)
+
+    def test_restaurar_recrea_la_fila_borrada(self):
+        vaciado = vaciar_stock([self.solar])
+        fila = StockProducto.objects.get(producto=self.dos, sucursal=self.solar)
+        fila.delete(fisico=True)
+        resultado = restaurar_vaciado(vaciado)
+        self.assertEqual(resultado['recreadas'], 1)
+        self.assertEqual(self._cantidad(self.dos, self.solar), 4)
+
+    def test_no_se_restaura_dos_veces(self):
+        vaciado = vaciar_stock([self.solar])
+        restaurar_vaciado(vaciado)
+        with self.assertRaises(ValidationError):
+            restaurar_vaciado(vaciado)
+
+    def test_el_minimo_configurado_despues_no_se_pisa(self):
+        StockProducto.objects.filter(producto=self.uno, sucursal=self.solar).update(stock_minimo=2)
+        vaciado = vaciar_stock([self.solar])
+        StockProducto.objects.filter(producto=self.uno, sucursal=self.solar).update(stock_minimo=9)
+        restaurar_vaciado(vaciado)
+        fila = StockProducto.objects.get(producto=self.uno, sucursal=self.solar)
+        self.assertEqual(fila.stock_minimo, 9)
+
+
+class VaciarStockApiTests(TestCase):
+    """Permisos: vaciar lo hace un admin; restaurar, SOLO el superadministrador."""
+
+    URL = '/api/inventario/stock/vaciar/'
+
+    def setUp(self):
+        self.producto = _producto('Vidrio api test')
+        self.solar = Sucursal.objects.create(nombre='Solar api', orden=1)
+        aplicar_ajuste(self.producto, self.solar, delta=6)
+
+        self.super = Usuario.objects.create_superuser(
+            email='super@celtuc.test', username='super.vac', password='x',
+        )
+        rol_admin = Rol.objects.create(nombre='Admin vaciado test', es_admin=True)
+        self.admin = Usuario.objects.create_user(
+            email='admin@celtuc.test', username='admin.vac', password='x', rol=rol_admin,
+        )
+        rol = Rol.objects.create(nombre='Mostrador vaciado test')
+        rol.permisos.set(Permiso.objects.filter(codigo='ver_inventario'))
+        self.empleado = Usuario.objects.create_user(
+            email='empleado@celtuc.test', username='empleado.vac', password='x', rol=rol,
+        )
+
+    def _cliente(self, usuario):
+        cliente = APIClient()
+        cliente.force_authenticate(usuario)
+        return cliente
+
+    def _vaciar(self, usuario, **extra):
+        cuerpo = {'sucursales': [self.solar.id], 'confirmacion': 'BORRAR', **extra}
+        return self._cliente(usuario).post(self.URL, cuerpo, format='json')
+
+    def test_admin_vacia(self):
+        r = self._vaciar(self.admin, motivo='mudanza')
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.data['productos'], 1)
+        self.assertEqual(r.data['unidades'], 6)
+        self.assertEqual(r.data['usuario'], 'admin.vac')
+        self.assertIs(r.data['puede_restaurar'], True)
+        self.assertEqual(
+            StockProducto.objects.get(producto=self.producto, sucursal=self.solar).cantidad, 0,
+        )
+
+    def test_empleado_de_mostrador_no_vacia(self):
+        self.assertEqual(self._vaciar(self.empleado).status_code, 403)
+        self.assertEqual(
+            StockProducto.objects.get(producto=self.producto, sucursal=self.solar).cantidad, 6,
+        )
+
+    def test_sin_la_palabra_no_borra(self):
+        r = self._vaciar(self.admin, confirmacion='dale')
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(
+            StockProducto.objects.get(producto=self.producto, sucursal=self.solar).cantidad, 6,
+        )
+
+    def test_sin_sucursales_no_borra(self):
+        r = self._cliente(self.admin).post(
+            self.URL, {'sucursales': [], 'confirmacion': 'BORRAR'}, format='json',
+        )
+        self.assertEqual(r.status_code, 400)
+
+    def test_solo_el_superadministrador_restaura(self):
+        vaciado_id = self._vaciar(self.admin).data['id']
+        url = f'/api/inventario/stock/vaciados/{vaciado_id}/restaurar/'
+
+        self.assertEqual(self._cliente(self.empleado).post(url, {}, format='json').status_code, 403)
+        self.assertEqual(self._cliente(self.admin).post(url, {}, format='json').status_code, 403)
+
+        r = self._cliente(self.super).post(url, {'modo': 'reemplazar'}, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['unidades'], 6)
+        self.assertEqual(r.data['vaciado']['estado'], 'restaurado')
+        self.assertEqual(r.data['vaciado']['restaurado_por_usuario'], 'super.vac')
+        self.assertEqual(
+            StockProducto.objects.get(producto=self.producto, sucursal=self.solar).cantidad, 6,
+        )
+
+    def test_historial_y_detalle_son_de_admin(self):
+        self._vaciar(self.admin)
+        lista = self._cliente(self.admin).get('/api/inventario/stock/vaciados/')
+        self.assertEqual(lista.status_code, 200)
+        self.assertEqual(len(lista.data), 1)
+        self.assertEqual(lista.data[0]['sucursales'], [self.solar.id])
+
+        detalle = self._cliente(self.admin).get(
+            f'/api/inventario/stock/vaciados/{lista.data[0]["id"]}/'
+        )
+        self.assertEqual(detalle.status_code, 200)
+        self.assertEqual(detalle.data['total_items'], 1)
+        self.assertEqual(detalle.data['conflictos'], 0)
+        self.assertEqual(detalle.data['items'][0]['cantidad'], 6)
+        self.assertEqual(detalle.data['items'][0]['cantidad_hoy'], 0)
+
+        self.assertEqual(
+            self._cliente(self.empleado).get('/api/inventario/stock/vaciados/').status_code, 403,
+        )
+
+    def test_queda_una_sola_accion_en_la_auditoria(self):
+        self._vaciar(self.admin)
+        registros = RegistroAuditoria.objects.filter(usuario_username='admin.vac')
+        # El vaciado entero, no un renglon por producto (bulk_create no audita).
+        self.assertEqual(registros.count(), 1)
+        self.assertEqual(registros.first().accion, 'crear')
+        self.assertEqual(registros.first().modelo, 'vaciado de stock')

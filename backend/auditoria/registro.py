@@ -9,6 +9,7 @@ import datetime
 import logging
 
 from django.apps import apps as django_apps
+from django.db import transaction
 from django.db.models.signals import m2m_changed, post_delete, post_save, pre_save
 from django.utils import timezone
 
@@ -39,6 +40,10 @@ AUDITADOS = {
     'inventario.MovimientoStock': {
         'omitir': lambda instancia: instancia.tipo == 'venta',
     },
+    # Vaciar el stock de una sucursal (y restaurarlo) es UNA accion: los miles
+    # de movimientos que genera se escriben con `bulk_create` —sin señales— asi
+    # el historial muestra el vaciado entero, no renglon por renglon.
+    'inventario.VaciadoStock': {},
     'productos.Producto': {},
     'productos.CategoriaProducto': {},
     'productos.ConfiguracionProductos': {},
@@ -134,7 +139,15 @@ def _ip_de(request):
 
 def _escribir(accion, usuario, request=None, instancia=None, cambios=None,
               app='', modelo=''):
-    """Crea un registro. Nunca lanza: la auditoria no rompe la operacion real."""
+    """Crea un registro. Nunca lanza: la auditoria no rompe la operacion real.
+
+    El INSERT va en su propio punto de guardado (`atomic`): si falla —por
+    ejemplo, si la tabla quedo atras respecto del codigo— se deshace solo eso y
+    la transaccion de quien estaba trabajando sigue viva. Sin el savepoint, un
+    error de base "ensucia" la transaccion entera y la operacion observada
+    muere despues con un TransactionManagementError, que es exactamente lo que
+    este try/except promete evitar.
+    """
     from .models import RegistroAuditoria
     try:
         meta = instancia._meta if instancia is not None else None
@@ -142,18 +155,21 @@ def _escribir(accion, usuario, request=None, instancia=None, cambios=None,
         # que paso) pero se guarda TAMBIEN quien estaba detras: una impersonacion
         # sin rastro del actor real seria un agujero de auditoria.
         actor = getattr(usuario, 'impersonado_por', None)
-        return RegistroAuditoria.objects.create(
-            usuario=usuario if getattr(usuario, 'pk', None) else None,
-            usuario_username=getattr(usuario, 'username', '') or '',
-            actor_username=getattr(actor, 'username', '') or '',
-            accion=accion,
-            app=(meta.app_label if meta else app) or '',
-            modelo=(str(meta.verbose_name) if meta else modelo) or '',
-            objeto_id=str(instancia.pk) if instancia is not None and instancia.pk is not None else '',
-            objeto=str(instancia)[:300] if instancia is not None else '',
-            cambios=cambios or {},
-            ip=_ip_de(request),
-        )
+        with transaction.atomic():
+            return RegistroAuditoria.objects.create(
+                usuario=usuario if getattr(usuario, 'pk', None) else None,
+                usuario_username=getattr(usuario, 'username', '') or '',
+                actor_username=getattr(actor, 'username', '') or '',
+                accion=accion,
+                app=(meta.app_label if meta else app) or '',
+                modelo=(str(meta.verbose_name) if meta else modelo) or '',
+                objeto_id=(
+                    str(instancia.pk) if instancia is not None and instancia.pk is not None else ''
+                ),
+                objeto=str(instancia)[:300] if instancia is not None else '',
+                cambios=cambios or {},
+                ip=_ip_de(request),
+            )
     except Exception:
         logger.exception('No se pudo escribir el registro de auditoria.')
         return None

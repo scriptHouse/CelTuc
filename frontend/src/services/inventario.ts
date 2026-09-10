@@ -524,3 +524,108 @@ export function listarMovimientos(params: {
   const sufijo = query.toString() ? `?${query.toString()}` : ''
   return api.get<MovimientoStock[]>(`/inventario/movimientos/${sufijo}`, token())
 }
+
+// ===== Borrar el stock de una sucursal (con respaldo restaurable) =====
+
+/**
+ * La palabra que hay que escribir para confirmar el borrado. La valida TAMBIÉN
+ * el backend: una petición suelta no puede vaciar una sucursal por accidente.
+ */
+export const PALABRA_BORRAR = 'BORRAR'
+
+export type EstadoVaciado = 'guardado' | 'restaurado'
+
+/**
+ * Cómo vuelve el stock al restaurar:
+ * - `reemplazar`: cada producto queda con la cantidad que tenía antes (lo normal).
+ * - `sumar`: lo guardado se SUMA a lo que haya hoy.
+ */
+export type ModoRestauracion = 'reemplazar' | 'sumar'
+
+/** Un borrado masivo ya hecho, con su respaldo. */
+export interface VaciadoStock {
+  id: number
+  sucursales: number[]
+  /** Foto de los nombres al momento de borrar (sobrevive a renombres). */
+  sucursales_nombres: string
+  motivo: string
+  /** Filas (producto × sucursal) que se guardaron. */
+  productos: number
+  unidades: number
+  /** Cuánta plata representaba, a precio de lista del momento. */
+  valor_lista: number
+  estado: EstadoVaciado
+  modo_restauracion: ModoRestauracion | ''
+  creado: string // ISO
+  usuario: string | null
+  restaurado: string | null
+  restaurado_por_usuario: string | null
+  /** Todavía se puede volver atrás (solo lo hace el superadministrador). */
+  puede_restaurar: boolean
+}
+
+/** Una fila del respaldo, con lo que hay HOY en esa misma combinación. */
+export interface ItemVaciado {
+  producto: number
+  producto_nombre: string
+  sucursal: number
+  sucursal_nombre: string
+  /** Lo que había cuando se borró. */
+  cantidad: number
+  /** Lo que hay ahora: si no es 0, alguien volvió a cargar stock. */
+  cantidad_hoy: number
+}
+
+export interface DetalleVaciado {
+  vaciado: VaciadoStock
+  /** Las filas más pesadas del respaldo (el backend acota cuántas manda). */
+  items: ItemVaciado[]
+  total_items: number
+  /** Filas que hoy volvieron a tener stock: restaurar «como estaba» las pisa. */
+  conflictos: number
+  unidades_hoy: number
+}
+
+export interface ResultadoRestauracion {
+  filas: number
+  cambiadas: number
+  recreadas: number
+  unidades: number
+  vaciado: VaciadoStock
+}
+
+/**
+ * Pone en CERO el stock de las sucursales elegidas, guardando antes el respaldo
+ * completo. Lo hace un administrador; el catálogo, los precios y las demás
+ * sucursales no se tocan.
+ */
+export function vaciarStock(input: {
+  sucursales: number[]
+  motivo?: string
+  /** Tiene que ser `PALABRA_BORRAR`. */
+  confirmacion: string
+}): Promise<VaciadoStock> {
+  return api.post<VaciadoStock>('/inventario/stock/vaciar/', input, token())
+}
+
+/** El historial de vaciados (solo admin). */
+export function listarVaciados(): Promise<VaciadoStock[]> {
+  return api.get<VaciadoStock[]>('/inventario/stock/vaciados/', token())
+}
+
+/** Qué guardó un vaciado y qué hay hoy: la pantalla previa a restaurar. */
+export function detalleVaciado(id: number): Promise<DetalleVaciado> {
+  return api.get<DetalleVaciado>(`/inventario/stock/vaciados/${id}/`, token())
+}
+
+/** Devuelve el stock guardado. SOLO el superadministrador (el backend lo exige). */
+export function restaurarVaciado(
+  id: number,
+  input: { modo: ModoRestauracion },
+): Promise<ResultadoRestauracion> {
+  return api.post<ResultadoRestauracion>(
+    `/inventario/stock/vaciados/${id}/restaurar/`,
+    input,
+    token(),
+  )
+}

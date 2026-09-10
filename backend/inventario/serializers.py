@@ -7,7 +7,16 @@ from precios_service.models import ItemService
 from productos.models import CategoriaProducto, Producto
 
 from .importacion import MAX_COLUMNAS, MAX_UNIDADES, precio_planilla
-from .models import ItemVenta, MovimientoStock, PagoVenta, StockProducto, Sucursal, Venta
+from .models import (
+    ItemVenta,
+    MovimientoStock,
+    PagoVenta,
+    StockProducto,
+    Sucursal,
+    VaciadoStock,
+    VaciadoStockItem,
+    Venta,
+)
 
 
 class SucursalSerializer(serializers.ModelSerializer):
@@ -463,3 +472,99 @@ class IngresoCompraventaSerializer(serializers.Serializer):
         if not data['marca'] and not data['modelo']:
             raise serializers.ValidationError('Cargá al menos la marca o el modelo del equipo.')
         return data
+
+
+# ===== Vaciar el stock de una sucursal (con respaldo restaurable) =====
+
+# Palabra que hay que escribir para confirmar el borrado. La pide TAMBIEN el
+# servidor: una peticion suelta no puede vaciar una sucursal por accidente.
+PALABRA_CONFIRMACION = 'BORRAR'
+
+
+class VaciadoStockSerializer(serializers.ModelSerializer):
+    """Un vaciado ya hecho: que se borro, quien y si todavia se puede restaurar."""
+
+    sucursales = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
+    valor_lista = serializers.DecimalField(
+        max_digits=16, decimal_places=2, coerce_to_string=False, read_only=True,
+    )
+    usuario = serializers.SerializerMethodField()
+    restaurado_por_usuario = serializers.SerializerMethodField()
+    puede_restaurar = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = VaciadoStock
+        fields = (
+            'id', 'sucursales', 'sucursales_nombres', 'motivo', 'productos', 'unidades',
+            'valor_lista', 'estado', 'modo_restauracion', 'creado', 'usuario',
+            'restaurado', 'restaurado_por_usuario', 'puede_restaurar',
+        )
+
+    def get_usuario(self, obj):
+        return obj.creado_por.username if obj.creado_por_id else None
+
+    def get_restaurado_por_usuario(self, obj):
+        return obj.restaurado_por.username if obj.restaurado_por_id else None
+
+
+class VaciadoStockItemSerializer(serializers.ModelSerializer):
+    """Una fila del respaldo, con lo que hay HOY en esa combinacion.
+
+    `cantidad_hoy` es lo que permite ver, antes de restaurar, si alguien ya
+    volvio a cargar stock (restaurar «como estaba» pisaria ese conteo).
+    """
+
+    producto = serializers.PrimaryKeyRelatedField(read_only=True)
+    sucursal = serializers.PrimaryKeyRelatedField(read_only=True)
+    sucursal_nombre = serializers.CharField(source='sucursal.nombre', read_only=True)
+    cantidad_hoy = serializers.SerializerMethodField()
+
+    class Meta:
+        model = VaciadoStockItem
+        fields = (
+            'producto', 'producto_nombre', 'sucursal', 'sucursal_nombre',
+            'cantidad', 'cantidad_hoy',
+        )
+
+    def get_cantidad_hoy(self, obj):
+        actuales = self.context.get('actuales') or {}
+        fila = actuales.get((obj.producto_id, obj.sucursal_id))
+        return fila.cantidad if fila is not None else 0
+
+
+class VaciarStockSerializer(serializers.Serializer):
+    """Entrada de POST /stock/vaciar/: que sucursales se ponen en cero.
+
+    Se pueden elegir VARIAS de una (el negocio a veces arranca de cero en mas
+    de un local a la vez). `confirmacion` tiene que ser la palabra BORRAR: es la
+    misma que se escribe en pantalla, verificada tambien del lado del servidor.
+    """
+
+    sucursales = serializers.PrimaryKeyRelatedField(
+        queryset=Sucursal.objects.all(), many=True, allow_empty=False,
+    )
+    motivo = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    confirmacion = serializers.CharField()
+
+    def validate_sucursales(self, value):
+        unicas = list({s.pk: s for s in value}.values())
+        if not unicas:
+            raise serializers.ValidationError('Elegí al menos una sucursal.')
+        return unicas
+
+    def validate_confirmacion(self, value):
+        if (value or '').strip().upper() != PALABRA_CONFIRMACION:
+            raise serializers.ValidationError(
+                f'Para borrar el stock hay que escribir «{PALABRA_CONFIRMACION}».'
+            )
+        return value
+
+
+class RestaurarVaciadoSerializer(serializers.Serializer):
+    """Entrada de POST /stock/vaciados/<id>/restaurar/ (solo superadmin)."""
+
+    modo = serializers.ChoiceField(
+        choices=VaciadoStock.Modo.choices,
+        required=False,
+        default=VaciadoStock.Modo.REEMPLAZAR,
+    )
