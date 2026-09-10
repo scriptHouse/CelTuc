@@ -973,6 +973,33 @@ class PlanillaImportacionTests(TestCase):
         self.assertEqual(fila['categoria_nueva'], 'HERRAMIENTAS QUIRURGICAS')
         self.assertIn('se crea la categoría', fila['motivo'])
 
+    def test_las_categorias_nuevas_salen_con_su_sugerencia(self):
+        """La revision tiene que poder preguntar como se cobra cada una."""
+        # Como queda el catalogo despues de borrarlo para recargarlo de cero.
+        CategoriaProducto.objects.filter(nombre__iexact='Parlantes').borrar()
+        analisis = self.analizar(_planilla([
+            ('PARLANTES', 'Zetatest Parlante JBL', 100, 3, None),
+            ('ZETATEST ACCESORIOS', 'Zetatest Cable 1M - CO', 10, 3, None),
+        ]), self.sucursal)
+        porNombre = {c['nombre']: c for c in analisis['categorias']}
+        self.assertIn('PARLANTES', porNombre)
+        # Parlantes se vende a un solo precio: viene sugerida.
+        self.assertTrue(porNombre['PARLANTES']['solo_lista'])
+        self.assertEqual(porNombre['PARLANTES']['filas'], 1)
+        # La categoria que ya existe no aparece: no hay nada que decidir.
+        self.assertNotIn('ZETATEST ACCESORIOS', porNombre)
+
+    def test_una_categoria_borrada_no_rompe_el_analisis(self):
+        """Sus productos quedan vivos en la tabla pero sin donde ubicarse: antes
+        de esto, el analisis entero se caia con un 500."""
+        CategoriaProducto.objects.filter(pk=self.producto.categoria_id).borrar()
+        analisis = self.analizar(_planilla([
+            ('ZETATEST ACCESORIOS', 'Zetatest Cable 1M - CO', 10, 3, None),
+        ]), self.sucursal)
+        self.assertEqual(len(analisis['filas']), 1)
+        # El producto huerfano no se ofrece como candidato.
+        self.assertIsNone(analisis['filas'][0]['producto'])
+
     def test_el_cero_en_el_precio_no_es_un_precio(self):
         """La planilla escribe 0 en las calidades que no existen para un modelo:
         un 0 cargado dejaria el producto en venta a cero."""
@@ -1641,6 +1668,44 @@ class ImportarStockApiTests(TestCase):
         self.assertTrue(creado.categoria.es_service)
         self.assertIsNone(creado.categoria.padre)
         self.assertEqual(creado.stocks.get(sucursal=self.sucursal).cantidad, 4)
+
+    def test_la_categoria_nueva_puede_nacer_sin_precio_de_contado(self):
+        """Parlantes, consolas y equipos se venden a UN SOLO precio: la lista en
+        dolares pasada a pesos, sin descuento. Quien importa lo confirma."""
+        r = self._cliente(self.admin).post(self.APLICAR, {
+            'sucursal': self.sucursal.id,
+            'items': [{
+                'crear': {
+                    'nombre': 'Zetatest Parlante',
+                    'categoria_nueva': 'Zetatest Parlantes',
+                    'muestra_cash': False,
+                    'lista_usd': '100',
+                },
+                'cantidad': 1,
+            }],
+        }, format='json')
+        self.assertEqual(r.status_code, 200)
+        categoria = CategoriaProducto.objects.get(nombre='Zetatest Parlantes')
+        self.assertFalse(categoria.muestra_cash)
+        # Y el catalogo deja de derivarle el cash: solo lista.
+        from productos.models import ConfiguracionProductos, resolver_precio_producto
+        creado = Producto.objects.get(nombre='Zetatest Parlante')
+        precios = resolver_precio_producto(creado, ConfiguracionProductos.obtener())
+        self.assertEqual(precios['lista_usd'], Decimal('100'))
+        self.assertIsNone(precios['cash_usd'])
+        self.assertIsNone(precios['cash_ars'])
+        self.assertIsNotNone(precios['lista_ars'])
+
+    def test_por_defecto_la_categoria_nueva_tiene_contado(self):
+        r = self._cliente(self.admin).post(self.APLICAR, {
+            'sucursal': self.sucursal.id,
+            'items': [{
+                'crear': {'nombre': 'Zetatest Cable X', 'categoria_nueva': 'Zetatest Cables'},
+                'cantidad': 1,
+            }],
+        }, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(CategoriaProducto.objects.get(nombre='Zetatest Cables').muestra_cash)
 
     def test_dos_filas_de_la_misma_categoria_nueva_no_la_duplican(self):
         r = self._cliente(self.admin).post(self.APLICAR, {

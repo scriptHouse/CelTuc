@@ -64,6 +64,21 @@ MAX_PRECIO = Decimal(10) ** 10
 TIPO_SERVICE = 'service'
 TIPO_MERCADERIA = 'mercaderia'
 
+# Categorias que NO tienen precio de contado: se venden a un solo precio (la
+# lista en dolares pasada a pesos con el dolar del negocio, sin descuento).
+# Es una SUGERENCIA para la pantalla de revision —quien importa la confirma y
+# puede sumar las que quiera—, sacada de como estaban cargadas hasta ahora.
+SIN_CASH_SUGERIDO = frozenset({
+    'parlantes',
+    'consolas',
+    'xiaomi',
+    'samsung',
+    'productos apple',
+    'iphones',
+    'combos promo',
+    'fundas en liquidacion',
+})
+
 
 def _es_amarillo(rgb):
     """Si ese color ARGB/RGB es un amarillo (rojo y verde altos, azul bajo)."""
@@ -591,8 +606,12 @@ class IndiceCatalogo:
         self.dolar = self.config.dolar
         self.categorias = {c.id: c for c in CategoriaProducto.objects.all()}
         self.raices = [c for c in self.categorias.values() if c.padre_id is None]
+        # Se excluyen los productos cuya categoria fue borrada: quedan vivos en
+        # la tabla pero ya no se muestran en ningun lado, y sin su categoria no
+        # hay con que ubicarlos (antes reventaba el analisis entero).
         self.productos = list(
-            Producto.objects.filter(activo=True).select_related('categoria')
+            Producto.objects.filter(activo=True, categoria__borrado=False)
+            .select_related('categoria')
         )
         self.por_clave = defaultdict(list)
         self.ficha = {}
@@ -608,8 +627,12 @@ class IndiceCatalogo:
         self._cache_seccion = {}
 
     def raiz(self, categoria_id):
+        """La categoria de mas arriba de esa rama (la que agrupa en pantalla)."""
         categoria = self.categorias[categoria_id]
-        return self.categorias[categoria.padre_id] if categoria.padre_id else categoria
+        if not categoria.padre_id:
+            return categoria
+        # Si la madre fue borrada, la propia categoria hace de raiz.
+        return self.categorias.get(categoria.padre_id, categoria)
 
     def descuento_cash(self, categoria):
         """El descuento cash efectivo de una categoria, sin ir a la base.
@@ -838,7 +861,7 @@ def analizar(archivo, sucursal, columnas=None):
     filas = []
     resumen = defaultdict(int)
     # Categorias que la planilla trae y el catalogo todavia no tiene.
-    categorias_nuevas = set()
+    categorias_nuevas = {}
     unidades_antes = unidades_despues = 0
     for cruda in crudas:
         cantidad, motivo = _cantidad(cruda['stock_crudo'])
@@ -962,7 +985,14 @@ def analizar(archivo, sucursal, columnas=None):
 
         resumen[fila['estado']] += 1
         if fila['categoria_nueva']:
-            categorias_nuevas.add((fila['categoria_nueva'], fila['es_service']))
+            nueva = categorias_nuevas.setdefault(fila['categoria_nueva'], {
+                'nombre': fila['categoria_nueva'],
+                'es_service': fila['es_service'],
+                'filas': 0,
+                # Sugerencia: si esta categoria se vende a un solo precio.
+                'solo_lista': normalizar(fila['categoria_nueva']) in SIN_CASH_SUGERIDO,
+            })
+            nueva['filas'] += 1
         if fila['estado'] == 'actualiza':
             anterior = fila['cantidad_actual'] or 0
             unidades_antes += anterior
@@ -1001,6 +1031,11 @@ def analizar(archivo, sucursal, columnas=None):
     matcheados = {f['producto'] for f in filas if f['producto']}
     return {
         'filas': filas,
+        # Las categorias que habria que crear, para que quien importa confirme
+        # como se cobra cada una antes de aplicar.
+        'categorias': sorted(
+            categorias_nuevas.values(), key=lambda c: (not c['solo_lista'], c['nombre']),
+        ),
         # De donde salio cada dato y que otras columnas hay: con esto se puede
         # corregir a mano una planilla que venga con otra forma.
         'columnas': {
@@ -1037,7 +1072,9 @@ def analizar(archivo, sucursal, columnas=None):
             'catalogo_sin_planilla': max(len(indice.productos) - len(matcheados), 0),
             # Cuantas categorias se crearian, y cuantas de esas son del taller.
             'categorias_nuevas': len(categorias_nuevas),
-            'categorias_service': sum(1 for _, s in categorias_nuevas if s),
+            'categorias_service': sum(
+                1 for c in categorias_nuevas.values() if c['es_service']
+            ),
             'filas_service': sum(1 for f in filas if f['es_service']),
         },
     }
@@ -1050,8 +1087,9 @@ def _categoria_de_alta(datos, usuario):
 
     La planilla puede traer categorias que el catalogo todavia no tiene (es lo
     que pasa la primera vez, cuando se carga todo desde cero). Se crean como
-    categoria raiz, marcadas segun el color con el que vino el bloque: amarillo
-    es del taller. Si ya existe una con ese nombre se reusa.
+    categoria raiz, marcadas segun el color con el que vino el bloque (amarillo
+    es del taller) y segun lo que se haya confirmado en la revision sobre si
+    tienen precio de contado. Si ya existe una con ese nombre se reusa.
     """
     categoria = datos.get('categoria')
     if categoria is not None:
@@ -1068,6 +1106,9 @@ def _categoria_de_alta(datos, usuario):
     return CategoriaProducto.objects.create(
         nombre=nombre,
         es_service=bool(datos.get('es_service')),
+        # Las que se venden a un solo precio no muestran contado: el cash sale
+        # de la formula y ahi no hay descuento que aplicar.
+        muestra_cash=bool(datos.get('muestra_cash', True)),
         orden=ultimo + 1,
         creado_por=usuario,
         actualizado_por=usuario,

@@ -155,6 +155,11 @@ export interface FilaImportacion {
   producto_detalle: string
   categoria: string
   categoria_id: number | null
+  /** A qué mitad del catálogo va, según el color de su categoría. */
+  tipo: 'service' | 'mercaderia'
+  es_service: boolean
+  /** La categoría que habría que crear (vacío si ya existe). */
+  categoria_nueva: string
   /** Lo que hay hoy en la sucursal (null si el producto no está en el catálogo). */
   cantidad_actual: number | null
   /** Hoy figura como "(no informado)": el 0 no es un conteo. */
@@ -224,6 +229,11 @@ export interface ResumenImportacion {
   unidades_despues: number
   /** Productos del catálogo que la planilla no menciona: quedan como están. */
   catalogo_sin_planilla: number
+  /** Categorías que habría que crear, y cuántas de esas son del taller. */
+  categorias_nuevas: number
+  categorias_service: number
+  /** Filas que van al taller (categoría pintada de amarillo). */
+  filas_service: number
   /** Filas que van a cambiar el precio del catálogo. */
   precio: number
   /** De esas, las que tienen el precio en $ fijado a mano (no se va a ver). */
@@ -248,12 +258,28 @@ export interface ColumnasImportacion {
   disponibles: Array<{ indice: number; letra: string; rotulo: string }>
 }
 
+/**
+ * Una categoría que la planilla trae y el catálogo todavía no tiene. Antes de
+ * aplicar hay que confirmar cómo se cobra: `solo_lista` es la sugerencia del
+ * servidor (parlantes, consolas, Xiaomi, Samsung y Apple se venden a un solo
+ * precio), pero la decide quien importa.
+ */
+export interface CategoriaNuevaImportacion {
+  nombre: string
+  es_service: boolean
+  /** Cuántas filas de la planilla caen en ella. */
+  filas: number
+  solo_lista: boolean
+}
+
 export interface AnalisisImportacion {
   sucursal: number
   sucursal_nombre: string
   archivo: string
   resumen: ResumenImportacion
   columnas: ColumnasImportacion
+  /** Las categorías que habría que crear (vacío si están todas). */
+  categorias: CategoriaNuevaImportacion[]
   filas: FilaImportacion[]
 }
 
@@ -264,12 +290,18 @@ export interface ItemImportacionInput {
   /** O el alta de un producto que la planilla trae y no existe (solo admin). */
   crear?: {
     nombre: string
-    categoria: number
+    categoria?: number | null
     /** Solo la trae MÓDULOS, que reparte las calidades en columnas. */
     calidad?: string
     lista_usd?: string | null
     /** Solo si la planilla no sigue la fórmula de la categoría. */
     cash_usd?: string | null
+    /** Nombre de la categoría a crear, si todavía no existe. */
+    categoria_nueva?: string
+    /** La categoría nueva es del taller (viene pintada de amarillo). */
+    es_service?: boolean
+    /** En falso, la categoría nueva se vende a un solo precio (sin contado). */
+    muestra_cash?: boolean
   }
   /** Omitida, la fila NO toca el stock (así se importa solo el precio). */
   cantidad?: number

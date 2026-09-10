@@ -364,6 +364,9 @@ class ProductoNuevoImportacionSerializer(serializers.Serializer):
         max_length=120, required=False, allow_blank=True, default='',
     )
     es_service = serializers.BooleanField(required=False, default=False)
+    # Si la categoria nueva muestra precio de contado. En falso se vende a un
+    # solo precio: la lista en dolares pasada a pesos, sin descuento.
+    muestra_cash = serializers.BooleanField(required=False, default=True)
     # Solo la trae la planilla que reparte las calidades en columnas (MODULOS):
     # ahi el nombre es el modelo y la calidad es lo que separa un producto del
     # otro. En el resto de las secciones viaja vacia, como hasta ahora.

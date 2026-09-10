@@ -28,6 +28,7 @@ import {
   aplicarImportacionStock,
   type AnalisisImportacion,
   type CampoColumna,
+  type CategoriaNuevaImportacion,
   type ColumnasImportacion,
   type EstadoFilaImportacion,
   type FilaImportacion,
@@ -254,6 +255,10 @@ export function ImportarStockModal({
   const [opciones, setOpciones] = useState<Opciones>(TODO)
   const [columnas, setColumnas] = useState<Record<CampoColumna, number | null> | null>(null)
   const [avanzadas, setAvanzadas] = useState(false)
+  // Las categorías que la planilla trae y hay que crear: cuáles se venden a UN
+  // SOLO PRECIO (sin contado) y si ya se confirmó cómo queda cada una.
+  const [soloLista, setSoloLista] = useState<Record<string, boolean>>({})
+  const [categoriasOk, setCategoriasOk] = useState(false)
 
   const sucursal = sucursales.find((s) => s.id === sucursalId) ?? null
 
@@ -274,6 +279,8 @@ export function ImportarStockModal({
     setOpciones(TODO)
     setColumnas(null)
     setAvanzadas(false)
+    setSoloLista({})
+    setCategoriasOk(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [abierto])
 
@@ -292,6 +299,11 @@ export function ImportarStockModal({
       setDecisiones(iniciales)
       setAnalisis(data)
       setColumnas(elegidas)
+      setSoloLista(
+        Object.fromEntries(data.categorias.map((c) => [c.nombre, c.solo_lista])),
+      )
+      // Cada análisis nuevo se vuelve a confirmar: las categorías pueden ser otras.
+      setCategoriasOk(data.categorias.length === 0)
       setAvance(100)
       // Un respiro para que se vea el 100 % antes de pasar a la revisión.
       setTimeout(() => setPaso('revision'), 350)
@@ -406,6 +418,10 @@ export function ImportarStockModal({
   }, [filas, filtro, busqueda, decisiones])
 
   useEffect(() => setVisibles(PAGINA), [filtro, busqueda])
+
+  // Hay categorías nuevas que crear y todavía no se confirmó cómo se cobran.
+  const faltaConfirmar =
+    admin && opciones.altas && (analisis?.categorias.length ?? 0) > 0 && !categoriasOk
 
   const marcadas = useMemo(
     () => filas.filter((f) => decisiones[f.fila]?.marcada && aplicable(f)),
@@ -536,7 +552,14 @@ export function ImportarStockModal({
             // la calidad en su propia columna (fuera de las dos coinciden con
             // el nombre de la planilla y una calidad vacía).
             nombre: fila.nombre_base,
-            categoria: fila.categoria_id!,
+            categoria: fila.categoria_id,
+            // Si su categoría todavía no existe, viaja para crearla: de qué
+            // lado del catálogo va y si se vende a un solo precio.
+            categoria_nueva: fila.categoria_nueva || undefined,
+            es_service: fila.categoria_nueva ? fila.es_service : undefined,
+            muestra_cash: fila.categoria_nueva
+              ? !soloLista[fila.categoria_nueva]
+              : undefined,
             calidad: fila.calidad,
             // El alta nace con el precio de la planilla (no hay precio anterior
             // que cuidar), salvo que se haya apagado ese dato a propósito.
@@ -828,6 +851,16 @@ export function ImportarStockModal({
                 detalle="quedan como están"
               />
             </div>
+            <CategoriasNuevas
+              categorias={analisis.categorias}
+              soloLista={soloLista}
+              onCambiar={(nombre, valor) =>
+                setSoloLista((prev) => ({ ...prev, [nombre]: valor }))
+              }
+              confirmado={categoriasOk}
+              onConfirmar={setCategoriasOk}
+              activo={admin && opciones.altas}
+            />
             <AvisosImportacion
               resumen={analisis.resumen}
               admin={admin}
@@ -979,7 +1012,17 @@ export function ImportarStockModal({
                 </Button>
                 <Button
                   onClick={() => aplicar.mutate()}
-                  disabled={aplicar.isPending || marcadas.length === 0 || conflictos.length > 0}
+                  disabled={
+                    aplicar.isPending ||
+                    marcadas.length === 0 ||
+                    conflictos.length > 0 ||
+                    faltaConfirmar
+                  }
+                  title={
+                    faltaConfirmar
+                      ? 'Confirmá primero cómo se cobra cada categoría nueva'
+                      : undefined
+                  }
                   className="flex-1 sm:flex-none"
                 >
                   {aplicar.isPending ? (
@@ -1053,6 +1096,111 @@ export function ImportarStockModal({
 }
 
 // ===== Subcomponentes =====
+
+/**
+ * Las categorías que la planilla trae y el catálogo no tiene, con la decisión
+ * que hay que tomar antes de crearlas: **cómo se cobran**.
+ *
+ * Casi todo el catálogo tiene dos precios (lista y contado, con el descuento de
+ * su categoría), pero equipos y consolas se venden a UN SOLO PRECIO: la lista
+ * en dólares pasada a pesos con el dólar del negocio, sin descuento. Vienen
+ * marcadas las de siempre y se puede sumar cualquier otra; hay que confirmar
+ * para poder aplicar, porque una vez creada la categoría el precio ya sale
+ * calculado de una forma o de la otra.
+ */
+function CategoriasNuevas({
+  categorias,
+  soloLista,
+  onCambiar,
+  confirmado,
+  onConfirmar,
+  activo,
+}: {
+  categorias: CategoriaNuevaImportacion[]
+  soloLista: Record<string, boolean>
+  onCambiar: (nombre: string, valor: boolean) => void
+  confirmado: boolean
+  onConfirmar: (valor: boolean) => void
+  /** Se van a crear de verdad (hay altas prendidas y la cuenta es admin). */
+  activo: boolean
+}) {
+  if (categorias.length === 0) return null
+  const marcadas = categorias.filter((c) => soloLista[c.nombre]).length
+
+  return (
+    <div
+      className={cn(
+        'mt-3 rounded-xl border px-3.5 py-3',
+        activo && !confirmado ? 'border-ink-900 bg-ink-50' : 'border-line bg-ink-50/40',
+      )}
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <p className="text-xs font-semibold text-ink-900">
+          {num(categorias.length)} categorías nuevas · cómo se cobran
+        </p>
+        <p className="tnum text-[0.7rem] text-ink-400">
+          {num(marcadas)} a un solo precio · {num(categorias.length - marcadas)} con contado
+        </p>
+      </div>
+      <p className="mt-1 text-[0.7rem] leading-relaxed text-ink-500">
+        Tocá las que se venden a <b>un solo precio</b>: ahí el peso sale de la lista en dólares
+        por el dólar del negocio, sin descuento. En las demás el sistema calcula además el
+        contado con el descuento de la categoría.
+      </p>
+      {!activo && (
+        <p className="mt-1 text-[0.7rem] text-ink-400">
+          Con las altas apagadas no se crea ninguna: esto queda solo como referencia.
+        </p>
+      )}
+
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {categorias.map((c) => {
+          const sola = soloLista[c.nombre] ?? false
+          return (
+            <button
+              key={c.nombre}
+              type="button"
+              onClick={() => onCambiar(c.nombre, !sola)}
+              aria-pressed={sola}
+              disabled={!activo}
+              title={
+                sola
+                  ? `${c.nombre}: un solo precio (sin contado)`
+                  : `${c.nombre}: lista y contado`
+              }
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[0.7rem] font-medium transition-colors disabled:opacity-50',
+                sola
+                  ? 'border-ink-950 bg-ink-950 text-on-ink'
+                  : 'border-line-strong bg-surface text-ink-600 hover:border-ink-300 hover:text-ink-900',
+              )}
+            >
+              {sola && <Check className="h-3 w-3 shrink-0" aria-hidden />}
+              {c.nombre}
+              {c.es_service && <span className="opacity-60">· taller</span>}
+              <span className="tnum opacity-60">{num(c.filas)}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {activo && (
+        <label className="mt-2.5 flex cursor-pointer items-start gap-2.5 border-t border-line pt-2.5">
+          <input
+            type="checkbox"
+            checked={confirmado}
+            onChange={(e) => onConfirmar(e.target.checked)}
+            className="mt-0.5 h-4.5 w-4.5 shrink-0 cursor-pointer rounded border-line-strong text-ink-950 accent-ink-950"
+          />
+          <span className="text-xs leading-relaxed text-ink-700">
+            Confirmo cómo se cobra cada una.{' '}
+            <span className="text-ink-400">Sin esto no se puede aplicar.</span>
+          </span>
+        </label>
+      )}
+    </div>
+  )
+}
 
 /**
  * Lo que hay que saber ANTES de aplicar: qué pasa con los precios, con qué
