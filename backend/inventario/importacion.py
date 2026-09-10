@@ -10,7 +10,13 @@ Dos cuidados que definen el diseño:
 1. **Celda vacia NO es cero.** Si la planilla no informa cantidad, la fila se
    marca `sin_valor` y no se toca el stock. Sin esta regla, importar una
    planilla a medio llenar pondria en cero medio inventario.
-2. **La hoja cambia de forma en el medio.** MODULOS vuelve a escribir el
+2. **El color de la categoria dice a que modulo va.** En la columna A la
+   planilla trae el nombre de la categoria, combinado sobre todo su bloque y
+   PINTADO: amarillo es del taller (baterias, modulos, reparaciones) y
+   cualquier otro color es mercaderia. Con eso, una sola planilla alimenta el
+   catalogo entero y despues se puede filtrar cada cosa por separado. Una
+   planilla sin colores se lee como siempre: todo mercaderia.
+3. **La hoja cambia de forma en el medio.** MODULOS vuelve a escribir el
    encabezado con las columnas corridas y reparte las calidades (CC / CO / CA)
    EN COLUMNAS: cada modelo es un renglon con tres precios y tres stocks. Cada
    encabezado nuevo manda desde su fila hacia abajo y cada calidad sale como su
@@ -50,6 +56,44 @@ MAX_FILAS = 20000
 # El precio de lista del catalogo: dos decimales y diez enteros (max_digits=12).
 CENTAVO = Decimal('0.01')
 MAX_PRECIO = Decimal(10) ** 10
+
+# El color de la celda de la categoria (columna A) dice a que modulo va el
+# bloque. Se compara con tolerancia —no todos los amarillos son el mismo— y
+# cualquier otro color (o ninguno) es mercaderia, que es como se leyeron todas
+# las planillas hasta ahora.
+TIPO_SERVICE = 'service'
+TIPO_MERCADERIA = 'mercaderia'
+
+
+def _es_amarillo(rgb):
+    """Si ese color ARGB/RGB es un amarillo (rojo y verde altos, azul bajo)."""
+    if not isinstance(rgb, str) or len(rgb) < 6:
+        return False
+    try:
+        r, v, a = (int(rgb[-6:][i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return False
+    return r >= 180 and v >= 180 and a <= 140
+
+
+def _tipos_por_color(hoja, filas):
+    """`{numero_de_fila: tipo}` de las filas donde la columna A esta pintada.
+
+    Solo la PRIMERA celda de cada bloque trae el color (la planilla la combina
+    sobre todo el grupo), y esa es justo la fila donde arranca la seccion.
+    """
+    tipos = {}
+    for fila in hoja.iter_rows(min_col=1, max_col=1, max_row=filas):
+        celda = fila[0]
+        relleno = getattr(celda, 'fill', None)
+        if relleno is None or relleno.patternType != 'solid':
+            continue
+        tipos[celda.row] = (
+            TIPO_SERVICE if _es_amarillo(getattr(relleno.fgColor, 'rgb', None))
+            else TIPO_MERCADERIA
+        )
+    return tipos
+
 
 # Abreviaturas de calidad que usa la planilla y el catalogo guarda completas.
 ALIAS_CALIDAD = {
@@ -113,6 +157,18 @@ def _a_decimal(valor):
         return Decimal(str(valor))
     except (InvalidOperation, ValueError, TypeError):
         return None
+
+
+def precio_de_lista(valor):
+    """El precio de una celda de la planilla, o None si no informa uno.
+
+    Ademas de lo que hace `precio_planilla`, trata el CERO como "no aplica":
+    asi marca la planilla las calidades que no existen para un modelo (los
+    modulos vienen con 0 en las que no se hacen). Un cero cargado como precio
+    dejaria un producto en venta a $0.
+    """
+    numero = precio_planilla(valor)
+    return None if numero is not None and numero == 0 else numero
 
 
 def precio_planilla(valor):
@@ -300,8 +356,9 @@ def leer_planilla(archivo, elegidas=None):
 
     Cada fila es un dict con `fila` (numero real en el Excel, para que quien
     revisa pueda ir a buscarla), `seccion`, `nombre`, `nombre_base`, `calidad`,
-    `stock_crudo`, `minimo_crudo`, `lista_usd`, `cash_usd` y `columna_ocupada`
-    (la seccion reusa la columna STOCK para otra cosa).
+    `stock_crudo`, `minimo_crudo`, `lista_usd`, `cash_usd`, `tipo` (del color
+    de su categoria) y `columna_ocupada` (la seccion reusa la columna STOCK
+    para otra cosa).
 
     La hoja puede cambiar de forma en el medio: cada encabezado nuevo manda
     desde su fila hacia abajo y, si abajo reparte las calidades en columnas,
@@ -329,6 +386,7 @@ def leer_planilla(archivo, elegidas=None):
             crudas.append(fila)
             if len(crudas) >= MAX_FILAS:
                 break
+        tipos = _tipos_por_color(hoja, len(crudas))
     finally:
         libro.close()
 
@@ -359,6 +417,8 @@ def leer_planilla(archivo, elegidas=None):
     base = columnas
     filas = []
     seccion = ''
+    # A que modulo va el bloque que se esta leyendo. Sin color, mercaderia.
+    tipo = TIPO_MERCADERIA
     columna_ocupada = False
     # El sub-encabezado aparece JUSTO ANTES del titulo de su seccion, asi que
     # su aviso tiene que sobrevivir a ese cambio de seccion (y solo a ese).
@@ -375,6 +435,7 @@ def leer_planilla(archivo, elegidas=None):
         otro_encabezado = _columnas_de(cruda) if cruda else None
         if etiqueta:
             seccion = etiqueta
+            tipo = tipos.get(numero + 1, TIPO_MERCADERIA)
             # Un titulo nuevo cierra el bloque de calidades y devuelve la hoja a
             # su encabezado de arriba. No cuando el titulo viene en la MISMA
             # fila que el encabezado que abre el bloque: asi lo escribe MODULOS.
@@ -408,7 +469,9 @@ def leer_planilla(archivo, elegidas=None):
             continue
         buscando_calidades = False
         if calidades:
-            filas.extend(_filas_por_calidad(cruda, celda, numero, seccion, nombre, calidades))
+            filas.extend(
+                _filas_por_calidad(cruda, celda, numero, seccion, nombre, calidades, tipo)
+            )
             continue
         filas.append({
             'fila': numero + 1,
@@ -418,14 +481,15 @@ def leer_planilla(archivo, elegidas=None):
             'calidad': '',
             'stock_crudo': celda(cruda, 'stock'),
             'minimo_crudo': celda(cruda, 'minimo'),
-            'lista_usd': precio_planilla(celda(cruda, 'lista')),
-            'cash_usd': precio_planilla(celda(cruda, 'cash')),
+            'lista_usd': precio_de_lista(celda(cruda, 'lista')),
+            'cash_usd': precio_de_lista(celda(cruda, 'cash')),
+            'tipo': tipo,
             'columna_ocupada': columna_ocupada,
         })
     return filas, hoja
 
 
-def _filas_por_calidad(cruda, celda, numero, seccion, nombre, calidades):
+def _filas_por_calidad(cruda, celda, numero, seccion, nombre, calidades, tipo):
     """Una fila de la planilla que trae varias calidades EN COLUMNAS.
 
     Sale una fila por calidad, cada una con su precio y su stock. La calidad que
@@ -435,7 +499,7 @@ def _filas_por_calidad(cruda, celda, numero, seccion, nombre, calidades):
     salidas = []
     for calidad, salto in calidades:
         stock = celda(cruda, 'stock', salto)
-        lista = precio_planilla(celda(cruda, 'lista', salto))
+        lista = precio_de_lista(celda(cruda, 'lista', salto))
         if not _informa(stock):
             # El guion es "no existe", no "conte cero": se lee como celda vacia.
             stock = None
@@ -450,7 +514,8 @@ def _filas_por_calidad(cruda, celda, numero, seccion, nombre, calidades):
             'stock_crudo': stock,
             'minimo_crudo': celda(cruda, 'minimo', salto),
             'lista_usd': lista,
-            'cash_usd': precio_planilla(celda(cruda, 'cash', salto)),
+            'cash_usd': precio_de_lista(celda(cruda, 'cash', salto)),
+            'tipo': tipo,
             'columna_ocupada': False,
         })
     return salidas
@@ -772,6 +837,8 @@ def analizar(archivo, sucursal, columnas=None):
 
     filas = []
     resumen = defaultdict(int)
+    # Categorias que la planilla trae y el catalogo todavia no tiene.
+    categorias_nuevas = set()
     unidades_antes = unidades_despues = 0
     for cruda in crudas:
         cantidad, motivo = _cantidad(cruda['stock_crudo'])
@@ -810,6 +877,13 @@ def analizar(archivo, sucursal, columnas=None):
                 indice.raiz(producto.categoria_id).id if producto is not None
                 else (categoria.id if categoria else None)
             ),
+            # A que modulo va la fila segun el color de su categoria en la
+            # planilla, y —si esa categoria todavia no existe— como crearla.
+            'tipo': cruda['tipo'],
+            'es_service': cruda['tipo'] == TIPO_SERVICE,
+            'categoria_nueva': (
+                cruda['seccion'] if producto is None and categoria is None else ''
+            ),
             'cantidad_actual': actual.cantidad if actual else (0 if producto is not None else None),
             'sin_dato_actual': bool(actual.sin_dato and actual.cantidad == 0) if actual else True,
             'cantidad_nueva': cantidad,
@@ -847,11 +921,19 @@ def analizar(archivo, sucursal, columnas=None):
             )
         elif producto is None:
             fila['estado'] = 'nueva'
-            fila['motivo'] = (
-                'No está en el catálogo.' if categoria else
-                'No está en el catálogo y su sección no coincide con ninguna categoría: '
-                'hay que crearlo a mano.'
-            )
+            if categoria is not None:
+                fila['motivo'] = 'No está en el catálogo.'
+            elif fila['categoria_nueva']:
+                donde = 'del taller' if fila['es_service'] else 'de mercadería'
+                fila['motivo'] = (
+                    f'No está en el catálogo: se da de alta y se crea la categoría '
+                    f'«{fila["categoria_nueva"]}» ({donde}).'
+                )
+            else:
+                fila['motivo'] = (
+                    'No está en el catálogo y la planilla no dice en qué categoría va: '
+                    'hay que crearlo a mano.'
+                )
         elif actual is not None and actual.cantidad == cantidad and not fila['sin_dato_actual'] and (
             minimo is None or actual.stock_minimo == minimo
         ) and not (precio and precio['cambia']):
@@ -872,9 +954,15 @@ def analizar(archivo, sucursal, columnas=None):
         # Marcada por defecto: solo lo que cambia algo y no necesita decision.
         # Lo demas se puede marcar a mano, pero nunca entra solo.
         fila['sugerido'] = fila['estado'] == 'actualiza'
-        fila['puede_crear'] = fila['estado'] == 'nueva' and fila['categoria_id'] is not None
+        # Se puede dar de alta si se sabe donde ponerlo: la categoria del
+        # catalogo, o la que la planilla trae para crear.
+        fila['puede_crear'] = fila['estado'] == 'nueva' and bool(
+            fila['categoria_id'] is not None or fila['categoria_nueva']
+        )
 
         resumen[fila['estado']] += 1
+        if fila['categoria_nueva']:
+            categorias_nuevas.add((fila['categoria_nueva'], fila['es_service']))
         if fila['estado'] == 'actualiza':
             anterior = fila['cantidad_actual'] or 0
             unidades_antes += anterior
@@ -947,16 +1035,50 @@ def analizar(archivo, sucursal, columnas=None):
             'unidades_antes': unidades_antes,
             'unidades_despues': unidades_despues,
             'catalogo_sin_planilla': max(len(indice.productos) - len(matcheados), 0),
+            # Cuantas categorias se crearian, y cuantas de esas son del taller.
+            'categorias_nuevas': len(categorias_nuevas),
+            'categorias_service': sum(1 for _, s in categorias_nuevas if s),
+            'filas_service': sum(1 for f in filas if f['es_service']),
         },
     }
 
 
 # ===== Aplicacion =====
 
+def _categoria_de_alta(datos, usuario):
+    """La categoria del producto que se da de alta: la elegida, o una nueva.
+
+    La planilla puede traer categorias que el catalogo todavia no tiene (es lo
+    que pasa la primera vez, cuando se carga todo desde cero). Se crean como
+    categoria raiz, marcadas segun el color con el que vino el bloque: amarillo
+    es del taller. Si ya existe una con ese nombre se reusa.
+    """
+    categoria = datos.get('categoria')
+    if categoria is not None:
+        return categoria
+    nombre = (datos.get('categoria_nueva') or '').strip()[:120]
+    existente = CategoriaProducto.objects.filter(
+        padre__isnull=True, nombre__iexact=nombre,
+    ).first()
+    if existente is not None:
+        return existente
+    ultimo = CategoriaProducto.objects.filter(padre__isnull=True).aggregate(
+        m=Max('orden'),
+    )['m'] or 0
+    return CategoriaProducto.objects.create(
+        nombre=nombre,
+        es_service=bool(datos.get('es_service')),
+        orden=ultimo + 1,
+        creado_por=usuario,
+        actualizado_por=usuario,
+    )
+
+
 def _crear_producto(datos, usuario):
     """Da de alta en el catalogo un producto que la planilla trae y no existia.
 
-    Nace con lo unico que la planilla sabe: nombre, categoria de su seccion y
+    Nace con lo unico que la planilla sabe: nombre, categoria de su seccion
+    (que se crea si no existe, con el color que traia el bloque) y
     precio de lista en dolares (los demas precios los deriva el catalogo, como
     con cualquier producto). El cash solo se guarda cuando la planilla no sigue
     la formula de su categoria: si coincide, se deja derivar. Se suma la calidad
@@ -964,7 +1086,7 @@ def _crear_producto(datos, usuario):
     ahi si la sabe y sin ella los tres modulos de un mismo modelo serian el
     mismo producto. Lo fino —marca, notas— se completa despues desde Productos.
     """
-    categoria = datos['categoria']
+    categoria = _categoria_de_alta(datos, usuario)
     ultimo = Producto.objects.filter(categoria=categoria).aggregate(m=Max('orden'))['m'] or 0
     return Producto.objects.create(
         categoria=categoria,

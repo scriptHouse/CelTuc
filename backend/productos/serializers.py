@@ -61,7 +61,7 @@ class CategoriaProductoSerializer(serializers.ModelSerializer):
         model = CategoriaProducto
         fields = (
             'id', 'padre', 'nombre', 'nota', 'descuento_cash_pct', 'redondeo_ars',
-            'muestra_cash', 'tarifa_cuotas', 'es_equipo', 'orden', 'activo',
+            'muestra_cash', 'tarifa_cuotas', 'es_equipo', 'es_service', 'orden', 'activo',
             'creado', 'actualizado',
         )
         read_only_fields = ('creado', 'actualizado')

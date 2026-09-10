@@ -28,6 +28,8 @@ export interface CategoriaCatalogoInput {
   muestra_cash?: boolean
   tarifa_cuotas?: 'accesorios' | 'equipos'
   es_equipo?: boolean
+  /** Repuestos y mano de obra del taller: en Inventario se filtran aparte. */
+  es_service?: boolean
   orden?: number
   activo?: boolean
 }

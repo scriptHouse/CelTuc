@@ -354,9 +354,16 @@ class ProductoNuevoImportacionSerializer(serializers.Serializer):
     """El alta de catalogo de una fila que la planilla trae y no existe todavia."""
 
     nombre = serializers.CharField(max_length=200)
+    # La categoria del catalogo o, si la planilla trae una que todavia no
+    # existe, su nombre para crearla (y si es del taller o mercaderia).
     categoria = serializers.PrimaryKeyRelatedField(
         queryset=CategoriaProducto.objects.filter(activo=True),
+        required=False, allow_null=True,
     )
+    categoria_nueva = serializers.CharField(
+        max_length=120, required=False, allow_blank=True, default='',
+    )
+    es_service = serializers.BooleanField(required=False, default=False)
     # Solo la trae la planilla que reparte las calidades en columnas (MODULOS):
     # ahi el nombre es el modelo y la calidad es lo que separa un producto del
     # otro. En el resto de las secciones viaja vacia, como hasta ahora.
@@ -378,6 +385,15 @@ class ProductoNuevoImportacionSerializer(serializers.Serializer):
         if not value:
             raise serializers.ValidationError('El producto necesita un nombre.')
         return value
+
+    def validate(self, data):
+        data['categoria_nueva'] = (data.get('categoria_nueva') or '').strip()
+        if not data.get('categoria') and not data['categoria_nueva']:
+            raise serializers.ValidationError(
+                'El producto nuevo necesita una categoría del catálogo, o el nombre '
+                'de la que hay que crear.'
+            )
+        return data
 
 
 class ItemImportacionSerializer(serializers.Serializer):

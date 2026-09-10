@@ -139,6 +139,16 @@ class CategoriaProducto(ModeloBase):
         default=False,
         help_text='En la Ficha de equipo, sus productos salen como VENTA (no como accesorio compatible).',
     )
+    es_service = models.BooleanField(
+        'es del taller (service)',
+        default=False,
+        help_text=(
+            'Repuestos y mano de obra del taller (baterias, modulos, camaras, '
+            'reparaciones). En Inventario se pueden filtrar aparte de la '
+            'mercaderia. Lo marca solo la importacion de la planilla: en el '
+            'archivo estas categorias vienen pintadas de amarillo.'
+        ),
+    )
     orden = models.PositiveSmallIntegerField('orden', default=0)
     activo = models.BooleanField('activo', default=True)
 

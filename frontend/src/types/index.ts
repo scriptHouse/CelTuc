@@ -615,6 +615,12 @@ export interface CategoriaCatalogo {
   tarifa_cuotas: 'accesorios' | 'equipos'
   /** En la Ficha de equipo sus productos salen como VENTA, no como accesorio. */
   es_equipo: boolean
+  /**
+   * Repuestos y mano de obra del taller (baterías, módulos, reparaciones). En
+   * la planilla estas categorías vienen pintadas de amarillo y en Inventario se
+   * pueden filtrar aparte de la mercadería.
+   */
+  es_service: boolean
   orden: number
   activo: boolean
   creado: string // ISO

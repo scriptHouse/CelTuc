@@ -729,8 +729,11 @@ class SeedInventarioTests(TestCase):
 
 # ===== Importacion de stock por sucursal =====
 
-def _planilla(filas, encabezado=None, dolar=None):
+def _planilla(filas, encabezado=None, dolar=None, amarillas=()):
     """Un .xlsx en memoria con la forma de la planilla del negocio.
+
+    `amarillas` son los nombres de seccion que van PINTADOS de amarillo en la
+    columna A: asi marca la planilla lo que es del taller.
 
     `filas` son tuplas (seccion, producto, lista_usd, stock, minimo) y, si hace
     falta, un sexto valor con el PRECIO CASH USD; un None en `producto` genera
@@ -754,6 +757,13 @@ def _planilla(filas, encabezado=None, dolar=None):
         seccion, producto, lista, stock, minimo = datos[:5]
         cash = datos[5] if len(datos) > 5 else None
         hoja.append([seccion, producto, None, None, lista, cash, None, None, stock, minimo])
+    if amarillas:
+        from openpyxl.styles import PatternFill
+
+        amarillo = PatternFill('solid', fgColor='FFFF00')
+        for fila in range(1, hoja.max_row + 1):
+            if str(hoja.cell(fila, 1).value or '').strip() in amarillas:
+                hoja.cell(fila, 1).fill = amarillo
     buffer = io.BytesIO()
     libro.save(buffer)
     buffer.seek(0)
@@ -923,6 +933,53 @@ class PlanillaImportacionTests(TestCase):
                 f'difiere en {categoria.nombre}',
             )
         self.assertEqual(indice.descuento_cash(hija), Decimal('30'))
+
+    # --- El color de la categoria dice a que modulo va -----------------------
+
+    def test_la_categoria_pintada_de_amarillo_es_del_taller(self):
+        """En la planilla el bloque del taller viene con la columna A amarilla."""
+        analisis = self.analizar(_planilla(
+            [
+                ('ZETATEST TALLER', 'Zetatest Bateria 11', 40, 3, None),
+                ('ZETATEST ACCESORIOS', 'Zetatest Cable 1M - CO', 10, 5, None),
+            ],
+            amarillas=('ZETATEST TALLER',),
+        ), self.sucursal)
+        taller, mercaderia = analisis['filas']
+        self.assertEqual(taller['tipo'], 'service')
+        self.assertTrue(taller['es_service'])
+        self.assertEqual(mercaderia['tipo'], 'mercaderia')
+        self.assertFalse(mercaderia['es_service'])
+        self.assertEqual(analisis['resumen']['filas_service'], 1)
+
+    def test_una_planilla_sin_colores_es_toda_mercaderia(self):
+        """Las planillas de siempre se siguen leyendo igual que antes."""
+        filas = self._filas(_planilla([
+            ('ZETATEST ACCESORIOS', 'Zetatest Cable 1M - CO', 10, 3, None),
+        ]))
+        self.assertEqual(filas[2]['tipo'], 'mercaderia')
+        self.assertFalse(filas[2]['es_service'])
+
+    def test_la_categoria_que_no_existe_se_puede_crear(self):
+        """Con el catalogo vacio, la planilla trae tambien las categorias."""
+        filas = self._filas(_planilla(
+            [('HERRAMIENTAS QUIRURGICAS', 'Zetatest Bateria 12', 40, 3, None)],
+            amarillas=('HERRAMIENTAS QUIRURGICAS',),
+        ))
+        fila = filas[2]
+        self.assertEqual(fila['estado'], 'nueva')
+        self.assertTrue(fila['puede_crear'])
+        self.assertIsNone(fila['categoria_id'])
+        self.assertEqual(fila['categoria_nueva'], 'HERRAMIENTAS QUIRURGICAS')
+        self.assertIn('se crea la categoría', fila['motivo'])
+
+    def test_el_cero_en_el_precio_no_es_un_precio(self):
+        """La planilla escribe 0 en las calidades que no existen para un modelo:
+        un 0 cargado dejaria el producto en venta a cero."""
+        filas = self._filas(_planilla([
+            ('ZETATEST ACCESORIOS', 'Zetatest Cable 1M - CO', 0, 3, None),
+        ]))
+        self.assertIsNone(filas[2]['lista_usd'])
 
     def test_precio_del_excel_llega_redondeado_a_centavos(self):
         """Excel devuelve 7.14 como 7.140000000000001 y el catalogo guarda dos
@@ -1562,6 +1619,55 @@ class ImportarStockApiTests(TestCase):
         }, format='json')
         self.assertEqual(r.status_code, 400)
         self.assertFalse(Producto.objects.filter(nombre='Zetatest Suelto').exists())
+
+    def test_alta_creando_la_categoria_del_taller(self):
+        """La primera carga trae el catalogo entero: productos Y categorias."""
+        r = self._cliente(self.admin).post(self.APLICAR, {
+            'sucursal': self.sucursal.id,
+            'items': [{
+                'crear': {
+                    'nombre': 'Zetatest Bateria 15',
+                    'categoria_nueva': 'Zetatest Baterías',
+                    'es_service': True,
+                    'lista_usd': '90',
+                },
+                'cantidad': 4,
+            }],
+        }, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['creados'], 1)
+        creado = Producto.objects.get(nombre='Zetatest Bateria 15')
+        self.assertEqual(creado.categoria.nombre, 'Zetatest Baterías')
+        self.assertTrue(creado.categoria.es_service)
+        self.assertIsNone(creado.categoria.padre)
+        self.assertEqual(creado.stocks.get(sucursal=self.sucursal).cantidad, 4)
+
+    def test_dos_filas_de_la_misma_categoria_nueva_no_la_duplican(self):
+        r = self._cliente(self.admin).post(self.APLICAR, {
+            'sucursal': self.sucursal.id,
+            'items': [
+                {
+                    'crear': {'nombre': 'Zetatest Uno', 'categoria_nueva': 'Zetatest Repetida'},
+                    'cantidad': 1,
+                },
+                {
+                    'crear': {'nombre': 'Zetatest Dos', 'categoria_nueva': 'Zetatest Repetida'},
+                    'cantidad': 1,
+                },
+            ],
+        }, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(
+            CategoriaProducto.objects.filter(nombre='Zetatest Repetida').count(), 1,
+        )
+
+    def test_un_alta_sin_categoria_ni_nombre_de_categoria_da_400(self):
+        r = self._cliente(self.admin).post(self.APLICAR, {
+            'sucursal': self.sucursal.id,
+            'items': [{'crear': {'nombre': 'Zetatest Sin Casa'}, 'cantidad': 1}],
+        }, format='json')
+        self.assertEqual(r.status_code, 400)
+        self.assertFalse(Producto.objects.filter(nombre='Zetatest Sin Casa').exists())
 
     def test_alta_con_cash_fijado(self):
         r = self._cliente(self.admin).post(self.APLICAR, {

@@ -15,9 +15,12 @@ import {
   Pencil,
   Plus,
   Search,
+  SlidersHorizontal,
   Store,
+  Tag,
   Trash2,
   Upload,
+  X,
 } from 'lucide-react'
 import type { CategoriaCatalogo, ProductoCatalogo } from '@/types'
 import { listarCategorias, listarProductos } from '@/services/productos'
@@ -52,7 +55,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { AyudaInfo } from '@/components/ui/AyudaInfo'
 import { AyudaInventario } from '@/components/AyudaContenidos'
-import { ProductoForm } from '@/components/ProductosManager'
+import { ProductoForm, ProductosManager } from '@/components/ProductosManager'
 import { ImportarStockModal } from '@/components/inventario/ImportarStockModal'
 import { VaciarStockModal } from '@/components/inventario/VaciarStockModal'
 import { ExportarInventarioModal } from '@/components/inventario/exportar/ExportarInventarioModal'
@@ -67,6 +70,19 @@ import { useConfirm } from '@/components/ConfirmProvider'
  */
 
 type SeleccionSucursal = number | 'todas'
+/**
+ * Las dos mitades del catálogo. Las marca la categoría (`es_service`), que a su
+ * vez sale del color con el que viene pintada en la planilla: amarillo es del
+ * taller. Es el filtro grande de la pantalla; todo lo demás afina adentro.
+ */
+type Tipo = 'todo' | 'mercaderia' | 'service'
+
+const TIPOS: Array<{ id: Tipo; label: string; ayuda: string }> = [
+  { id: 'todo', label: 'Todo', ayuda: 'Mercadería y taller juntos' },
+  { id: 'mercaderia', label: 'Mercadería', ayuda: 'Accesorios y equipos que se venden' },
+  { id: 'service', label: 'Service', ayuda: 'Repuestos y mano de obra del taller' },
+]
+
 type Vista = 'con-stock' | 'todos' | 'bajo' | 'no-informado'
 
 const VISTAS: Array<{ id: Vista; label: string }> = [
@@ -134,6 +150,7 @@ export function InventarioPage() {
   }, [activas, sel])
 
   const [q, setQ] = useState('')
+  const [tipo, setTipo] = useState<Tipo>('todo')
   const [cat, setCat] = useState('')
   const [vista, setVista] = useState<Vista>('con-stock')
   const buscando = q.trim() !== ''
@@ -191,9 +208,26 @@ export function InventarioPage() {
     const termino = q.trim()
     return productos.filter((p) => {
       if (!p.activo) return false
-      if (termino && !coincideBusqueda(`${p.nombre} ${p.marca} ${p.calidad}`, termino)) return false
+      const propia = categoriaPorId.get(p.categoria)
+      const raiz = raizDe(propia)
+      // Un solo buscador para todo: nombre, marca, calidad, la nota de la fila
+      // y su categoría. Así "bateria 13 pro" o "funda silicone" caen igual.
+      if (
+        termino &&
+        !coincideBusqueda(
+          `${p.nombre} ${p.marca} ${p.calidad} ${p.nota} ${raiz?.nombre ?? ''} ${
+            propia && propia.id !== raiz?.id ? propia.nombre : ''
+          }`,
+          termino,
+        )
+      ) {
+        return false
+      }
+      if (tipo !== 'todo') {
+        const esService = raiz?.es_service ?? false
+        if (esService !== (tipo === 'service')) return false
+      }
       if (cat) {
-        const raiz = raizDe(categoriaPorId.get(p.categoria))
         if (String(raiz?.id ?? '') !== cat) return false
       }
       // Buscando se recorre TODO el catálogo (para cargar stock de algo nuevo);
@@ -205,7 +239,7 @@ export function InventarioPage() {
       return true
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productos, q, cat, vista, sel, filas, categoriaPorId])
+  }, [productos, q, tipo, cat, vista, sel, filas, categoriaPorId])
 
   const grupos = useMemo(() => {
     const porRaiz = new Map<number, { raiz: CategoriaCatalogo; items: ProductoCatalogo[] }>()
@@ -278,6 +312,9 @@ export function InventarioPage() {
   const [transferencia, setTransferencia] = useState<Contexto | null>(null)
   const [gestionarSucursales, setGestionarSucursales] = useState(false)
   const [nuevoProducto, setNuevoProducto] = useState(false)
+  // El producto al que se le está editando el precio (solo admin).
+  const [precioDe, setPrecioDe] = useState<ProductoCatalogo | null>(null)
+  const [catalogo, setCatalogo] = useState(false)
   const [importar, setImportar] = useState(false)
   const [exportar, setExportar] = useState(false)
   const [vaciar, setVaciar] = useState(false)
@@ -316,10 +353,37 @@ export function InventarioPage() {
     return mapa
   }, [activas, stock])
 
+  // El selector de categoría muestra solo las del tipo elegido: si estás en
+  // Service no tiene sentido ofrecerte "Fundas".
+  const raicesDelTipo = raices.filter(
+    (c) => tipo === 'todo' || c.es_service === (tipo === 'service'),
+  )
   const opcionesCategoria = [
     { value: '', label: 'Todas las categorías' },
-    ...raices.map((c) => ({ value: String(c.id), label: c.nombre })),
+    ...raicesDelTipo.map((c) => ({
+      value: String(c.id),
+      label: tipo === 'todo' && c.es_service ? `${c.nombre} · taller` : c.nombre,
+    })),
   ]
+
+  // Si el tipo cambia y la categoría filtrada ya no pertenece, se limpia sola.
+  useEffect(() => {
+    if (cat && !raicesDelTipo.some((c) => String(c.id) === cat)) setCat('')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tipo, categorias])
+
+  // Cuánto hay de cada lado, para que el segmentado no sea una apuesta a ciegas.
+  const porTipo = useMemo(() => {
+    let mercaderia = 0
+    let service = 0
+    for (const p of productos) {
+      if (!p.activo) continue
+      if (raizDe(categoriaPorId.get(p.categoria))?.es_service) service += 1
+      else mercaderia += 1
+    }
+    return { todo: mercaderia + service, mercaderia, service }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productos, categoriaPorId])
 
   return (
     <div className="animate-fade-in">
@@ -340,6 +404,17 @@ export function InventarioPage() {
                 <PackagePlus className="h-4 w-4" />
                 <span className="lg:hidden">Nuevo</span>
                 <span className="hidden lg:inline">Nuevo producto</span>
+              </Button>
+            )}
+            {admin && (
+              <Button
+                variant="outline"
+                onClick={() => setCatalogo(true)}
+                className="px-3.5 lg:px-5"
+                title="Categorías, descuento de contado y precios del catálogo"
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+                <span className="hidden lg:inline">Catálogo</span>
               </Button>
             )}
             <Button
@@ -425,14 +500,48 @@ export function InventarioPage() {
 
       {/* Controles */}
       <div className="ct-rise mb-2 flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div
+          role="group"
+          aria-label="Qué parte del catálogo mirar"
+          className="flex shrink-0 rounded-xl border border-line bg-canvas/40 p-1"
+        >
+          {TIPOS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTipo(t.id)}
+              aria-pressed={tipo === t.id}
+              title={t.ayuda}
+              className={cn(
+                'h-8 rounded-lg px-3 text-xs font-medium transition-colors',
+                tipo === t.id
+                  ? 'bg-ink-950 text-on-ink shadow-sm'
+                  : 'text-ink-500 hover:bg-ink-100 hover:text-ink-900',
+              )}
+            >
+              {t.label}
+              <span className="tnum ml-1.5 opacity-60">{num(porTipo[t.id])}</span>
+            </button>
+          ))}
+        </div>
         <div className="relative flex-1">
           <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
           <Input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Buscar en todo el catálogo (nombre, marca, calidad)"
+            placeholder="Buscar: nombre, marca, calidad, categoría…"
             className="pl-10"
           />
+          {q && (
+            <button
+              type="button"
+              onClick={() => setQ('')}
+              aria-label="Limpiar la búsqueda"
+              className="absolute right-2.5 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-lg text-ink-400 transition-colors hover:bg-ink-100 hover:text-ink-900"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
         <Select
           options={opcionesCategoria}
@@ -499,8 +608,13 @@ export function InventarioPage() {
           {grupos.map(({ raiz, items }) => (
             <Card key={raiz.id} className="ct-rise overflow-hidden">
               <div className="flex items-baseline justify-between gap-3 border-b border-line px-4 py-3 sm:px-5">
-                <h2 className="min-w-0 truncate text-sm font-semibold uppercase tracking-[0.08em] text-ink-700">
-                  {raiz.nombre}
+                <h2 className="flex min-w-0 items-center gap-2 text-sm font-semibold uppercase tracking-[0.08em] text-ink-700">
+                  <span className="truncate">{raiz.nombre}</span>
+                  {raiz.es_service && (
+                    <Badge tone="outline" className="shrink-0 normal-case tracking-normal">
+                      taller
+                    </Badge>
+                  )}
                 </h2>
                 <span className="tnum shrink-0 text-xs text-ink-400">{num(items.length)}</span>
               </div>
@@ -520,6 +634,7 @@ export function InventarioPage() {
                     }
                     onDetalle={(sucursal) => setDetalle({ producto: p, sucursal })}
                     onTransferir={(sucursal) => setTransferencia({ producto: p, sucursal })}
+                    onPrecio={admin ? () => setPrecioDe(p) : undefined}
                     puedeTransferir={activas.length > 1}
                     estilo={ctStagger(Math.min(i, 14))}
                   />
@@ -530,6 +645,24 @@ export function InventarioPage() {
         </div>
       )}
 
+      <ProductosManager
+        open={catalogo}
+        onClose={() => {
+          setCatalogo(false)
+          queryClient.invalidateQueries({ queryKey: ['productos-items'] })
+          queryClient.invalidateQueries({ queryKey: ['productos-categorias'] })
+        }}
+      />
+      <PrecioProductoModal
+        producto={precioDe}
+        categorias={categorias}
+        productos={productos}
+        onCerrar={() => setPrecioDe(null)}
+        onGuardado={() => {
+          setPrecioDe(null)
+          queryClient.invalidateQueries({ queryKey: ['productos-items'] })
+        }}
+      />
       <DetalleStockModal
         abierto={detalle !== null}
         contexto={detalle}
@@ -779,6 +912,7 @@ function FilaProducto({
   onDelta,
   onDetalle,
   onTransferir,
+  onPrecio,
   puedeTransferir,
   estilo,
 }: {
@@ -791,6 +925,8 @@ function FilaProducto({
   onDelta: (sucursalId: number, delta: number) => void
   onDetalle: (sucursal: Sucursal) => void
   onTransferir: (sucursal: Sucursal) => void
+  /** Editar el precio del producto. Solo llega si la cuenta es admin. */
+  onPrecio?: () => void
   /** Con una sola sucursal no hay a dónde mover: el botón no se muestra. */
   puedeTransferir: boolean
   estilo: React.CSSProperties
@@ -996,6 +1132,14 @@ function FilaProducto({
                   ? `No hay unidades de ${producto.nombre} en ${sucursal.nombre} para mover`
                   : `Mover unidades de ${producto.nombre} desde ${sucursal.nombre} a otra sucursal`
               }
+            />
+          )}
+          {onPrecio && (
+            <BotonAccionFila
+              icono={Tag}
+              texto="Precio"
+              onClick={onPrecio}
+              titulo={`Cambiar el precio en dólares de ${producto.nombre} (los pesos los calcula el sistema)`}
             />
           )}
           <BotonAccionFila
@@ -1725,5 +1869,76 @@ function ListadoSkeleton() {
         ))}
       </div>
     </Card>
+  )
+}
+
+
+/**
+ * Editar el precio de un producto sin salir de Inventario.
+ *
+ * Es el mismo formulario del catálogo: se carga la LISTA EN DÓLARES y el
+ * sistema deriva el resto (cash con el descuento de la categoría, y los pesos
+ * con el dólar del negocio). Los otros tres precios solo se tocan cuando hace
+ * falta clavar una excepción.
+ */
+function PrecioProductoModal({
+  producto,
+  categorias,
+  productos,
+  onCerrar,
+  onGuardado,
+}: {
+  producto: ProductoCatalogo | null
+  categorias: CategoriaCatalogo[]
+  productos: ProductoCatalogo[]
+  onCerrar: () => void
+  onGuardado: () => void
+}) {
+  const { data: dispositivos = [] } = useQuery({
+    queryKey: ['service-dispositivos'],
+    queryFn: listarDispositivos,
+    enabled: producto !== null,
+  })
+
+  const categoria = categorias.find((c) => c.id === producto?.categoria)
+
+  return (
+    <Modal
+      open={producto !== null}
+      onClose={onCerrar}
+      size="xl"
+      labelledBy="precio-producto-titulo"
+    >
+      <div className="border-b border-line px-5 py-4">
+        <h2
+          id="precio-producto-titulo"
+          className="flex items-center gap-2 text-lg font-semibold text-ink-950"
+        >
+          <Tag className="h-4.5 w-4.5 shrink-0 text-ink-500" aria-hidden />
+          {producto?.nombre ?? 'Precio'}
+        </h2>
+        <p className="text-xs text-ink-400">
+          Cargá la lista en dólares: el cash y los pesos se calculan solos con el descuento de la
+          categoría y el dólar del negocio.
+        </p>
+      </div>
+      <div className="max-h-[70vh] overflow-y-auto px-5 py-5">
+        {producto && categoria ? (
+          <ProductoForm
+            key={producto.id}
+            producto={producto}
+            categoria={categoria}
+            productosDeCategoria={productos.filter((p) => p.categoria === categoria.id)}
+            dispositivos={dispositivos}
+            onListo={onGuardado}
+            onCancelar={onCerrar}
+          />
+        ) : (
+          <p className="rounded-xl bg-ink-50 px-3 py-3 text-xs text-ink-400">
+            No se encontró la categoría de este producto.
+          </p>
+        )}
+      </div>
+    </Modal>
   )
 }

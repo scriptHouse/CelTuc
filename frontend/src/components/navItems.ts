@@ -1,4 +1,6 @@
-import { Boxes, Contact, CreditCard, DollarSign, FileText, Fingerprint, History, LayoutDashboard, ReceiptText, ScanSearch, ShoppingBag, Smartphone, UserCog, Users, Wallet, Wrench } from 'lucide-react'
+// ShoppingBag y Wrench quedan fuera junto con sus ítems comentados más abajo
+// (Productos y Service): al descomentarlos, hay que volver a importarlos.
+import { Boxes, Contact, CreditCard, DollarSign, FileText, Fingerprint, History, LayoutDashboard, ReceiptText, ScanSearch, Smartphone, UserCog, Users, Wallet } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 export interface NavItem {
@@ -23,8 +25,13 @@ export const navItems: NavItem[] = [
   { to: '/empleados', label: 'Empleados', icon: Users, permiso: 'ver_empleados' },
   { to: '/simulador', label: 'Simulador', icon: CreditCard, permiso: 'ver_simulador' },
   { to: '/cotizaciones', label: 'Cotizaciones', icon: Smartphone, permiso: 'ver_cotizaciones' },
-  { to: '/service', label: 'Service', icon: Wrench, permiso: 'ver_precios_service' },
-  { to: '/productos', label: 'Productos', icon: ShoppingBag, permiso: 'ver_productos' },
+  // Service y Productos quedan FUERA del sidebar: ahora todo el catálogo se
+  // maneja desde Inventario, que trae las dos mitades (mercadería y taller) en
+  // una sola pantalla y las distingue por el color con el que vienen pintadas
+  // en la planilla. Las pantallas siguen existiendo y sus rutas responden, así
+  // que basta con descomentar estas dos líneas para que vuelvan.
+  // { to: '/service', label: 'Service', icon: Wrench, permiso: 'ver_precios_service' },
+  // { to: '/productos', label: 'Productos', icon: ShoppingBag, permiso: 'ver_productos' },
   { to: '/equipos', label: 'Equipos', icon: ScanSearch, permiso: 'ver_equipos' },
   // Documentos queda visible a toda cuenta autenticada (no tiene permiso de
   // módulo propio). El backend acota lo sensible por su cuenta: en el historial

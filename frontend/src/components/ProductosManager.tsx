@@ -437,6 +437,7 @@ function CategoriaPanel({
               {categoria.padre !== null && ' (subgrupo)'}
               {!categoria.muestra_cash && ' · sin cash'}
               {categoria.es_equipo && ' · venta de equipos'}
+              {categoria.es_service && ' · taller'}
             </p>
           </div>
           <ChevronDown
@@ -552,6 +553,7 @@ function CategoriaForm({
   const [muestraCash, setMuestraCash] = useState(categoria?.muestra_cash ?? true)
   const [tarifa, setTarifa] = useState<'accesorios' | 'equipos'>(categoria?.tarifa_cuotas ?? 'accesorios')
   const [esEquipo, setEsEquipo] = useState(categoria?.es_equipo ?? false)
+  const [esService, setEsService] = useState(categoria?.es_service ?? false)
 
   const raices = categorias.filter((c) => c.padre === null && c.id !== categoria?.id)
 
@@ -563,7 +565,8 @@ function CategoriaForm({
     redondeo !== aTexto(categoria?.redondeo_ars ?? null) ||
     muestraCash !== (categoria?.muestra_cash ?? true) ||
     tarifa !== (categoria?.tarifa_cuotas ?? 'accesorios') ||
-    esEquipo !== (categoria?.es_equipo ?? false)
+    esEquipo !== (categoria?.es_equipo ?? false) ||
+    esService !== (categoria?.es_service ?? false)
 
   const guardar = useMutation({
     mutationFn: (input: CategoriaCatalogoInput) =>
@@ -602,6 +605,7 @@ function CategoriaForm({
       muestra_cash: muestraCash,
       tarifa_cuotas: tarifa,
       es_equipo: esEquipo,
+      es_service: esService,
       ...(modoCreacion ? { orden: ordenSiguiente } : {}),
     })
   }
@@ -672,6 +676,11 @@ function CategoriaForm({
       <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2">
         <CampoBooleano etiqueta="Muestra precio cash" valor={muestraCash} onChange={setMuestraCash} />
         <CampoBooleano etiqueta="Es venta de equipos (Ficha)" valor={esEquipo} onChange={setEsEquipo} />
+        <CampoBooleano
+          etiqueta="Es del taller (service)"
+          valor={esService}
+          onChange={setEsService}
+        />
       </div>
 
       <div className="mt-3.5 flex items-center justify-between gap-2 border-t border-line pt-3">
