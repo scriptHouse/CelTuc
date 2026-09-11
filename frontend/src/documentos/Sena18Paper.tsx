@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { BOX, DATA, DocShell, Field, INK, STD_CONTENT_W, UnderlineLine, pt } from './kit'
 import {
   SENA18_CAMPOS_COLOR,
@@ -86,8 +86,11 @@ export function Sena18Paper({ datos, onChange, readOnly, direccion }: PaperProps
         <span style={{ width: ENTREGA_GAP }} />
         <span style={{ width: PRECIO_W, textAlign: 'center' }}>{SENA18_LABELS.precio}</span>
       </div>
+      {/* Una sola caja de B a I, sin divisiones (como el Excel): el equipo va
+          centrado sobre su columna y el precio sobre la suya. El `padding` deja
+          aire contra los bordes, así ningún texto se come la línea del marco. */}
       <div style={{ height: FILA, display: 'flex', border: `${BOX}px solid ${INK}`, boxSizing: 'border-box' }}>
-        <div style={{ width: ENTREGA_W, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ width: ENTREGA_W, flexShrink: 0, display: 'flex', alignItems: 'center', padding: '0 4px' }}>
           <Desplegable
             value={datos.entrega}
             onChange={set('entrega')}
@@ -95,10 +98,13 @@ export function Sena18Paper({ datos, onChange, readOnly, direccion }: PaperProps
             readOnly={readOnly}
             ariaLabel="Equipo que entrega en parte de pago"
             placeholder="— elegir equipo —"
+            align="center"
           />
         </div>
+        {/* El aire del medio es lo único que cede: así las dos columnas
+            mantienen el ancho exacto que tienen en la grilla del Excel. */}
         <div style={{ width: ENTREGA_GAP }} />
-        <div style={{ width: PRECIO_W, display: 'flex', alignItems: 'center' }}>
+        <div style={{ width: PRECIO_W, flexShrink: 0, display: 'flex', alignItems: 'center', padding: '0 4px' }}>
           <Field value={datos.entregaPrecio} onChange={set('entregaPrecio')} readOnly={readOnly} align="center" ariaLabel="Precio del equipo que entrega" />
         </div>
       </div>
@@ -144,12 +150,18 @@ export function Sena18Paper({ datos, onChange, readOnly, direccion }: PaperProps
  * tiene una línea arriba que la separa de lo anterior.
  */
 function NotaBox({ texto, soloRegla }: { texto: string; soloRegla?: boolean }) {
+  /* El marco se arma en un objeto aparte, con una sola forma de declararlo por
+     caso. NO mezclar `border` con `borderTop` en el mismo objeto de estilo:
+     React aplica las claves en orden y a las que valen `undefined` les asigna
+     '', así que un `borderTop: undefined` BORRA el borde de arriba que acaba de
+     poner el atajo `border` y la caja sale sin tapa. */
+  const marco: CSSProperties = soloRegla
+    ? { borderTop: `1px solid ${INK}`, padding: '5px 0 0' }
+    : { border: `${BOX}px solid ${INK}`, padding: '5px 7px' }
   return (
     <div
       style={{
-        border: soloRegla ? undefined : `${BOX}px solid ${INK}`,
-        borderTop: soloRegla ? `1px solid ${INK}` : undefined,
-        padding: soloRegla ? '5px 0 0' : '5px 7px',
+        ...marco,
         fontSize: pt(10),
         lineHeight: 1.28,
         textAlign: 'justify',

@@ -66,9 +66,11 @@ export const SENA18_W = 776
    Narrow —una tipografía condensada— y las nuestras (Inter en pantalla,
    Helvetica en el PDF) piden un renglón más cada una. Se agranda el papel en
    vez de recortar el texto: la hoja del PDF no cambia, `paginaISO` la
-   dimensiona sola. Las cuatro notas crecen con su contenido, así que el sobrante
-   queda en la caja del pie. */
-export const SENA18_H = 920
+   dimensiona sola.
+   Las tres primeras notas crecen con su contenido; la del pie ocupa lo que
+   sobra, así que este número es el que le da su alto. Está medido para que le
+   quede el mismo aire que en el Excel (~20 px) y no un hueco. */
+export const SENA18_H = 900
 
 export const SENA18_TITULO = 'RECIBO DE SEÑA IPHONE 18'
 
