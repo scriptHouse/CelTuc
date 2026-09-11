@@ -13,6 +13,7 @@ import type { CompraData } from './compraContent'
 import type { MayoristaData } from './mayoristaContent'
 import type { ExtensionData } from './extensionContent'
 import type { SenaData } from './senaContent'
+import type { Sena18Data } from './sena18Content'
 import type { CompraventaData } from './compraventaContent'
 import {
   totalesEquipo,
@@ -129,6 +130,27 @@ export function resumenSena(d: SenaData): ResumenDocumento {
     // campo `total`, que en el papel es el cuadro "SALDO A PAGAR": archivar el
     // saldo mostraria en el historial lo que el cliente todavia NO pagó.
     total: montoDe(d.valorTotal) ?? montoDe(d.laSuma),
+  }
+}
+
+/**
+ * Seña de iPhone 18. Mismo criterio que la seña común: el importe que se
+ * archiva es lo que el cliente YA pagó (la SEÑA), no el SALDO, que es lo que
+ * todavía debe al retirar el equipo.
+ */
+export function resumenSena18(d: Sena18Data): ResumenDocumento {
+  const colores = [d.color1, d.color2, d.color3, d.color4].map((c) => c.trim()).filter(Boolean)
+  return {
+    referencia: d.cupon,
+    cliente: d.recibiDe,
+    clienteDocumento: d.dni,
+    detalle: juntar(
+      d.concepto,
+      d.conceptoExtra,
+      d.entrega.trim() ? `entrega ${d.entrega.trim()}` : '',
+      colores.length ? `colores ${colores.join(' / ')}` : '',
+    ),
+    total: montoDe(d.sena) ?? montoDe(d.laSuma),
   }
 }
 

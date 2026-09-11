@@ -309,6 +309,7 @@ export function DocShell({
   onAnio,
   readOnly,
   garantia,
+  garantiaFontSize,
   firmaIzq,
   firmaDer,
   direccion,
@@ -326,6 +327,8 @@ export function DocShell({
   onAnio: Setter
   readOnly?: boolean
   garantia: Run[]
+  /** Cuerpo del texto legal del pie. Por defecto pt(7), el del Excel nuevo. */
+  garantiaFontSize?: number
   firmaIzq?: string
   firmaDer?: string
   direccion?: string
@@ -352,7 +355,7 @@ export function DocShell({
         <Spacer h={7} />
         {children}
         <Spacer h={10} />
-        <GarantiaBox runs={garantia} fontSize={pt(7)} />
+        <GarantiaBox runs={garantia} fontSize={garantiaFontSize ?? pt(7)} />
         <Spacer h={8} />
         <FirmaBlock izq={firmaIzq} der={firmaDer} />
       </Body>

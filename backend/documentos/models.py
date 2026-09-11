@@ -35,6 +35,7 @@ TIPOS = {
     'compra-mayorista': 'Compra mayorista',
     'extension-garantia': 'Extensión de garantía',
     'sena': 'Seña',
+    'sena-iphone-18': 'Seña iPhone 18',
     'compraventa': 'Compra / Venta',
     'garantia-accesorios': 'Garantía de accesorios',
 }

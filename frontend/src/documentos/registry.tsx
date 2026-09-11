@@ -11,6 +11,8 @@ import { ExtensionPaper } from './ExtensionPaper'
 import { EXT_H, EXT_W, extensionVacia, type ExtensionData } from './extensionContent'
 import { SenaPaper } from './SenaPaper'
 import { SENA_H, SENA_W, senaVacia, type SenaData } from './senaContent'
+import { Sena18Paper } from './Sena18Paper'
+import { SENA18_H, SENA18_W, sena18Vacia, type Sena18Data } from './sena18Content'
 import { CompraventaPaper } from './CompraventaPaper'
 import { CV_H, CV_W, compraventaVacia, type CompraventaData } from './compraventaContent'
 import { GarantiaAccPaper } from './GarantiaAccPaper'
@@ -36,6 +38,7 @@ import {
   resumenRecepcion,
   resumenReparacion,
   resumenSena,
+  resumenSena18,
   resumenVacio,
 } from './resumen'
 
@@ -142,6 +145,22 @@ export const senaModule: DocModule<SenaData> = {
   loadXlsx: async () => (await import('./senaXlsx')).construirSenaXlsx,
 }
 
+export const sena18Module: DocModule<Sena18Data> = {
+  id: 'sena-iphone-18',
+  nombre: 'Seña iPhone 18',
+  descripcion: 'Recibo de seña de un iPhone 18: seña y saldo, equipo en parte de pago y colores elegidos.',
+  naturalW: SENA18_W,
+  naturalH: SENA18_H,
+  crearVacio: sena18Vacia,
+  nombreArchivo: (d) => (d.cupon.trim() ? `sena-iphone-18-${d.cupon.trim()}` : 'sena-iphone-18'),
+  resumen: resumenSena18,
+  camposCliente: { nombre: 'recibiDe', documento: 'dni' },
+  cuponAuto: 'cupon',
+  Paper: Sena18Paper,
+  loadPdf: async () => (await import('./Sena18Pdf')).Sena18Pdf,
+  loadXlsx: async () => (await import('./sena18Xlsx')).construirSena18Xlsx,
+}
+
 export const compraventaModule: DocModule<CompraventaData> = {
   id: 'compraventa',
   nombre: 'Compra / Venta',
@@ -220,6 +239,7 @@ export const DOC_MODULES: DocModule<any>[] = [
   mayoristaModule,
   extensionModule,
   senaModule,
+  sena18Module,
   compraventaModule,
   garantiaAccModule,
 ]

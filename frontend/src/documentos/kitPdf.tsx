@@ -171,6 +171,7 @@ export function PdfDocShell({
   mes,
   anio,
   garantia,
+  garantiaFontSize,
   firmaIzq,
   firmaDer,
   direccion,
@@ -183,6 +184,8 @@ export function PdfDocShell({
   mes: string
   anio: string
   garantia: Run[]
+  /** Cuerpo del texto legal del pie. Por defecto pt(7), el del Excel nuevo. */
+  garantiaFontSize?: number
   firmaIzq?: string
   firmaDer?: string
   direccion?: string
@@ -201,7 +204,7 @@ export function PdfDocShell({
             <PdfGap h={7} />
             {children}
             <PdfGap h={10} />
-            <PdfGarantia runs={garantia} fontSize={pt(7)} />
+            <PdfGarantia runs={garantia} fontSize={garantiaFontSize ?? pt(7)} />
             <PdfGap h={8} />
             <PdfFirmaBlock izq={firmaIzq} der={firmaDer} />
           </PdfBody>
