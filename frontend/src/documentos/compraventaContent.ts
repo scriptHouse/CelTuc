@@ -154,13 +154,22 @@ export const CV_CARACTERISTICAS: CaracteristicaCV[] = [
 const CV_CARACT_BLOQUE_H = 126
 export const CV_CARACT_FILA_H = CV_CARACT_BLOQUE_H / CV_CARACTERISTICAS.length
 
-/** Pie de firmas tal cual el Excel nuevo. */
+/**
+ * Pie de firmas.
+ *
+ * El COMPRADOR va a la derecha y el VENDEDOR a la izquierda: la derecha es el
+ * lado que ya viene firmado y aclarado de fábrica (CelTuc, que es siempre el
+ * comprador de estos usados), y la izquierda la que firma a mano el cliente,
+ * de quien el formulario pide nombre y DNI (`nombreVendedor`, `dniVendedor`).
+ * Si se invierten las etiquetas, la firma preimpresa queda del lado del
+ * vendedor y el contrato dice lo contrario de lo que pasa en el mostrador.
+ */
 export const CV_FIRMAS = {
-  firmaIzq: 'FIRMA COMPRADOR',
-  firmaDer: 'FIRMA VENDEDOR',
-  aclaracionIzq: 'ACLARACION COMPRADOR',
-  aclaracionDer: 'ACLARACION VENDEDOR',
-  /** Aclaración preimpresa en el Excel nuevo. */
+  firmaIzq: 'FIRMA VENDEDOR',
+  firmaDer: 'FIRMA COMPRADOR',
+  aclaracionIzq: 'ACLARACION VENDEDOR',
+  aclaracionDer: 'ACLARACION COMPRADOR',
+  /** Aclaración preimpresa: acompaña a la firma preimpresa, o sea al comprador. */
   aclaracionDerValor: 'ESTEBAN NICOLAS PADROS',
 } as const
 
