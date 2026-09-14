@@ -14,7 +14,7 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 
 from comun.models import ModeloBase
-from inventario.models import Venta
+from inventario.models import Sucursal, Venta
 
 # Un solo vocabulario de medios para ventas y arqueo.
 MedioPago = Venta.FormaPago
@@ -54,6 +54,14 @@ class ConfiguracionCaja(ModeloBase):
         'fondo sugerido ($)', max_digits=12, decimal_places=2, default=Decimal('10000'),
     )
     denominaciones = models.JSONField('denominaciones', default=_denominaciones_default)
+    # Apagado (como siempre): las cajas son del negocio entero y reciben las
+    # ventas de todas las sucursales. Prendido: cada sucursal que tiene caja
+    # cierra la suya; las de una sucursal sin caja no entran a ningun arqueo.
+    # Se cambia con `configurar_por_sucursal`, nunca a mano (valida turnos).
+    por_sucursal = models.BooleanField(
+        'caja por sucursal', default=False,
+        help_text='Cada sucursal cierra su propia caja (con sus dos cajas fiscales).',
+    )
 
     class Meta:
         db_table = 'caja_configuracion'
@@ -89,6 +97,14 @@ class Caja(ModeloBase):
         'canal fiscal', max_length=20, choices=Canal.choices, blank=True, default='',
         help_text='Que ventas entran solas a esta caja segun como se facturan.',
     )
+    # De que sucursal es el cajon. Vacia = caja COMPARTIDA por todo el negocio
+    # (como fueron siempre). Con la caja por sucursal prendida, solo las cajas
+    # de la sucursal de la venta la reciben. No se cambia despues de creada:
+    # sus turnos y cierres son de esa sucursal.
+    sucursal = models.ForeignKey(
+        Sucursal, on_delete=models.PROTECT, null=True, blank=True,
+        related_name='cajas', verbose_name='sucursal',
+    )
     orden = models.PositiveSmallIntegerField('orden', default=0)
     activa = models.BooleanField('activa', default=True)
 
@@ -97,22 +113,42 @@ class Caja(ModeloBase):
         verbose_name = 'caja'
         verbose_name_plural = 'cajas'
         ordering = ('orden', 'nombre')
+        # Los nombres y los canales son unicos DENTRO de su ambito: entre las
+        # compartidas, o entre las cajas de una misma sucursal (asi Solar y
+        # Salta pueden tener cada una su «Facturación RI»). Van de a pares
+        # porque en SQL dos NULL no chocan en un indice unico.
         constraints = [
             models.UniqueConstraint(
                 fields=('nombre',),
-                condition=models.Q(borrado=False),
+                condition=models.Q(borrado=False, sucursal__isnull=True),
                 name='uq_caja_viva',
             ),
-            # Un solo cajon por canal fiscal: si hubiera dos, el enrutamiento
-            # de ventas seria ambiguo.
+            models.UniqueConstraint(
+                fields=('sucursal', 'nombre'),
+                condition=models.Q(borrado=False, sucursal__isnull=False),
+                name='uq_caja_viva_sucursal',
+            ),
+            # Un solo cajon por canal fiscal en cada ambito: si hubiera dos,
+            # el enrutamiento de ventas seria ambiguo.
             models.UniqueConstraint(
                 fields=('canal',),
-                condition=models.Q(borrado=False) & ~models.Q(canal=''),
+                condition=(
+                    models.Q(borrado=False, sucursal__isnull=True) & ~models.Q(canal='')
+                ),
                 name='uq_canal_caja_viva',
+            ),
+            models.UniqueConstraint(
+                fields=('sucursal', 'canal'),
+                condition=(
+                    models.Q(borrado=False, sucursal__isnull=False) & ~models.Q(canal='')
+                ),
+                name='uq_canal_caja_viva_sucursal',
             ),
         ]
 
     def __str__(self):
+        if self.sucursal_id:
+            return f'{self.nombre} · {self.sucursal}'
         return self.nombre
 
 
@@ -217,6 +253,8 @@ class CierreCaja(ModeloBase):
         SesionCaja, on_delete=models.PROTECT, related_name='cierre', verbose_name='turno',
     )
     caja_nombre = models.CharField('caja (al cierre)', max_length=120)
+    # Foto de la sucursal de la caja al cerrar (vacia = caja compartida).
+    sucursal_nombre = models.CharField('sucursal (al cierre)', max_length=120, blank=True)
 
     ventas_por_medio = models.JSONField('ventas por medio', default=_dict_medios)
     operaciones_por_medio = models.JSONField('operaciones por medio', default=_dict_medios)
@@ -290,6 +328,18 @@ def resumen_sesion(sesion):
     }
 
 
+def _config_bloqueada():
+    """La configuracion con lock de fila (dentro de una transaccion).
+
+    Todo lo que depende del modo (abrir un turno, cambiar el modo, dar o quitar
+    la caja de una sucursal) toma PRIMERO este lock y despues el de las cajas:
+    asi dos operaciones cruzadas no se bloquean mutuamente, y un turno no puede
+    abrirse justo mientras se cambia el modo.
+    """
+    config = ConfiguracionCaja.instancia()
+    return ConfiguracionCaja.objects.select_for_update().get(pk=config.pk)
+
+
 def abrir_caja(caja, *, fondo_inicial, conteo_apertura=None, nota_apertura='', usuario=None):
     """Abre el turno de una caja declarando el fondo. Una sola sesion abierta por caja."""
     fondo = Decimal(str(fondo_inicial))
@@ -298,6 +348,19 @@ def abrir_caja(caja, *, fondo_inicial, conteo_apertura=None, nota_apertura='', u
     if not caja.activa:
         raise ValidationError('Esa caja esta desactivada.')
     with transaction.atomic():
+        config = _config_bloqueada()
+        # Solo se abren las cajas del modo vigente: una caja que no recibe
+        # ventas tendria un arqueo que nunca cuadra con lo vendido.
+        if config.por_sucursal and caja.sucursal_id is None:
+            raise ValidationError(
+                'Cada sucursal tiene su propia caja: las cajas compartidas de antes ya no '
+                'se abren. Abri la caja de tu sucursal.'
+            )
+        if not config.por_sucursal and caja.sucursal_id is not None:
+            raise ValidationError(
+                'Esa caja es de una sucursal y la caja por sucursal esta apagada: '
+                'se trabaja con las cajas compartidas.'
+            )
         # Serializa aperturas concurrentes sobre la misma caja.
         Caja.objects.select_for_update().get(pk=caja.pk)
         if SesionCaja.objects.filter(caja=caja, estado=SesionCaja.Estado.ABIERTA).exists():
@@ -369,17 +432,32 @@ CANAL_POR_FACTURACION = {
 }
 
 
-def caja_para_facturacion(facturacion):
-    """La caja del canal fiscal indicado, si el local tiene cajas con canal."""
+def cajas_del_ambito(sucursal=None, *, config=None):
+    """Las cajas (vivas, activas o no) que atienden las ventas de una sucursal.
+
+    Con la caja por sucursal apagada son las COMPARTIDAS (sin sucursal), sin
+    importar de que sucursal sea la venta: el comportamiento de siempre. Con el
+    modo prendido son solo las de esa sucursal (ninguna, si no tiene caja).
+    """
+    config = config or ConfiguracionCaja.instancia()
+    if not config.por_sucursal:
+        return Caja.objects.filter(sucursal__isnull=True)
+    if sucursal is None:
+        return Caja.objects.none()
+    return Caja.objects.filter(sucursal=sucursal)
+
+
+def caja_para_facturacion(facturacion, sucursal=None):
+    """La caja del canal fiscal indicado, si el ambito tiene cajas con canal."""
     canal = CANAL_POR_FACTURACION.get(facturacion)
     if not canal:
         return None
-    return Caja.objects.filter(canal=canal, activa=True).first()
+    return cajas_del_ambito(sucursal).filter(canal=canal, activa=True).first()
 
 
 def caja_para_venta(venta):
     """La caja del canal fiscal de la venta (su facturacion principal)."""
-    return caja_para_facturacion(venta.facturacion)
+    return caja_para_facturacion(venta.facturacion, venta.sucursal)
 
 
 def registrar_venta_en_caja(venta, *, caja=None, usuario=None):
@@ -398,9 +476,21 @@ def registrar_venta_en_caja(venta, *, caja=None, usuario=None):
     vez de mezclar la plata en el cajon equivocado. Sin cajas con canal vale el
     comportamiento historico: la `caja` indicada o la unica sesion abierta. La
     venta vale igual en todos los casos (el stock ya se desconto).
+
+    Con la caja por sucursal prendida todo lo anterior pasa DENTRO de las cajas
+    de la sucursal de la venta: la plata de Salta nunca cae en un cajon de
+    Solar. Si la sucursal no tiene caja, la venta no se anota y se avisa.
     """
     if venta.total is None or venta.total <= 0:
         return [], []
+
+    config = ConfiguracionCaja.instancia()
+    ambito = cajas_del_ambito(venta.sucursal, config=config)
+    if config.por_sucursal and not ambito.filter(activa=True).exists():
+        return [], [
+            f'La sucursal "{venta.sucursal.nombre}" no tiene caja: '
+            'la venta no entra en ningun arqueo.'
+        ]
 
     items = list(venta.items.select_related('producto')[:4])
     # `detalle` del item sirve para las tres clases de renglon (mercaderia,
@@ -418,15 +508,17 @@ def registrar_venta_en_caja(venta, *, caja=None, usuario=None):
         partes = [(None, venta.forma_pago, venta.facturacion, venta.total)]
 
     # La sesion de respaldo (sin cajas con canal fiscal): la indicada o la unica
-    # abierta. Se calcula una sola vez para todas las partes.
+    # abierta, siempre dentro del ambito. Se calcula una sola vez para todas las
+    # partes.
     def _sesion_de_respaldo():
         sesion = None
+        abiertas_del_ambito = SesionCaja.objects.filter(
+            estado=SesionCaja.Estado.ABIERTA, caja__in=ambito,
+        )
         if caja is not None:
-            sesion = SesionCaja.objects.filter(
-                caja=caja, estado=SesionCaja.Estado.ABIERTA,
-            ).first()
+            sesion = abiertas_del_ambito.filter(caja=caja).first()
         if sesion is None:
-            abiertas = list(SesionCaja.objects.filter(estado=SesionCaja.Estado.ABIERTA)[:2])
+            abiertas = list(abiertas_del_ambito[:2])
             if len(abiertas) == 1:
                 sesion = abiertas[0]
         return sesion
@@ -434,14 +526,17 @@ def registrar_venta_en_caja(venta, *, caja=None, usuario=None):
     movimientos = []
     avisos = []
     for indice, (pago, medio, facturacion, monto) in enumerate(partes, start=1):
-        caja_canal = caja_para_facturacion(facturacion)
+        canal = CANAL_POR_FACTURACION.get(facturacion)
+        caja_canal = ambito.filter(canal=canal, activa=True).first() if canal else None
         if caja_canal is not None:
             sesion = SesionCaja.objects.filter(
                 caja=caja_canal, estado=SesionCaja.Estado.ABIERTA,
             ).first()
             if sesion is None:
+                # `str` suma la sucursal («Facturación RI · Salta»); en una caja
+                # compartida es solo el nombre, como siempre.
                 avisos.append(
-                    f'La caja "{caja_canal.nombre}" no tiene turno abierto: '
+                    f'La caja "{caja_canal}" no tiene turno abierto: '
                     'abrila para que esta venta entre a su arqueo.'
                 )
                 continue
@@ -535,6 +630,7 @@ def cerrar_caja(sesion, *, contado_por_medio, conteo_cierre=None, fondo_siguient
             numero=numero,
             sesion=sesion,
             caja_nombre=sesion.caja.nombre,
+            sucursal_nombre=sesion.caja.sucursal.nombre if sesion.caja.sucursal_id else '',
             ventas_por_medio={m: float(v) for m, v in resumen['ventas_por_medio'].items()},
             operaciones_por_medio=resumen['operaciones_por_medio'],
             ingresos=resumen['ingresos'],
@@ -557,3 +653,143 @@ def cerrar_caja(sesion, *, contado_por_medio, conteo_cierre=None, fondo_siguient
         sesion.actualizado_por = usuario
         sesion.save(update_fields=['estado', 'actualizado_por'])
         return cierre
+
+
+# ===== Caja por sucursal =====
+
+# Las dos cajas que recibe cada sucursal con caja (mismos nombres y orden que
+# las compartidas sembradas en la migracion 0004).
+CAJAS_FISCALES = (
+    (Caja.Canal.FACTURA_RI, 'Facturación RI', 0),
+    (Caja.Canal.GENERAL, 'Monotributo y sin factura', 1),
+)
+
+
+def _nombres_de_turnos(sesiones):
+    return ', '.join(f'«{s.caja}»' for s in sesiones)
+
+
+def _nombre_libre(sucursal, nombre):
+    """`nombre`, o con un numero al final si esa sucursal ya tiene una caja asi."""
+    candidato, n = nombre, 2
+    while Caja.objects.filter(sucursal=sucursal, nombre__iexact=candidato).exists():
+        candidato, n = f'{nombre} {n}', n + 1
+    return candidato
+
+
+def _habilitar(sucursal, usuario):
+    """Deja activas las dos cajas fiscales de la sucursal (las crea si faltan)."""
+    for canal, nombre, orden in CAJAS_FISCALES:
+        caja = Caja.objects.select_for_update().filter(sucursal=sucursal, canal=canal).first()
+        if caja is None:
+            Caja.objects.create(
+                sucursal=sucursal,
+                canal=canal,
+                nombre=_nombre_libre(sucursal, nombre),
+                orden=orden,
+                activa=True,
+                creado_por=usuario,
+                actualizado_por=usuario,
+            )
+        elif not caja.activa:
+            caja.activa = True
+            caja.actualizado_por = usuario
+            caja.save(update_fields=['activa', 'actualizado_por'])
+
+
+def _deshabilitar(sucursal, usuario):
+    """Desactiva las cajas de la sucursal (nunca las borra: tienen historial)."""
+    cajas = list(Caja.objects.select_for_update().filter(sucursal=sucursal, activa=True))
+    abiertas = list(
+        SesionCaja.objects.filter(caja__in=cajas, estado=SesionCaja.Estado.ABIERTA)
+        .select_related('caja', 'caja__sucursal')
+    )
+    if abiertas:
+        raise ValidationError(
+            f'«{sucursal.nombre}» tiene turnos abiertos ({_nombres_de_turnos(abiertas)}): '
+            'cerralos antes de quitarle la caja.'
+        )
+    for caja in cajas:
+        caja.activa = False
+        caja.actualizado_por = usuario
+        caja.save(update_fields=['activa', 'actualizado_por'])
+
+
+def sucursal_tiene_caja(sucursal):
+    """Una sucursal tiene caja si le queda al menos una caja activa."""
+    return Caja.objects.filter(sucursal=sucursal, activa=True).exists()
+
+
+def habilitar_caja_sucursal(sucursal, *, usuario=None):
+    """Le da caja a una sucursal: sus dos cajas fiscales, nuevas o reactivadas."""
+    if not sucursal.activa:
+        raise ValidationError('Esa sucursal esta desactivada.')
+    with transaction.atomic():
+        _config_bloqueada()
+        _habilitar(sucursal, usuario)
+
+
+def deshabilitar_caja_sucursal(sucursal, *, usuario=None):
+    """Le quita la caja a una sucursal (sin turnos abiertos): sus ventas dejan de
+    entrar a un arqueo. Las cajas quedan desactivadas con todo su historial."""
+    with transaction.atomic():
+        _config_bloqueada()
+        _deshabilitar(sucursal, usuario)
+
+
+def configurar_por_sucursal(*, activar, sucursales=None, usuario=None):
+    """Prende o apaga la caja por sucursal. Devuelve la configuracion.
+
+    El cambio de modo exige que no quede ningun turno abierto en las cajas del
+    modo que se deja: un turno siempre empieza y termina con las mismas reglas,
+    asi su arqueo cuadra con lo que vendio.
+
+    Al prender, `sucursales` (si viene) dice cuales tienen caja: esas quedan con
+    sus dos cajas fiscales y las demas sin caja. Sin lista, si ninguna sucursal
+    tiene caja todavia, se les da a todas las activas (despues se apaga la que
+    no corresponda). Al apagar, las cajas de las sucursales quedan como estan
+    (en pausa) y las ventas vuelven a las compartidas; si no queda ninguna
+    compartida activa, se reactivan (o se crean) las dos fiscales.
+    """
+    with transaction.atomic():
+        config = _config_bloqueada()
+        if activar:
+            abiertas = list(
+                SesionCaja.objects.filter(
+                    estado=SesionCaja.Estado.ABIERTA, caja__sucursal__isnull=True,
+                ).select_related('caja')
+            )
+            if abiertas:
+                raise ValidationError(
+                    'Antes de separar las cajas por sucursal, cerra los turnos abiertos de '
+                    f'{_nombres_de_turnos(abiertas)}.'
+                )
+            if sucursales is not None:
+                elegidas = {s.pk for s in sucursales}
+                for sucursal in Sucursal.objects.filter(pk__in=elegidas, activa=True):
+                    _habilitar(sucursal, usuario)
+                otras = Sucursal.objects.filter(cajas__activa=True, cajas__borrado=False)
+                for sucursal in otras.exclude(pk__in=elegidas).distinct():
+                    _deshabilitar(sucursal, usuario)
+            elif not Caja.objects.filter(sucursal__isnull=False, activa=True).exists():
+                for sucursal in Sucursal.objects.filter(activa=True):
+                    _habilitar(sucursal, usuario)
+        else:
+            abiertas = list(
+                SesionCaja.objects.filter(
+                    estado=SesionCaja.Estado.ABIERTA, caja__sucursal__isnull=False,
+                ).select_related('caja', 'caja__sucursal')
+            )
+            if abiertas:
+                raise ValidationError(
+                    'Antes de volver a las cajas compartidas, cerra los turnos abiertos de '
+                    f'{_nombres_de_turnos(abiertas)}.'
+                )
+            if not Caja.objects.filter(sucursal__isnull=True, activa=True).exists():
+                _habilitar(None, usuario)
+
+        if config.por_sucursal != activar:
+            config.por_sucursal = activar
+            config.actualizado_por = usuario
+            config.save(update_fields=['por_sucursal', 'actualizado_por'])
+        return config

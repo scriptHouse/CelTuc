@@ -5,6 +5,7 @@ import type {
   MedioPagoCaja,
   MovimientoCaja,
   SesionCaja,
+  SucursalCaja,
 } from '@/types'
 import { MEDIOS_PAGO_CAJA } from '@/types'
 import type { AbrirCajaInput, CerrarCajaInput, EstadoCaja, MovimientoInput } from '@/services/caja'
@@ -51,11 +52,14 @@ function seed(): SandboxDB {
       exigirLote: true,
       fondoSugerido: 10000,
       denominaciones: [20000, 10000, 2000, 1000, 500, 200, 100],
+      porSucursal: false,
     },
     caja: {
       id: 'practica',
       nombre: 'Caja de práctica',
       canal: '',
+      sucursalId: null,
+      sucursalNombre: null,
       activa: true,
       creadaEn: new Date().toISOString(),
     },
@@ -84,6 +88,11 @@ export async function obtenerConfigCaja(): Promise<CajaConfig> {
 export async function listarCajas(): Promise<CajaRegistradora[]> {
   await wait()
   return [{ ..._db.caja }]
+}
+
+/** El sandbox tiene una sola caja compartida: no hay sucursales que elegir. */
+export async function listarSucursalesCaja(): Promise<SucursalCaja[]> {
+  return []
 }
 
 export async function cajasConTurnoAbierto(): Promise<string[]> {

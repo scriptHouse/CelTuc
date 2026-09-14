@@ -30,7 +30,7 @@ import type { CerrarCajaInput } from '@/services/caja'
 import { DenomGrid } from '@/components/caja/DenomGrid'
 import { DiffChip } from '@/components/caja/DiffChip'
 import { CierreDetalleModal } from '@/components/caja/CierreDetalleModal'
-import { MEDIO_ICONO, MEDIO_LABEL, operacionesLabel, totalConteo } from '@/components/caja/medios'
+import { MEDIO_ICONO, MEDIO_LABEL, nombreCaja, operacionesLabel, totalConteo } from '@/components/caja/medios'
 
 /**
  * El Ritual: cierre de caja guiado en 3 actos — Revisar → Contar → Confirmar —
@@ -170,7 +170,7 @@ export function CierreWizard({
           </span>
           <h2 className="mt-5 text-xl font-bold tracking-[-0.02em] text-ink-950">Caja cerrada</h2>
           <p className="tnum mt-1 text-xs uppercase tracking-[0.14em] text-ink-400">
-            Comprobante {zNum(resultado.numero)} · {caja.nombre}
+            Comprobante {zNum(resultado.numero)} · {nombreCaja(caja)}
           </p>
 
           <div className="mt-6 grid grid-cols-2 gap-2.5 text-left">
@@ -225,7 +225,7 @@ export function CierreWizard({
         <div className="min-w-0">
           <span className="mb-1.5 flex items-center gap-2 text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-ink-400">
             <span aria-hidden className="h-px w-5 rounded-full bg-ink-300" />
-            Cierre de caja · {caja.nombre} · turno #{sesion.numero}
+            Cierre de caja · {nombreCaja(caja)} · turno #{sesion.numero}
           </span>
           <h1 className="text-balance text-2xl font-bold tracking-[-0.02em] text-ink-950">
             {TITULOS[paso].titulo}

@@ -10,6 +10,7 @@ import {
   FlaskConical,
   Lock,
   LockOpen,
+  MapPin,
   Plus,
   Receipt,
   ScrollText,
@@ -48,7 +49,7 @@ import { AperturaModal, type AperturaValues } from '@/components/caja/AperturaMo
 import { MovimientoModal, type MovimientoValues } from '@/components/caja/MovimientoModal'
 import { CierreDetalleModal } from '@/components/caja/CierreDetalleModal'
 import { DiffChip } from '@/components/caja/DiffChip'
-import { CANAL_ICONO, CANAL_RESUMEN, FACTURACION_LABEL, MEDIO_ICONO, MEDIO_LABEL, TIPO_MOV_ICONO, operacionesLabel, signoMovimiento } from '@/components/caja/medios'
+import { CANAL_ICONO, CANAL_RESUMEN, FACTURACION_LABEL, MEDIO_ICONO, MEDIO_LABEL, TIPO_MOV_ICONO, nombreCaja, operacionesLabel, signoMovimiento } from '@/components/caja/medios'
 import { MEDIOS_PAGO_CAJA } from '@/types'
 import {
   ExportarTablaModal,
@@ -64,6 +65,9 @@ import {
  */
 
 const zNum = (n: number) => `Z-${String(n).padStart(4, '0')}`
+
+/** Valor del filtro de sucursal para los cierres de las cajas compartidas. */
+const COMPARTIDAS = 'compartidas'
 
 function horaDe(iso: string): string {
   return new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
@@ -89,6 +93,15 @@ const GESTOR_EXPORT_CIERRES: GestorExport<CierreCaja> = {
   columnas: [
     { id: 'comprobante', label: 'Comprobante', corto: 'Z', tipo: 'texto', peso: 11, valor: (c) => zNum(c.numero) },
     { id: 'caja', label: 'Caja', tipo: 'texto', peso: 16, valor: (c) => c.cajaNombre },
+    {
+      id: 'sucursal',
+      label: 'Sucursal',
+      tipo: 'texto',
+      peso: 13,
+      opcional: true,
+      ayuda: 'Vacío en los cierres de las cajas compartidas por todo el negocio.',
+      valor: (c) => c.sucursalNombre ?? '',
+    },
     { id: 'cierre', label: 'Cierre', tipo: 'fechahora', peso: 17, valor: (c) => c.cerradaEn },
     { id: 'cerrado_por', label: 'Responsable', tipo: 'texto', peso: 14, valor: (c) => c.cerradoPor },
     {
@@ -156,6 +169,7 @@ const GESTOR_EXPORT_CIERRES: GestorExport<CierreCaja> = {
   ],
   grupos: [
     { id: 'caja', label: 'Caja', valor: (c) => c.cajaNombre },
+    { id: 'sucursal', label: 'Sucursal', valor: (c) => c.sucursalNombre || 'Compartida' },
     { id: 'responsable', label: 'Responsable', valor: (c) => c.cerradoPor },
   ],
 }
@@ -183,17 +197,48 @@ export function CajaPage() {
   const { data: abiertas = [] } = useQuery({ queryKey: [kp, 'abiertas'], queryFn: () => svc.cajasConTurnoAbierto() })
   const { data: cierres = [], isLoading: cargandoCierres } = useQuery({ queryKey: [kp, 'cierres'], queryFn: () => svc.listarCierres() })
 
+  // --- Caja por sucursal ---------------------------------------------------------
+  // Con el modo prendido, cada sucursal cierra su propio cajón: primero se elige
+  // la sucursal (arranca en la del empleado) y después la caja. Apagado, todo
+  // sigue como siempre con las cajas compartidas.
+
+  const porSucursal = Boolean(config?.porSucursal)
+  const { data: sucursales = [], isLoading: cargandoSucursales } = useQuery({
+    queryKey: [kp, 'sucursales'],
+    queryFn: () => svc.listarSucursalesCaja(),
+    enabled: porSucursal,
+  })
+  const sucursalesConCaja = useMemo(() => sucursales.filter((s) => s.tieneCaja), [sucursales])
+  const sucursalDelUsuario = usuario?.sucursal?.id != null ? String(usuario.sucursal.id) : ''
+
+  const [sucursalId, setSucursalId] = useState('')
+  useEffect(() => {
+    if (!porSucursal || sucursalesConCaja.length === 0) return
+    if (sucursalesConCaja.some((s) => s.id === sucursalId)) return
+    const propia = sucursalesConCaja.find((s) => s.id === sucursalDelUsuario)
+    setSucursalId((propia ?? sucursalesConCaja[0]).id)
+  }, [porSucursal, sucursalesConCaja, sucursalId, sucursalDelUsuario])
+
+  const sinSucursalesConCaja = porSucursal && !cargandoSucursales && sucursalesConCaja.length === 0
+
   const cajasVisibles = useMemo(() => {
-    const activas = cajas.filter((c) => c.activa)
+    const activas = cajas.filter(
+      (c) => c.activa && (porSucursal ? c.sucursalId === sucursalId : !c.sucursalId),
+    )
     if (!config?.multiCaja) return activas.slice(0, 1)
     return activas
-  }, [cajas, config])
+  }, [cajas, config, porSucursal, sucursalId])
 
   const [cajaId, setCajaId] = useState('')
   useEffect(() => {
-    if (cajasVisibles.length === 0) return
+    if (cajasVisibles.length === 0) {
+      // Sin cajas para mostrar (p. ej. ninguna sucursal tiene caja): se suelta
+      // la selección, así no queda en pantalla el turno de una caja de otro lado.
+      if (!practica && config && !cargandoCajas && cajaId) setCajaId('')
+      return
+    }
     if (!cajasVisibles.some((c) => c.id === cajaId)) setCajaId(cajasVisibles[0].id)
-  }, [cajasVisibles, cajaId])
+  }, [cajasVisibles, cajaId, practica, config, cargandoCajas])
 
   const cajaActual = cajasVisibles.find((c) => c.id === cajaId) ?? null
 
@@ -261,6 +306,7 @@ export function CajaPage() {
   const [detalle, setDetalle] = useState<CierreCaja | null>(null)
   const [q, setQ] = useState('')
   const [filtroCaja, setFiltroCaja] = useState('')
+  const [filtroSucursal, setFiltroSucursal] = useState('')
   const [exportarAbierto, setExportarAbierto] = useState(false)
 
   function entrarPractica() {
@@ -298,19 +344,30 @@ export function CajaPage() {
     movimientos: MovimientoCaja[]
   } | null>(null)
 
+  /** Las sucursales que aparecen en el historial (para filtrar los Z). */
+  const sucursalesDeCierres = useMemo(() => {
+    const mapa = new Map<string, string>()
+    for (const c of cierres) if (c.sucursalId) mapa.set(c.sucursalId, c.sucursalNombre ?? '')
+    return [...mapa].map(([id, nombre]) => ({ id, nombre }))
+  }, [cierres])
+  const hayCierresCompartidos = cierres.some((c) => !c.sucursalId)
+
   const cierresFiltrados = useMemo(() => {
     const term = q.trim()
     return cierres.filter((c) => {
       const matchTerm =
         !term ||
         coincideBusqueda(
-          `${zNum(c.numero)} ${c.cajaNombre} ${c.cerradoPor} ${c.abiertaPor} ${c.motivoDiferencia ?? ''}`,
+          `${zNum(c.numero)} ${c.cajaNombre} ${c.sucursalNombre ?? ''} ${c.cerradoPor} ${c.abiertaPor} ${c.motivoDiferencia ?? ''}`,
           term,
         )
       const matchCaja = !filtroCaja || c.cajaId === filtroCaja
-      return matchTerm && matchCaja
+      const matchSucursal =
+        !filtroSucursal ||
+        (filtroSucursal === COMPARTIDAS ? !c.sucursalId : c.sucursalId === filtroSucursal)
+      return matchTerm && matchCaja && matchSucursal
     })
-  }, [cierres, q, filtroCaja])
+  }, [cierres, q, filtroCaja, filtroSucursal])
 
   async function handleAbrir(values: AperturaValues) {
     if (!cajaActual) return
@@ -387,7 +444,11 @@ export function CajaPage() {
     )
   }
 
-  const cargando = !config || cargandoCajas || (Boolean(cajaId) && cargandoEstado)
+  const cargando =
+    !config ||
+    cargandoCajas ||
+    (porSucursal && cargandoSucursales) ||
+    (Boolean(cajaId) && cargandoEstado)
 
   return (
     <div className="animate-fade-in">
@@ -450,7 +511,58 @@ export function CajaPage() {
       ) : (
         /* Venta de mostrador: descuenta stock Y entra sola al arqueo de la caja
            que corresponde según cómo se factura (una sola carga). */
-        <VentaRapida cajaId={cajaId || undefined} cajas={cajasVisibles} cajasAbiertas={abiertas} />
+        <VentaRapida
+          cajaId={cajaId || undefined}
+          // Todas las cajas activas: la venta puede ser de otra sucursal que la
+          // que se está mirando, y el destino se calcula con la de la venta.
+          cajas={cajas.filter((c) => c.activa)}
+          cajasAbiertas={abiertas}
+          porSucursal={porSucursal}
+          sucursalInicial={porSucursal && sucursalId ? sucursalId : undefined}
+        />
+      )}
+
+      {/* Caja por sucursal: primero la sucursal (con un punto verde si alguna
+         de sus cajas tiene turno abierto), después sus cajas. */}
+      {porSucursal && sucursalesConCaja.length > 0 && (
+        <div className="ct-rise mb-5">
+          <p className="mb-2.5 text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-ink-400">
+            ¿De qué sucursal es la caja?
+          </p>
+          <div role="tablist" aria-label="Sucursales" className="flex flex-wrap gap-2">
+            {sucursalesConCaja.map((s, i) => {
+              const activa = s.id === sucursalId
+              const abierta = cajas.some((c) => c.sucursalId === s.id && abiertas.includes(c.id))
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={activa}
+                  onClick={() => setSucursalId(s.id)}
+                  className={cn(
+                    'ct-stagger-item inline-flex h-10 items-center gap-2 rounded-full px-4 text-sm font-semibold transition-all duration-150',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 focus-visible:ring-offset-2',
+                    activa
+                      ? 'bg-ink-950 text-on-ink shadow-[0_8px_20px_rgba(10,10,11,0.2)]'
+                      : 'border border-line-strong bg-surface text-ink-600 hover:border-ink-300 hover:bg-ink-50',
+                  )}
+                  style={ctStagger(i)}
+                >
+                  <MapPin className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+                  {s.nombre}
+                  {abierta && (
+                    <span className="relative inline-flex h-2 w-2" title="Tiene un turno abierto">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500/60" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                      <span className="sr-only">(turno abierto)</span>
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </div>
       )}
 
       {/* Selector de cajas: una tarjeta grande por caja, con su canal fiscal
@@ -539,6 +651,27 @@ export function CajaPage() {
       {/* Estado del turno */}
       {cargando ? (
         <EstadoSkeleton />
+      ) : sinSucursalesConCaja ? (
+        <div className="mb-8">
+          <EmptyState
+            className="ct-rise"
+            icon={MapPin}
+            title="Ninguna sucursal tiene caja"
+            description={
+              admin
+                ? 'Cada sucursal cierra su propia caja: elegí en «Configurar» cuáles la tienen.'
+                : 'Cada sucursal cierra su propia caja, y todavía ninguna tiene una. Pedíselo a un administrador.'
+            }
+            action={
+              admin ? (
+                <Button onClick={() => setConfigAbierta(true)}>
+                  <SlidersHorizontal className="h-4 w-4" />
+                  Configurar
+                </Button>
+              ) : undefined
+            }
+          />
+        </div>
       ) : sesion && resumen && cajaActual ? (
         <>
           <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -681,7 +814,7 @@ export function CajaPage() {
           <EmptyState
             className="ct-rise"
             icon={Wallet}
-            title={`${cajaActual?.nombre ?? 'Caja'} está cerrada`}
+            title={`${cajaActual ? nombreCaja(cajaActual) : 'Caja'} está cerrada`}
             description={
               ultimoCierre
                 ? `El último cierre (${zNum(ultimoCierre.numero)}) dejó ${money(ultimoCierre.fondoSiguiente)} de fondo en caja.`
@@ -722,9 +855,22 @@ export function CajaPage() {
               className="pl-10"
             />
           </div>
+          {sucursalesDeCierres.length > 0 && (
+            <Select
+              options={[
+                { value: '', label: 'Todas las sucursales' },
+                ...sucursalesDeCierres.map((s) => ({ value: s.id, label: s.nombre })),
+                ...(hayCierresCompartidos ? [{ value: COMPARTIDAS, label: 'Cajas compartidas' }] : []),
+              ]}
+              value={filtroSucursal}
+              onChange={setFiltroSucursal}
+              placeholder="Sucursal"
+              className="sm:w-52"
+            />
+          )}
           {config?.multiCaja && cajas.length > 1 && (
             <Select
-              options={[{ value: '', label: 'Todas las cajas' }, ...cajas.map((c) => ({ value: c.id, label: c.nombre }))]}
+              options={[{ value: '', label: 'Todas las cajas' }, ...cajas.map((c) => ({ value: c.id, label: nombreCaja(c) }))]}
               value={filtroCaja}
               onChange={setFiltroCaja}
               placeholder="Caja"
@@ -783,7 +929,12 @@ export function CajaPage() {
                           <p className="tnum font-semibold text-ink-950">{zNum(c.numero)}</p>
                           <p className="tnum text-xs text-ink-400">turno #{c.sesionNumero}</p>
                         </td>
-                        <td className="px-4 py-3 text-ink-600">{c.cajaNombre}</td>
+                        <td className="px-4 py-3 text-ink-600">
+                          {c.cajaNombre}
+                          {c.sucursalNombre && (
+                            <p className="text-xs text-ink-400">{c.sucursalNombre}</p>
+                          )}
+                        </td>
                         <td className="tnum px-4 py-3 text-ink-600">{fechaHora(c.cerradaEn)}</td>
                         <td className="px-4 py-3 text-ink-600">{c.cerradoPor}</td>
                         <td className="tnum px-4 py-3 text-right font-semibold text-ink-900">
@@ -810,7 +961,11 @@ export function CajaPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="tnum font-semibold text-ink-950">
-                          {zNum(c.numero)} <span className="font-normal text-ink-400">· {c.cajaNombre}</span>
+                          {zNum(c.numero)}{' '}
+                          <span className="font-normal text-ink-400">
+                            · {c.cajaNombre}
+                            {c.sucursalNombre ? ` · ${c.sucursalNombre}` : ''}
+                          </span>
                         </p>
                         <p className="tnum mt-0.5 text-xs text-ink-400">
                           {fechaHora(c.cerradaEn)} · {c.cerradoPor}
@@ -872,6 +1027,15 @@ export function CajaPage() {
         filasTodas={cierres}
         contextoVista={[
           ...(q.trim() ? [`Búsqueda: «${q.trim()}»`] : []),
+          ...(filtroSucursal
+            ? [
+                `Sucursal: ${
+                  filtroSucursal === COMPARTIDAS
+                    ? 'cajas compartidas'
+                    : (sucursalesDeCierres.find((s) => s.id === filtroSucursal)?.nombre ?? filtroSucursal)
+                }`,
+              ]
+            : []),
           ...(filtroCaja ? [`Caja: ${cajas.find((c) => c.id === filtroCaja)?.nombre ?? filtroCaja}`] : []),
           ...(practica ? ['Modo práctica (datos de mentira)'] : []),
         ]}

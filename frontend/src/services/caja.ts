@@ -6,6 +6,7 @@ import type {
   MedioPagoCaja,
   MovimientoCaja,
   SesionCaja,
+  SucursalCaja,
   TipoMovimientoCaja,
 } from '@/types'
 import { MEDIOS_PAGO_CAJA } from '@/types'
@@ -45,15 +46,27 @@ interface ConfigDTO {
   exigir_lote: boolean
   fondo_sugerido: number
   denominaciones: number[]
+  por_sucursal: boolean
 }
 
 interface CajaDTO {
   id: number
   nombre: string
   canal: string
+  sucursal: number | null
+  sucursal_nombre: string | null
   orden: number
   activa: boolean
   creado: string
+}
+
+interface SucursalCajaDTO {
+  id: number
+  nombre: string
+  orden: number
+  activa: boolean
+  tiene_caja: boolean
+  turno_abierto: boolean
 }
 
 interface SesionDTO {
@@ -88,6 +101,8 @@ interface CierreDTO {
   numero: number
   caja: number
   caja_nombre: string
+  sucursal: number | null
+  sucursal_nombre: string
   sesion: number
   sesion_numero: number
   abierta_en: string
@@ -125,6 +140,7 @@ function mapConfig(dto: ConfigDTO): CajaConfig {
     exigirLote: dto.exigir_lote,
     fondoSugerido: Number(dto.fondo_sugerido),
     denominaciones: dto.denominaciones.map(Number),
+    porSucursal: Boolean(dto.por_sucursal),
   }
 }
 
@@ -133,8 +149,20 @@ function mapCaja(dto: CajaDTO): CajaRegistradora {
     id: String(dto.id),
     nombre: dto.nombre,
     canal: (dto.canal as CajaRegistradora['canal']) || '',
+    sucursalId: dto.sucursal != null ? String(dto.sucursal) : null,
+    sucursalNombre: dto.sucursal_nombre ?? null,
     activa: dto.activa,
     creadaEn: dto.creado,
+  }
+}
+
+function mapSucursal(dto: SucursalCajaDTO): SucursalCaja {
+  return {
+    id: String(dto.id),
+    nombre: dto.nombre,
+    activa: dto.activa,
+    tieneCaja: dto.tiene_caja,
+    turnoAbierto: dto.turno_abierto,
   }
 }
 
@@ -174,6 +202,8 @@ function mapCierre(dto: CierreDTO): CierreCaja {
     numero: dto.numero,
     cajaId: String(dto.caja),
     cajaNombre: dto.caja_nombre,
+    sucursalId: dto.sucursal != null ? String(dto.sucursal) : undefined,
+    sucursalNombre: dto.sucursal_nombre || undefined,
     sesionId: String(dto.sesion),
     sesionNumero: dto.sesion_numero,
     abiertaEn: dto.abierta_en,
@@ -219,6 +249,35 @@ export async function guardarConfigCaja(input: Partial<CajaConfig>): Promise<Caj
   return mapConfig(await api.patch<ConfigDTO>('/caja/config/', body, token()))
 }
 
+/**
+ * Prende o apaga la caja por sucursal. Al prender, `sucursalesConCaja` dice
+ * qué sucursales tienen caja (cada una recibe sus dos cajas fiscales). El
+ * backend lo rechaza si quedan turnos abiertos en las cajas del modo que se deja.
+ */
+export async function cambiarModoPorSucursal(
+  porSucursal: boolean,
+  sucursalesConCaja?: string[],
+): Promise<CajaConfig> {
+  const body: Record<string, unknown> = { por_sucursal: porSucursal }
+  if (sucursalesConCaja) body.sucursales_con_caja = sucursalesConCaja.map(Number)
+  return mapConfig(await api.patch<ConfigDTO>('/caja/config/', body, token()))
+}
+
+// ===== Sucursales =============================================================
+
+/** Las sucursales con su estado de caja (para el selector y la configuración). */
+export async function listarSucursalesCaja(): Promise<SucursalCaja[]> {
+  const sucursales = await api.get<SucursalCajaDTO[]>('/caja/sucursales/', token())
+  return sucursales.map(mapSucursal)
+}
+
+/** Darle o quitarle la caja a una sucursal (solo administradores). */
+export async function configurarCajaSucursal(id: string, tieneCaja: boolean): Promise<SucursalCaja> {
+  return mapSucursal(
+    await api.patch<SucursalCajaDTO>(`/caja/sucursales/${id}/`, { tiene_caja: tieneCaja }, token()),
+  )
+}
+
 // ===== Cajas ==================================================================
 
 export async function listarCajas(): Promise<CajaRegistradora[]> {
@@ -226,8 +285,11 @@ export async function listarCajas(): Promise<CajaRegistradora[]> {
   return cajas.map(mapCaja)
 }
 
-export async function crearCaja(nombre: string): Promise<CajaRegistradora> {
-  return mapCaja(await api.post<CajaDTO>('/caja/cajas/', { nombre: nombre.trim() }, token()))
+/** Crea una caja; con `sucursalId` es de esa sucursal, sin él es compartida. */
+export async function crearCaja(nombre: string, sucursalId?: string | null): Promise<CajaRegistradora> {
+  const body: Record<string, unknown> = { nombre: nombre.trim() }
+  if (sucursalId) body.sucursal = Number(sucursalId)
+  return mapCaja(await api.post<CajaDTO>('/caja/cajas/', body, token()))
 }
 
 export async function actualizarCaja(

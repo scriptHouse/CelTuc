@@ -335,8 +335,10 @@ class VentasView(_BaseInventario, APIView):
         data['movimientos_caja'] = [m.pk for m in movimientos_caja]
         # Nombre de la caja donde quedo anotada (el enrutamiento por canal
         # fiscal puede mandarla a otra caja que la seleccionada en pantalla).
+        # Con caja por sucursal lleva la sucursal («Facturación RI · Salta»); en
+        # una caja compartida es solo su nombre.
         data['caja_arqueo'] = (
-            movimientos_caja[0].sesion.caja.nombre if movimientos_caja else None
+            str(movimientos_caja[0].sesion.caja) if movimientos_caja else None
         )
         data['aviso_caja'] = aviso_caja
         return Response(data, status=201)

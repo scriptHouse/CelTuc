@@ -732,6 +732,11 @@ export interface CajaConfig {
   fondoSugerido: number
   /** Billetes que muestra la grilla de arqueo (subconjunto de DENOMINACIONES_ARS). */
   denominaciones: number[]
+  /**
+   * Cada sucursal cierra su propia caja. Apagado (como siempre), las cajas son
+   * compartidas por todo el negocio. Se cambia con `cambiarModoPorSucursal`.
+   */
+  porSucursal: boolean
 }
 
 /**
@@ -754,8 +759,20 @@ export interface CajaRegistradora {
   id: string
   nombre: string
   canal: CanalCaja
+  /** Sucursal del cajón; null = caja compartida por todo el negocio. */
+  sucursalId: string | null
+  sucursalNombre: string | null
   activa: boolean
   creadaEn: string // ISO
+}
+
+/** Una sucursal vista desde Caja: si tiene caja y si tiene algún turno abierto. */
+export interface SucursalCaja {
+  id: string
+  nombre: string
+  activa: boolean
+  tieneCaja: boolean
+  turnoAbierto: boolean
 }
 
 /** Todo lo que mueve plata durante un turno (las ventas también son movimientos). */
@@ -798,6 +815,9 @@ export interface CierreCaja {
   cajaId: string
   /** Nombre de la caja al momento del cierre (sobrevive renombres). */
   cajaNombre: string
+  /** Sucursal de la caja (vacío en las cajas compartidas). */
+  sucursalId?: string
+  sucursalNombre?: string
   sesionId: string
   sesionNumero: number
   abiertaEn: string // ISO

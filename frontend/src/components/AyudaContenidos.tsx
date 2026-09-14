@@ -618,6 +618,17 @@ export function AyudaCaja() {
         </p>
       </AyudaSeccion>
 
+      <AyudaSeccion titulo="Cada sucursal con su caja">
+        <p>
+          Un administrador puede <b>separar las cajas por sucursal</b> desde «Configurar»: cada
+          sucursal que tiene caja recibe sus dos cajas (Facturación RI y Monotributo y sin factura),
+          con su propio turno y su propio cierre. Arriba elegís <b>de qué sucursal</b> es la caja
+          (arranca en la tuya) y la venta entra sola a las cajas <b>de la sucursal de la venta</b>:
+          la plata de un local nunca cae en el cajón de otro. Una sucursal <b>sin caja</b> vende
+          igual, pero sus ventas no entran a ningún arqueo.
+        </p>
+      </AyudaSeccion>
+
       <AyudaSeccion titulo="La venta de mostrador (el botón VERDE)">
         <p>
           El botón <b>verde</b> «Registrar venta» es la puerta de entrada de la plata: una venta

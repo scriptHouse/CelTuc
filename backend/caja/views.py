@@ -1,10 +1,13 @@
 from django.core.exceptions import ValidationError
+from django.db import transaction
+from django.db.models import Exists, OuterRef
 from django.shortcuts import get_object_or_404
 from rest_framework import generics
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from comun.mixins import AuditoriaMixin
+from inventario.models import Sucursal
 from usuarios.permissions import LecturaConPermisoEscrituraAdmin, LecturaYEscrituraConPermiso
 
 from .models import (
@@ -15,18 +18,24 @@ from .models import (
     SesionCaja,
     abrir_caja,
     cerrar_caja,
+    configurar_por_sucursal,
+    deshabilitar_caja_sucursal,
     eliminar_movimiento,
+    habilitar_caja_sucursal,
     registrar_movimiento,
 )
 from .serializers import (
     AbrirCajaSerializer,
     CajaSerializer,
+    CambiarCajaSucursalSerializer,
     CerrarCajaSerializer,
     CierreCajaSerializer,
     ConfiguracionCajaSerializer,
     CrearMovimientoSerializer,
+    ModoSucursalSerializer,
     MovimientoCajaSerializer,
     SesionCajaSerializer,
+    SucursalCajaSerializer,
 )
 
 
@@ -54,8 +63,66 @@ class ConfigView(_BaseCajaAdmin, APIView):
         config = ConfiguracionCaja.instancia()
         entrada = ConfiguracionCajaSerializer(config, data=request.data, partial=True)
         entrada.is_valid(raise_exception=True)
-        entrada.save(actualizado_por=request.user)
-        return Response(entrada.data)
+        # Cambiar de modo (caja por sucursal) no es un campo mas: valida que no
+        # queden turnos abiertos y arma las cajas de cada sucursal. Va junto con
+        # el resto del PATCH, todo o nada.
+        modo = None
+        if 'por_sucursal' in request.data:
+            modo = ModoSucursalSerializer(data=request.data)
+            modo.is_valid(raise_exception=True)
+        try:
+            with transaction.atomic():
+                if modo is not None:
+                    configurar_por_sucursal(
+                        activar=modo.validated_data['por_sucursal'],
+                        sucursales=modo.validated_data.get('sucursales_con_caja'),
+                        usuario=request.user,
+                    )
+                    # El serializer guarda la fila entera: sin refrescar pisaria
+                    # el modo recien cambiado con el valor viejo.
+                    config.refresh_from_db()
+                entrada.save(actualizado_por=request.user)
+        except ValidationError as e:
+            return Response({'detail': ' '.join(e.messages)}, status=400)
+        return Response(ConfiguracionCajaSerializer(config).data)
+
+
+def _sucursales_para_caja():
+    """Las sucursales activas (y las que conservan cajas) con su estado de caja."""
+    cajas_activas = Caja.objects.filter(sucursal=OuterRef('pk'), activa=True)
+    turnos = SesionCaja.objects.filter(
+        caja__sucursal=OuterRef('pk'), caja__borrado=False, estado=SesionCaja.Estado.ABIERTA,
+    )
+    return Sucursal.objects.annotate(
+        tiene_caja=Exists(cajas_activas),
+        turno_abierto=Exists(turnos),
+    )
+
+
+class SucursalesCajaView(_BaseCajaAdmin, APIView):
+    """Que sucursales tienen caja (para el selector y la configuracion)."""
+
+    def get(self, request):
+        qs = _sucursales_para_caja().order_by('orden', 'nombre')
+        visibles = [s for s in qs if s.activa or s.tiene_caja]
+        return Response(SucursalCajaSerializer(visibles, many=True).data)
+
+
+class SucursalCajaDetailView(_BaseCajaAdmin, APIView):
+    """PATCH `{tiene_caja}`: darle o quitarle la caja a una sucursal (solo admin)."""
+
+    def patch(self, request, pk):
+        sucursal = get_object_or_404(Sucursal, pk=pk)
+        entrada = CambiarCajaSucursalSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        try:
+            if entrada.validated_data['tiene_caja']:
+                habilitar_caja_sucursal(sucursal, usuario=request.user)
+            else:
+                deshabilitar_caja_sucursal(sucursal, usuario=request.user)
+        except ValidationError as e:
+            return Response({'detail': ' '.join(e.messages)}, status=400)
+        return Response(SucursalCajaSerializer(_sucursales_para_caja().get(pk=pk)).data)
 
 
 class CajaListCreateView(_BaseCajaAdmin, AuditoriaMixin, generics.ListCreateAPIView):
@@ -186,7 +253,7 @@ class CierresView(_BaseCaja, APIView):
 
     def get(self, request):
         qs = CierreCaja.objects.select_related(
-            'sesion', 'sesion__caja', 'sesion__creado_por', 'creado_por',
+            'sesion', 'sesion__caja', 'sesion__caja__sucursal', 'sesion__creado_por', 'creado_por',
         ).prefetch_related(
             'sesion__movimientos__creado_por',
             'sesion__movimientos__venta',
@@ -195,6 +262,9 @@ class CierresView(_BaseCaja, APIView):
         caja = request.query_params.get('caja')
         if caja and caja.isdigit():
             qs = qs.filter(sesion__caja_id=caja)
+        sucursal = request.query_params.get('sucursal')
+        if sucursal and sucursal.isdigit():
+            qs = qs.filter(sesion__caja__sucursal_id=sucursal)
         try:
             limite = min(int(request.query_params.get('limite', 100)), 500)
         except ValueError:

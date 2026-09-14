@@ -86,6 +86,7 @@ import {
   renglonesDeFactura,
 } from '@/lib/conceptoGenerico'
 import { AperturaModal, type AperturaValues } from '@/components/caja/AperturaModal'
+import { cajasDelAmbito } from '@/components/caja/medios'
 import { CuentaCard } from '@/components/facturacion/CuentaCard'
 import { DevolverStockModal } from '@/components/facturacion/DevolverStockModal'
 import { NotaCreditoModal } from '@/components/facturacion/NotaCreditoModal'
@@ -366,8 +367,20 @@ export function FacturacionPage() {
       const condicion = c.emisor_condicion ?? emisor?.condicion
       if (!condicion) return
       const canal = condicion === 'responsable_inscripto' ? 'factura_ri' : 'general'
-      const [cajas, abiertas] = await Promise.all([listarCajas(), cajasConTurnoAbierto()])
-      const cajaCanal = cajas.find((cj) => cj.activa && cj.canal === canal)
+      const [cajas, abiertas, config] = await Promise.all([
+        listarCajas(),
+        cajasConTurnoAbierto(),
+        obtenerConfigCaja(),
+      ])
+      // Con caja por sucursal se mira la caja de la sucursal de quien factura
+      // (sin sucursal asignada no hay a cuál avisar: silencio).
+      const ambito = config.porSucursal
+        ? {
+            porSucursal: true,
+            sucursalId: usuario?.sucursal?.id != null ? String(usuario.sucursal.id) : null,
+          }
+        : undefined
+      const cajaCanal = cajasDelAmbito(cajas, ambito).find((cj) => cj.activa && cj.canal === canal)
       if (cajaCanal && !abiertas.includes(cajaCanal.id)) setAvisoCajaCerrada(cajaCanal)
     } catch {
       /* sin permiso de Caja (403) no hay aviso: la factura salió igual */

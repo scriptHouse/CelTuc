@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Textarea } from '@/components/ui/Textarea'
 import { DenomGrid } from '@/components/caja/DenomGrid'
-import { totalConteo } from '@/components/caja/medios'
+import { nombreCaja, totalConteo } from '@/components/caja/medios'
 
 /**
  * Apertura de turno: se declara el fondo inicial (con conteo por billetes
@@ -78,7 +78,7 @@ export function AperturaModal({
   return (
     <Modal open={open} onClose={onClose} size="lg">
       <div className="border-b border-line px-5 py-4">
-        <h2 className="text-lg font-semibold text-ink-950">Abrir caja · {caja?.nombre}</h2>
+        <h2 className="text-lg font-semibold text-ink-950">Abrir caja · {caja ? nombreCaja(caja) : ''}</h2>
         <p className="mt-0.5 text-xs text-ink-400">
           Declarás el fondo con el que arranca el turno. Todo queda registrado en el cierre.
         </p>

@@ -49,6 +49,7 @@ import {
   cajaParaFacturacion,
   facturacionSugerida,
   formasPara,
+  nombreCaja,
 } from '@/components/caja/medios'
 import { CuentaCard } from '@/components/facturacion/CuentaCard'
 import { LimiteUsoBar } from '@/components/facturacion/LimiteUsoBar'
@@ -471,12 +472,18 @@ export function VentaRapida({
   cajaId,
   cajas = [],
   cajasAbiertas = [],
+  porSucursal = false,
+  sucursalInicial,
 }: {
   cajaId?: string
   /** Cajas del local (con su canal fiscal) para mostrar a dónde va la plata. */
   cajas?: CajaRegistradora[]
   /** Ids de cajas con turno abierto (para avisar si la de destino está cerrada). */
   cajasAbiertas?: string[]
+  /** Caja por sucursal: la plata va a las cajas de la sucursal de la venta. */
+  porSucursal?: boolean
+  /** Sucursal con la que arranca la venta (la que se está mirando en Caja). */
+  sucursalInicial?: string
 }) {
   const [abierta, setAbierta] = useState(false)
 
@@ -552,6 +559,8 @@ export function VentaRapida({
         cajaId={cajaId}
         cajas={cajas}
         cajasAbiertas={cajasAbiertas}
+        porSucursal={porSucursal}
+        sucursalInicial={sucursalInicial}
       />
     </>
   )
@@ -564,6 +573,8 @@ function VentaModal({
   cajaId,
   cajas,
   cajasAbiertas,
+  porSucursal,
+  sucursalInicial,
 }: {
   abierta: boolean
   onCerrar: () => void
@@ -571,6 +582,8 @@ function VentaModal({
   cajaId?: string
   cajas: CajaRegistradora[]
   cajasAbiertas: string[]
+  porSucursal: boolean
+  sucursalInicial?: string
 }) {
   const toast = useToast()
   const queryClient = useQueryClient()
@@ -671,11 +684,16 @@ function VentaModal({
     if (!abierta) return
     // Arranca en la sucursal del empleado logueado (si está activa) para no
     // descontar stock del local equivocado; los botones permiten cambiarla.
+    // Con caja por sucursal manda la sucursal que se está mirando en Caja
+    // (que de entrada también es la del empleado).
+    const inicial = sucursalInicial != null ? Number(sucursalInicial) : null
     const propia = usuario?.sucursal?.id
     setSucursalId(
-      propia != null && activas.some((s) => s.id === propia)
-        ? propia
-        : (activas[0]?.id ?? null),
+      inicial != null && activas.some((s) => s.id === inicial)
+        ? inicial
+        : propia != null && activas.some((s) => s.id === propia)
+          ? propia
+          : (activas[0]?.id ?? null),
     )
     setFormaPago('efectivo')
     setDividido(false)
@@ -695,6 +713,22 @@ function VentaModal({
     0,
   )
 
+  // Con caja por sucursal, la plata va a las cajas de la sucursal de ESTA venta.
+  const ambitoCaja = useMemo(
+    () =>
+      porSucursal
+        ? { porSucursal: true, sucursalId: sucursalId != null ? String(sucursalId) : null }
+        : undefined,
+    [porSucursal, sucursalId],
+  )
+  // La sucursal elegida no maneja caja: la venta vale igual, pero no entra a
+  // ningún arqueo (así se configuró; no es un error).
+  const sucursalSinCaja =
+    porSucursal &&
+    sucursalId != null &&
+    !cajas.some((c) => c.activa && c.sucursalId === String(sucursalId))
+  const nombreSucursal = activas.find((s) => s.id === sucursalId)?.nombre ?? 'Esta sucursal'
+
   // A qué caja va cada parte de la plata. Con partes facturadas y no facturadas
   // la MISMA venta se reparte entre las dos cajas (cada canal a la suya).
   const destinos = useMemo(() => {
@@ -704,7 +738,7 @@ function VentaModal({
       : [[facturacion, total]]
     for (const [fact, monto] of partes) {
       if (monto <= 0) continue
-      const caja = cajaParaFacturacion(cajas, fact)
+      const caja = cajaParaFacturacion(cajas, fact, ambitoCaja)
       if (!caja) continue
       const previo = acumulado.get(caja.id)
       acumulado.set(caja.id, {
@@ -717,7 +751,7 @@ function VentaModal({
       ...d,
       abierta: cajasAbiertas.includes(d.caja.id),
     }))
-  }, [dividido, pagos, facturacion, total, cajas, cajasAbiertas])
+  }, [dividido, pagos, facturacion, total, cajas, cajasAbiertas, ambitoCaja])
 
   // ---- Cuenta que va a emitir la factura ------------------------------------
   // Las MISMAS cuentas (y los mismos límites mensuales) del módulo Facturación:
@@ -1059,7 +1093,9 @@ function VentaModal({
         `${money0(Number(venta.total))} en ${venta.sucursal_nombre} — stock descontado${arqueo}.` +
           (venta.cliente_nombre ? ` Quedó en el historial de ${venta.cliente_nombre}.` : ''),
       )
-      if (!venta.movimiento_caja) {
+      // En una sucursal sin caja es lo esperado (y el modal ya lo decía): no se
+      // repite el aviso en cada venta.
+      if (!venta.movimiento_caja && !sucursalSinCaja) {
         toast.info('La venta no entró en ningún arqueo', venta.aviso_caja ?? 'No hay un turno de caja abierto.')
       }
       onCerrar()
@@ -1465,6 +1501,15 @@ function VentaModal({
           )}
           {/* A qué caja(s) va la plata: con partes facturadas y no facturadas,
              una misma venta se reparte entre las dos cajas. */}
+          {sucursalSinCaja && (
+            <p className="mt-2 flex items-start gap-1.5 text-xs text-ink-500">
+              <Wallet className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span>
+                <b>{nombreSucursal}</b> no tiene caja: la venta se registra igual, pero no entra a
+                ningún arqueo.
+              </span>
+            </p>
+          )}
           {destinos.length > 0 && (
             <div className="mt-2 space-y-1">
               {destinos.map((d) => (
@@ -1484,11 +1529,11 @@ function VentaModal({
                     {d.abierta ? (
                       <>
                         <b className="tnum">{money(d.monto)}</b> entra al arqueo de{' '}
-                        <b>«{d.caja.nombre}»</b>.
+                        <b>«{nombreCaja(d.caja)}»</b>.
                       </>
                     ) : (
                       <>
-                        <b>«{d.caja.nombre}»</b> está cerrada: abrila para que{' '}
+                        <b>«{nombreCaja(d.caja)}»</b> está cerrada: abrila para que{' '}
                         <b className="tnum">{money(d.monto)}</b> entre a su arqueo.
                       </>
                     )}

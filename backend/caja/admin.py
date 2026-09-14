@@ -11,8 +11,10 @@ _AUDITORIA = ('creado', 'actualizado', 'creado_por', 'actualizado_por', 'fecha_b
 @admin.register(ConfiguracionCaja)
 class ConfiguracionCajaAdmin(ModeloBaseAdminMixin, ModelAdmin):
     list_display = ('__str__', 'cierre_ciego', 'tolerancia_activa', 'tolerancia_monto',
-                    'multi_caja', 'fondo_sugerido', 'actualizado')
-    readonly_fields = _AUDITORIA
+                    'multi_caja', 'por_sucursal', 'fondo_sugerido', 'actualizado')
+    # La caja por sucursal se cambia desde la app (Caja > Configurar): valida
+    # que no queden turnos abiertos y arma las cajas de cada sucursal.
+    readonly_fields = ('por_sucursal', *_AUDITORIA)
 
     def has_add_permission(self, request):
         # Singleton: la fila se crea sola; desde el admin solo se edita.
@@ -21,8 +23,8 @@ class ConfiguracionCajaAdmin(ModeloBaseAdminMixin, ModelAdmin):
 
 @admin.register(Caja)
 class CajaAdmin(ModeloBaseAdminMixin, ModelAdmin):
-    list_display = ('nombre', 'orden', 'activa', 'creado')
-    list_filter = ('activa',)
+    list_display = ('nombre', 'sucursal', 'canal', 'orden', 'activa', 'creado')
+    list_filter = ('activa', 'sucursal')
     search_fields = ('nombre',)
     readonly_fields = _AUDITORIA
 
@@ -53,8 +55,8 @@ class MovimientoCajaAdmin(ModeloBaseAdminMixin, ModelAdmin):
 
 @admin.register(CierreCaja)
 class CierreCajaAdmin(ModeloBaseAdminMixin, ModelAdmin):
-    list_display = ('numero', 'caja_nombre', 'diferencia_total', 'fondo_siguiente',
-                    'retiro_final', 'creado', 'creado_por')
-    list_filter = ('caja_nombre',)
+    list_display = ('numero', 'caja_nombre', 'sucursal_nombre', 'diferencia_total',
+                    'fondo_siguiente', 'retiro_final', 'creado', 'creado_por')
+    list_filter = ('caja_nombre', 'sucursal_nombre')
     search_fields = ('caja_nombre', 'motivo_diferencia', 'nota_diferencia')
     readonly_fields = _AUDITORIA

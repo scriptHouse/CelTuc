@@ -174,11 +174,36 @@ export const CANAL_POR_FACTURACION: Record<FacturacionVenta, Exclude<CanalCaja, 
   sin_factura: 'general',
 }
 
+/**
+ * Qué cajas atienden las ventas (espejo de `cajas_del_ambito` del backend).
+ * Sin caja por sucursal: las compartidas, venda la sucursal que venda. Con el
+ * modo prendido: solo las de la sucursal de la venta.
+ */
+export interface AmbitoCaja {
+  porSucursal: boolean
+  sucursalId: string | null
+}
+
+export function cajasDelAmbito(
+  cajas: CajaRegistradora[],
+  ambito?: AmbitoCaja,
+): CajaRegistradora[] {
+  if (!ambito?.porSucursal) return cajas.filter((c) => !c.sucursalId)
+  if (!ambito.sucursalId) return []
+  return cajas.filter((c) => c.sucursalId === ambito.sucursalId)
+}
+
+/** «Facturación RI · Salta» (o solo el nombre, en una caja compartida). */
+export function nombreCaja(caja: Pick<CajaRegistradora, 'nombre' | 'sucursalNombre'>): string {
+  return caja.sucursalNombre ? `${caja.nombre} · ${caja.sucursalNombre}` : caja.nombre
+}
+
 /** La caja que recibiría una venta según cómo se factura (o null si no hay canales). */
 export function cajaParaFacturacion(
   cajas: CajaRegistradora[],
   facturacion: FacturacionVenta,
+  ambito?: AmbitoCaja,
 ): CajaRegistradora | null {
   const canal = CANAL_POR_FACTURACION[facturacion]
-  return cajas.find((c) => c.activa && c.canal === canal) ?? null
+  return cajasDelAmbito(cajas, ambito).find((c) => c.activa && c.canal === canal) ?? null
 }

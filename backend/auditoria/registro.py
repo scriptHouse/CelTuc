@@ -58,6 +58,7 @@ AUDITADOS = {
     'facturacion.LimiteMensual': {},
     'facturacion.Comprobante': {},
     'facturacion.Cliente': {},
+    'caja.ConfiguracionCaja': {},  # incluye prender/apagar la caja por sucursal
     'caja.Caja': {},
     'caja.SesionCaja': {},
     'caja.CierreCaja': {},

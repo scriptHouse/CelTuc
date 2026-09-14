@@ -56,7 +56,10 @@ export function CierreDetalleModal({
           <h2 className="text-lg font-semibold text-ink-950">
             Comprobante <span className="tnum">{zNum(cierre.numero)}</span>
           </h2>
-          <p className="text-xs text-ink-400">Cierre inmutable · {cierre.cajaNombre}</p>
+          <p className="text-xs text-ink-400">
+            Cierre inmutable · {cierre.cajaNombre}
+            {cierre.sucursalNombre ? ` · ${cierre.sucursalNombre}` : ''}
+          </p>
         </div>
         <DiffChip valor={cierre.diferenciaTotal} />
       </div>
@@ -71,6 +74,7 @@ export function CierreDetalleModal({
           </div>
 
           <Seccion>
+            {cierre.sucursalNombre && <Linea l="Sucursal" r={cierre.sucursalNombre} />}
             <Linea l="Apertura" r={fechaHora(cierre.abiertaEn)} />
             <Linea l="Cierre" r={fechaHora(cierre.cerradaEn)} />
             <Linea l="Abrió" r={cierre.abiertaPor} />

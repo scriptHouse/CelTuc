@@ -2,6 +2,8 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
+from inventario.models import Sucursal
+
 from .models import Caja, CierreCaja, ConfiguracionCaja, MedioPago, MovimientoCaja, SesionCaja
 
 _CERO = Decimal('0')
@@ -21,9 +23,12 @@ class ConfiguracionCajaSerializer(serializers.ModelSerializer):
         model = ConfiguracionCaja
         fields = (
             'cierre_ciego', 'tolerancia_activa', 'tolerancia_monto', 'retiros_habilitados',
-            'multi_caja', 'exigir_lote', 'fondo_sugerido', 'denominaciones', 'actualizado',
+            'multi_caja', 'exigir_lote', 'fondo_sugerido', 'denominaciones', 'por_sucursal',
+            'actualizado',
         )
-        read_only_fields = ('actualizado',)
+        # `por_sucursal` no se escribe por aca: cambiar de modo valida turnos y
+        # arma las cajas de cada sucursal (ver `ModoSucursalSerializer`).
+        read_only_fields = ('por_sucursal', 'actualizado')
 
     def validate_denominaciones(self, value):
         limpias = sorted({int(d) for d in value if int(d) > 0}, reverse=True)
@@ -33,34 +38,77 @@ class ConfiguracionCajaSerializer(serializers.ModelSerializer):
 
 
 class CajaSerializer(serializers.ModelSerializer):
+    sucursal = serializers.PrimaryKeyRelatedField(
+        queryset=Sucursal.objects.all(), allow_null=True, required=False,
+    )
+    sucursal_nombre = serializers.CharField(source='sucursal.nombre', read_only=True, default=None)
+
     class Meta:
         model = Caja
-        fields = ('id', 'nombre', 'canal', 'orden', 'activa', 'creado')
+        fields = ('id', 'nombre', 'canal', 'sucursal', 'sucursal_nombre', 'orden', 'activa', 'creado')
         read_only_fields = ('creado',)
+        # Los validadores automaticos de DRF para las constraints unicas no
+        # entienden que el ambito depende de la sucursal (chocarian la
+        # «Facturación RI» de Salta con la compartida): la unicidad se valida en
+        # `validate`, y la base la sigue garantizando con sus constraints.
+        validators = []
+        extra_kwargs = {'nombre': {'validators': []}, 'canal': {'validators': []}}
 
     def validate_nombre(self, value):
         value = value.strip()
         if not value:
             raise serializers.ValidationError('El nombre es obligatorio.')
-        repetida = Caja.objects.filter(nombre__iexact=value)
-        if self.instance is not None:
-            repetida = repetida.exclude(pk=self.instance.pk)
-        if repetida.exists():
-            raise serializers.ValidationError('Ya existe una caja con ese nombre.')
         return value
 
-    def validate_canal(self, value):
-        if not value:
-            return value
-        repetida = Caja.objects.filter(canal=value)
+    def validate(self, attrs):
+        # Nombre y canal son unicos DENTRO del ambito de la caja: las
+        # compartidas entre si, o las de una misma sucursal entre si.
         if self.instance is not None:
-            repetida = repetida.exclude(pk=self.instance.pk)
-        if repetida.exists():
-            raise serializers.ValidationError(
-                'Ya hay una caja para ese canal: no puede haber dos, '
-                'las ventas no sabrian a cual entrar.'
-            )
-        return value
+            if 'sucursal' in attrs and attrs['sucursal'] != self.instance.sucursal:
+                raise serializers.ValidationError({
+                    'sucursal': 'La sucursal de una caja no se cambia: sus turnos y cierres son de esa sucursal.',
+                })
+            sucursal = self.instance.sucursal
+        else:
+            sucursal = attrs.get('sucursal')
+        mismas = Caja.objects.filter(sucursal=sucursal)
+        if self.instance is not None:
+            mismas = mismas.exclude(pk=self.instance.pk)
+
+        nombre = attrs.get('nombre')
+        if nombre and mismas.filter(nombre__iexact=nombre).exists():
+            raise serializers.ValidationError({'nombre': 'Ya existe una caja con ese nombre.'})
+        canal = attrs.get('canal')
+        if canal and mismas.filter(canal=canal).exists():
+            raise serializers.ValidationError({
+                'canal': 'Ya hay una caja para ese canal: no puede haber dos, '
+                'las ventas no sabrian a cual entrar.',
+            })
+        return attrs
+
+
+class SucursalCajaSerializer(serializers.ModelSerializer):
+    """Una sucursal vista desde Caja: si tiene caja y si tiene un turno abierto."""
+
+    tiene_caja = serializers.BooleanField(read_only=True)
+    turno_abierto = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = Sucursal
+        fields = ('id', 'nombre', 'orden', 'activa', 'tiene_caja', 'turno_abierto')
+
+
+class CambiarCajaSucursalSerializer(serializers.Serializer):
+    tiene_caja = serializers.BooleanField()
+
+
+class ModoSucursalSerializer(serializers.Serializer):
+    """Prender o apagar la caja por sucursal (y, al prender, cuales tienen caja)."""
+
+    por_sucursal = serializers.BooleanField()
+    sucursales_con_caja = serializers.PrimaryKeyRelatedField(
+        queryset=Sucursal.objects.filter(activa=True), many=True, required=False,
+    )
 
 
 class SesionCajaSerializer(serializers.ModelSerializer):
@@ -113,6 +161,7 @@ class MovimientoCajaSerializer(serializers.ModelSerializer):
 
 class CierreCajaSerializer(serializers.ModelSerializer):
     caja = serializers.IntegerField(source='sesion.caja_id', read_only=True)
+    sucursal = serializers.IntegerField(source='sesion.caja.sucursal_id', read_only=True)
     sesion = serializers.PrimaryKeyRelatedField(read_only=True)
     sesion_numero = serializers.IntegerField(source='sesion.numero', read_only=True)
     abierta_en = serializers.DateTimeField(source='sesion.creado', read_only=True)
@@ -131,7 +180,8 @@ class CierreCajaSerializer(serializers.ModelSerializer):
     class Meta:
         model = CierreCaja
         fields = (
-            'id', 'numero', 'caja', 'caja_nombre', 'sesion', 'sesion_numero',
+            'id', 'numero', 'caja', 'caja_nombre', 'sucursal', 'sucursal_nombre',
+            'sesion', 'sesion_numero',
             'abierta_en', 'cerrada_en', 'abierta_por', 'cerrado_por', 'fondo_inicial',
             'ventas_por_medio', 'operaciones_por_medio', 'ingresos', 'egresos', 'retiros',
             'esperado_por_medio', 'contado_por_medio', 'conteo_cierre',
