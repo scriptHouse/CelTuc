@@ -10,7 +10,7 @@ asi una venta cae en el arqueo sin mapeos raros.
 """
 from decimal import Decimal
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import models, transaction
 
 from comun.models import ModeloBase
@@ -445,6 +445,44 @@ def cajas_del_ambito(sucursal=None, *, config=None):
     if sucursal is None:
         return Caja.objects.none()
     return Caja.objects.filter(sucursal=sucursal)
+
+
+def sucursal_del_usuario(usuario):
+    """La sucursal del empleado vinculado a la cuenta (None si no tiene).
+
+    Mismo criterio que `/api/auth/me/` (el front la conoce por ahi).
+    """
+    if usuario is None or not getattr(usuario, 'is_authenticated', False):
+        return None
+    try:
+        empleado = usuario.empleado
+    except ObjectDoesNotExist:
+        return None
+    if empleado is None or empleado.sucursal_id is None:
+        return None
+    return empleado.sucursal
+
+
+def sucursal_restringida(usuario, *, config=None):
+    """La sucursal a la que queda limitado el usuario en Caja (None = ve todas).
+
+    Solo con la caja por sucursal prendida: un empleado con sucursal ve y opera
+    unicamente las cajas de SU sucursal. El administrador y el superadministrador
+    ven todas. Un empleado sin sucursal asignada tambien (no hay a cual
+    limitarlo: asi nadie queda sin caja por un dato que falta cargar).
+    """
+    if usuario is None or getattr(usuario, 'es_administrador', False):
+        return None
+    config = config or ConfiguracionCaja.instancia()
+    if not config.por_sucursal:
+        return None
+    return sucursal_del_usuario(usuario)
+
+
+def puede_operar_caja(usuario, caja):
+    """¿El usuario puede ver/operar esta caja? (ver `sucursal_restringida`)."""
+    sucursal = sucursal_restringida(usuario)
+    return sucursal is None or caja.sucursal_id == sucursal.pk
 
 
 def caja_para_facturacion(facturacion, sucursal=None):

@@ -8,6 +8,7 @@ import {
   Download,
   EyeOff,
   FlaskConical,
+  Layers,
   Lock,
   LockOpen,
   MapPin,
@@ -68,6 +69,9 @@ const zNum = (n: number) => `Z-${String(n).padStart(4, '0')}`
 
 /** Valor del filtro de sucursal para los cierres de las cajas compartidas. */
 const COMPARTIDAS = 'compartidas'
+
+/** Selector de sucursal del admin: ver las cajas de todas las sucursales juntas. */
+const TODAS = 'todas'
 
 function horaDe(iso: string): string {
   return new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
@@ -211,23 +215,66 @@ export function CajaPage() {
   const sucursalesConCaja = useMemo(() => sucursales.filter((s) => s.tieneCaja), [sucursales])
   const sucursalDelUsuario = usuario?.sucursal?.id != null ? String(usuario.sucursal.id) : ''
 
+  // Un empleado con sucursal ve SOLO la caja de su sucursal (el backend ya le
+  // devuelve únicamente eso). El administrador y el superadministrador ven todas
+  // y eligen una sucursal o «Todas». Un empleado sin sucursal elige entre todas.
+  const soloMiSucursal = porSucursal && !admin && Boolean(sucursalDelUsuario)
+
   const [sucursalId, setSucursalId] = useState('')
   useEffect(() => {
     if (!porSucursal || sucursalesConCaja.length === 0) return
-    if (sucursalesConCaja.some((s) => s.id === sucursalId)) return
+    const valida =
+      sucursalId === TODAS ? admin : sucursalesConCaja.some((s) => s.id === sucursalId)
+    if (valida) return
+    // El admin arranca viendo todas; el resto, su sucursal (o la primera).
+    if (admin) {
+      setSucursalId(TODAS)
+      return
+    }
     const propia = sucursalesConCaja.find((s) => s.id === sucursalDelUsuario)
     setSucursalId((propia ?? sucursalesConCaja[0]).id)
-  }, [porSucursal, sucursalesConCaja, sucursalId, sucursalDelUsuario])
+  }, [porSucursal, admin, sucursalesConCaja, sucursalId, sucursalDelUsuario])
 
+  const vistaTodas = porSucursal && sucursalId === TODAS
   const sinSucursalesConCaja = porSucursal && !cargandoSucursales && sucursalesConCaja.length === 0
 
   const cajasVisibles = useMemo(() => {
     const activas = cajas.filter(
-      (c) => c.activa && (porSucursal ? c.sucursalId === sucursalId : !c.sucursalId),
+      (c) =>
+        c.activa &&
+        (!porSucursal ? !c.sucursalId : vistaTodas ? Boolean(c.sucursalId) : c.sucursalId === sucursalId),
     )
+    if (vistaTodas) {
+      // Todas las sucursales: agrupadas en el orden de las sucursales.
+      const orden = (id: string | null) => {
+        const i = sucursalesConCaja.findIndex((s) => s.id === id)
+        return i === -1 ? Number.MAX_SAFE_INTEGER : i
+      }
+      activas.sort((a, b) => orden(a.sucursalId) - orden(b.sucursalId))
+      if (!config?.multiCaja) {
+        return activas.filter((c, i) => activas.findIndex((x) => x.sucursalId === c.sucursalId) === i)
+      }
+      return activas
+    }
     if (!config?.multiCaja) return activas.slice(0, 1)
     return activas
-  }, [cajas, config, porSucursal, sucursalId])
+  }, [cajas, config, porSucursal, vistaTodas, sucursalId, sucursalesConCaja])
+
+  /** Las tarjetas de caja; con «Todas», un grupo por sucursal. */
+  const gruposDeCajas = useMemo(() => {
+    if (!vistaTodas) return [{ clave: 'cajas', titulo: '', cajas: cajasVisibles }]
+    const grupos: Array<{ clave: string; titulo: string; cajas: CajaRegistradora[] }> = []
+    for (const c of cajasVisibles) {
+      const clave = c.sucursalId ?? ''
+      let grupo = grupos.find((g) => g.clave === clave)
+      if (!grupo) {
+        grupo = { clave, titulo: c.sucursalNombre ?? '', cajas: [] }
+        grupos.push(grupo)
+      }
+      grupo.cajas.push(c)
+    }
+    return grupos
+  }, [vistaTodas, cajasVisibles])
 
   const [cajaId, setCajaId] = useState('')
   useEffect(() => {
@@ -307,6 +354,14 @@ export function CajaPage() {
   const [q, setQ] = useState('')
   const [filtroCaja, setFiltroCaja] = useState('')
   const [filtroSucursal, setFiltroSucursal] = useState('')
+
+  // Admin: el historial sigue a la sucursal elegida arriba (abajo se puede
+  // cambiar igual). Se suelta el filtro de caja, que podía ser de otra sucursal.
+  useEffect(() => {
+    if (!porSucursal || !admin || !sucursalId) return
+    setFiltroSucursal(sucursalId === TODAS ? '' : sucursalId)
+    setFiltroCaja('')
+  }, [porSucursal, admin, sucursalId])
   const [exportarAbierto, setExportarAbierto] = useState(false)
 
   function entrarPractica() {
@@ -351,6 +406,15 @@ export function CajaPage() {
     return [...mapa].map(([id, nombre]) => ({ id, nombre }))
   }, [cierres])
   const hayCierresCompartidos = cierres.some((c) => !c.sucursalId)
+  /** Opciones del filtro de sucursal: las que tienen caja y las que ya cerraron Z. */
+  const opcionesSucursalHistorial = useMemo(() => {
+    const mapa = new Map<string, string>()
+    for (const s of sucursalesConCaja) mapa.set(s.id, s.nombre)
+    for (const s of sucursalesDeCierres) if (!mapa.has(s.id)) mapa.set(s.id, s.nombre)
+    return [...mapa].map(([id, nombre]) => ({ id, nombre }))
+  }, [sucursalesConCaja, sucursalesDeCierres])
+  const mostrarFiltroSucursal =
+    !soloMiSucursal && opcionesSucursalHistorial.length + (hayCierresCompartidos ? 1 : 0) > 1
 
   const cierresFiltrados = useMemo(() => {
     const term = q.trim()
@@ -518,132 +582,173 @@ export function CajaPage() {
           cajas={cajas.filter((c) => c.activa)}
           cajasAbiertas={abiertas}
           porSucursal={porSucursal}
-          sucursalInicial={porSucursal && sucursalId ? sucursalId : undefined}
+          sucursalInicial={porSucursal && sucursalId && sucursalId !== TODAS ? sucursalId : undefined}
+          soloSucursal={soloMiSucursal ? sucursalDelUsuario : undefined}
         />
       )}
 
-      {/* Caja por sucursal: primero la sucursal (con un punto verde si alguna
-         de sus cajas tiene turno abierto), después sus cajas. */}
+      {/* Caja por sucursal. El empleado ve fija la de su sucursal; el admin (y
+         quien no tiene sucursal) elige: con un punto verde si hay turno abierto. */}
       {porSucursal && sucursalesConCaja.length > 0 && (
-        <div className="ct-rise mb-5">
-          <p className="mb-2.5 text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-ink-400">
-            ¿De qué sucursal es la caja?
-          </p>
-          <div role="tablist" aria-label="Sucursales" className="flex flex-wrap gap-2">
-            {sucursalesConCaja.map((s, i) => {
-              const activa = s.id === sucursalId
-              const abierta = cajas.some((c) => c.sucursalId === s.id && abiertas.includes(c.id))
-              return (
-                <button
-                  key={s.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={activa}
-                  onClick={() => setSucursalId(s.id)}
-                  className={cn(
-                    'ct-stagger-item inline-flex h-10 items-center gap-2 rounded-full px-4 text-sm font-semibold transition-all duration-150',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 focus-visible:ring-offset-2',
-                    activa
-                      ? 'bg-ink-950 text-on-ink shadow-[0_8px_20px_rgba(10,10,11,0.2)]'
-                      : 'border border-line-strong bg-surface text-ink-600 hover:border-ink-300 hover:bg-ink-50',
-                  )}
-                  style={ctStagger(i)}
-                >
-                  <MapPin className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
-                  {s.nombre}
-                  {abierta && (
-                    <span className="relative inline-flex h-2 w-2" title="Tiene un turno abierto">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500/60" />
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-                      <span className="sr-only">(turno abierto)</span>
-                    </span>
-                  )}
-                </button>
-              )
-            })}
+        soloMiSucursal ? (
+          <div className="ct-rise mb-5 flex flex-wrap items-center gap-x-3 gap-y-2">
+            <p className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-ink-400">
+              Caja de tu sucursal
+            </p>
+            {sucursalesConCaja.map((s) => (
+              <span
+                key={s.id}
+                className="inline-flex h-9 items-center gap-2 rounded-full bg-ink-950 px-4 text-sm font-semibold text-on-ink"
+              >
+                <MapPin className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+                {s.nombre}
+                {cajas.some((c) => c.sucursalId === s.id && abiertas.includes(c.id)) && (
+                  <PuntoAbierta />
+                )}
+              </span>
+            ))}
           </div>
-        </div>
+        ) : (
+          <div className="ct-rise mb-5">
+            <p className="mb-2.5 text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-ink-400">
+              {admin ? '¿Qué sucursal querés ver?' : '¿De qué sucursal es la caja?'}
+            </p>
+            <div role="tablist" aria-label="Sucursales" className="flex flex-wrap gap-2">
+              {[
+                ...(admin ? [{ id: TODAS, nombre: 'Todas' }] : []),
+                ...sucursalesConCaja.map((s) => ({ id: s.id, nombre: s.nombre })),
+              ].map((s, i) => {
+                const activa = s.id === sucursalId
+                const abierta = cajas.some(
+                  (c) =>
+                    Boolean(c.sucursalId) &&
+                    (s.id === TODAS || c.sucursalId === s.id) &&
+                    abiertas.includes(c.id),
+                )
+                const Icono = s.id === TODAS ? Layers : MapPin
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={activa}
+                    onClick={() => setSucursalId(s.id)}
+                    className={cn(
+                      'ct-stagger-item inline-flex h-10 items-center gap-2 rounded-full px-4 text-sm font-semibold transition-all duration-150',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 focus-visible:ring-offset-2',
+                      activa
+                        ? 'bg-ink-950 text-on-ink shadow-[0_8px_20px_rgba(10,10,11,0.2)]'
+                        : 'border border-line-strong bg-surface text-ink-600 hover:border-ink-300 hover:bg-ink-50',
+                    )}
+                    style={ctStagger(i)}
+                  >
+                    <Icono className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+                    {s.nombre}
+                    {abierta && <PuntoAbierta />}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )
       )}
 
       {/* Selector de cajas: una tarjeta grande por caja, con su canal fiscal
-         y su estado a la vista. En el celular se apilan a lo ancho. */}
+         y su estado a la vista. Con «Todas», agrupadas por sucursal. En el
+         celular se apilan a lo ancho. */}
       {config?.multiCaja && cajasVisibles.length > 1 && (
         <div className="ct-rise mb-6">
           <p className="mb-2.5 text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-ink-400">
             ¿En qué caja estás trabajando?
           </p>
-          <div role="tablist" aria-label="Cajas" className="grid gap-2.5 sm:grid-cols-2">
-            {cajasVisibles.map((c, i) => {
-              const activa = c.id === cajaId
-              const abierta = abiertas.includes(c.id)
-              const Icono = CANAL_ICONO[c.canal]
-              return (
-                <button
-                  key={c.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={activa}
-                  onClick={() => setCajaId(c.id)}
-                  className={cn(
-                    'ct-stagger-item flex min-w-0 items-center gap-3.5 rounded-2xl border px-4 py-3.5 text-left transition-all duration-150',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 focus-visible:ring-offset-2',
-                    activa
-                      ? 'border-ink-950 bg-ink-950 shadow-[0_12px_28px_rgba(10,10,11,0.22)]'
-                      : 'border-line bg-surface hover:border-line-strong hover:shadow-[0_6px_16px_rgba(10,10,11,0.07)]',
-                  )}
-                  style={ctStagger(i)}
+          <div className={cn(vistaTodas && 'space-y-4')}>
+            {gruposDeCajas.map((grupo) => (
+              <div key={grupo.clave}>
+                {vistaTodas && (
+                  <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-ink-600">
+                    <MapPin className="h-3.5 w-3.5 shrink-0 text-ink-400" strokeWidth={1.75} aria-hidden />
+                    {grupo.titulo}
+                  </p>
+                )}
+                <div
+                  role="tablist"
+                  aria-label={vistaTodas ? `Cajas de ${grupo.titulo}` : 'Cajas'}
+                  className="grid gap-2.5 sm:grid-cols-2"
                 >
-                  <span
-                    className={cn(
-                      'grid h-11 w-11 shrink-0 place-items-center rounded-xl transition-colors',
-                      activa
-                        ? 'bg-on-ink/10 text-on-ink ring-1 ring-on-ink/15'
-                        : 'bg-ink-50 text-ink-500 ring-1 ring-line',
-                    )}
-                  >
-                    <Icono className="h-5 w-5" strokeWidth={1.75} aria-hidden />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span
-                      className={cn(
-                        'block truncate text-sm font-semibold',
-                        activa ? 'text-on-ink' : 'text-ink-900',
-                      )}
-                    >
-                      {c.nombre}
-                    </span>
-                    <span
-                      className={cn(
-                        'block truncate text-xs',
-                        activa ? 'text-on-ink/60' : 'text-ink-400',
-                      )}
-                    >
-                      {CANAL_RESUMEN[c.canal]}
-                    </span>
-                  </span>
-                  <span
-                    className={cn(
-                      'inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.64rem] font-semibold uppercase tracking-wide',
-                      abierta
-                        ? activa
-                          ? 'bg-on-ink/10 text-on-ink'
-                          : 'bg-emerald-600/10 text-emerald-700 ring-1 ring-emerald-600/25 dark:text-emerald-400'
-                        : activa
-                          ? 'bg-on-ink/10 text-on-ink/55'
-                          : 'bg-ink-100 text-ink-400',
-                    )}
-                  >
-                    {abierta && (
-                      <span aria-hidden className="relative inline-flex h-1.5 w-1.5">
-                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-current opacity-60" />
-                        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-current" />
-                      </span>
-                    )}
-                    {abierta ? 'Abierta' : 'Cerrada'}
-                  </span>
-                </button>
-              )
-            })}
+                  {grupo.cajas.map((c, i) => {
+                    const activa = c.id === cajaId
+                    const abierta = abiertas.includes(c.id)
+                    const Icono = CANAL_ICONO[c.canal]
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={activa}
+                        onClick={() => setCajaId(c.id)}
+                        className={cn(
+                          'ct-stagger-item flex min-w-0 items-center gap-3.5 rounded-2xl border px-4 py-3.5 text-left transition-all duration-150',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 focus-visible:ring-offset-2',
+                          activa
+                            ? 'border-ink-950 bg-ink-950 shadow-[0_12px_28px_rgba(10,10,11,0.22)]'
+                            : 'border-line bg-surface hover:border-line-strong hover:shadow-[0_6px_16px_rgba(10,10,11,0.07)]',
+                        )}
+                        style={ctStagger(i)}
+                      >
+                        <span
+                          className={cn(
+                            'grid h-11 w-11 shrink-0 place-items-center rounded-xl transition-colors',
+                            activa
+                              ? 'bg-on-ink/10 text-on-ink ring-1 ring-on-ink/15'
+                              : 'bg-ink-50 text-ink-500 ring-1 ring-line',
+                          )}
+                        >
+                          <Icono className="h-5 w-5" strokeWidth={1.75} aria-hidden />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span
+                            className={cn(
+                              'block truncate text-sm font-semibold',
+                              activa ? 'text-on-ink' : 'text-ink-900',
+                            )}
+                          >
+                            {c.nombre}
+                          </span>
+                          <span
+                            className={cn(
+                              'block truncate text-xs',
+                              activa ? 'text-on-ink/60' : 'text-ink-400',
+                            )}
+                          >
+                            {CANAL_RESUMEN[c.canal]}
+                          </span>
+                        </span>
+                        <span
+                          className={cn(
+                            'inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.64rem] font-semibold uppercase tracking-wide',
+                            abierta
+                              ? activa
+                                ? 'bg-on-ink/10 text-on-ink'
+                                : 'bg-emerald-600/10 text-emerald-700 ring-1 ring-emerald-600/25 dark:text-emerald-400'
+                              : activa
+                                ? 'bg-on-ink/10 text-on-ink/55'
+                                : 'bg-ink-100 text-ink-400',
+                          )}
+                        >
+                          {abierta && (
+                            <span aria-hidden className="relative inline-flex h-1.5 w-1.5">
+                              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-current opacity-60" />
+                              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-current" />
+                            </span>
+                          )}
+                          {abierta ? 'Abierta' : 'Cerrada'}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -656,11 +761,17 @@ export function CajaPage() {
           <EmptyState
             className="ct-rise"
             icon={MapPin}
-            title="Ninguna sucursal tiene caja"
+            title={
+              soloMiSucursal
+                ? `${usuario?.sucursal?.nombre ?? 'Tu sucursal'} no tiene caja`
+                : 'Ninguna sucursal tiene caja'
+            }
             description={
               admin
                 ? 'Cada sucursal cierra su propia caja: elegí en «Configurar» cuáles la tienen.'
-                : 'Cada sucursal cierra su propia caja, y todavía ninguna tiene una. Pedíselo a un administrador.'
+                : soloMiSucursal
+                  ? 'Tu sucursal no maneja caja: las ventas se registran igual, pero no entran a ningún arqueo.'
+                  : 'Cada sucursal cierra su propia caja, y todavía ninguna tiene una. Pedíselo a un administrador.'
             }
             action={
               admin ? (
@@ -855,11 +966,11 @@ export function CajaPage() {
               className="pl-10"
             />
           </div>
-          {sucursalesDeCierres.length > 0 && (
+          {mostrarFiltroSucursal && (
             <Select
               options={[
                 { value: '', label: 'Todas las sucursales' },
-                ...sucursalesDeCierres.map((s) => ({ value: s.id, label: s.nombre })),
+                ...opcionesSucursalHistorial.map((s) => ({ value: s.id, label: s.nombre })),
                 ...(hayCierresCompartidos ? [{ value: COMPARTIDAS, label: 'Cajas compartidas' }] : []),
               ]}
               value={filtroSucursal}
@@ -1032,7 +1143,7 @@ export function CajaPage() {
                 `Sucursal: ${
                   filtroSucursal === COMPARTIDAS
                     ? 'cajas compartidas'
-                    : (sucursalesDeCierres.find((s) => s.id === filtroSucursal)?.nombre ?? filtroSucursal)
+                    : (opcionesSucursalHistorial.find((s) => s.id === filtroSucursal)?.nombre ?? filtroSucursal)
                 }`,
               ]
             : []),
@@ -1041,6 +1152,17 @@ export function CajaPage() {
         ]}
       />
     </div>
+  )
+}
+
+/** Punto verde que late: hay un turno abierto (en el selector de sucursal). */
+function PuntoAbierta() {
+  return (
+    <span className="relative inline-flex h-2 w-2" title="Tiene un turno abierto">
+      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500/60" />
+      <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+      <span className="sr-only">(turno abierto)</span>
+    </span>
   )
 }
 

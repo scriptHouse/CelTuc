@@ -937,3 +937,168 @@ class CajaPorSucursalTests(TestCase):
         self.assertEqual(len(r.data), 1)
         self.assertEqual(r.data[0]['sucursal'], self.salta.pk)
         self.assertEqual(r.data[0]['sucursal_nombre'], 'Salta suc test')
+
+
+class CajaAccesoPorSucursalTests(TestCase):
+    """Con caja por sucursal, cada empleado ve y opera SOLO la caja de su sucursal.
+
+    El administrador y el superadministrador ven todas. Un empleado sin
+    sucursal asignada tambien (no hay a cual limitarlo). Con el modo apagado
+    no se limita nada: las cajas son compartidas.
+    """
+
+    def setUp(self):
+        from empleados.models import Empleado
+
+        self.solar = Sucursal.objects.create(nombre='Solar acceso test', orden=1)
+        self.salta = Sucursal.objects.create(nombre='Salta acceso test', orden=2)
+        configurar_por_sucursal(activar=True, sucursales=[self.solar, self.salta])
+        self.general_solar = Caja.objects.get(sucursal=self.solar, canal=Caja.Canal.GENERAL)
+        self.general_salta = Caja.objects.get(sucursal=self.salta, canal=Caja.Canal.GENERAL)
+
+        rol = Rol.objects.create(nombre='Cajero acceso test')
+        rol.permisos.set(Permiso.objects.filter(codigo__in=('ver_caja', 'ver_inventario')))
+        self.rol = rol
+
+        def cuenta(username, *, sucursal=None, con_empleado=True, rol_cuenta=None):
+            usuario = Usuario.objects.create_user(
+                email=f'{username}@celtuc.test', username=username, password='x',
+                rol=rol_cuenta or rol,
+            )
+            if con_empleado:
+                Empleado.objects.create(nombre=username, usuario=usuario, sucursal=sucursal)
+            cliente = APIClient()
+            cliente.force_authenticate(usuario)
+            return cliente
+
+        self.empleado_salta = cuenta('empleado.salta', sucursal=self.salta)
+        self.empleado_sin_sucursal = cuenta('empleado.sin.sucursal')
+        self.cuenta_sin_empleado = cuenta('cuenta.sin.empleado', con_empleado=False)
+        rol_admin = Rol.objects.create(nombre='Admin acceso test', es_admin=True)
+        self.admin_con_sucursal = cuenta('admin.salta', sucursal=self.salta, rol_cuenta=rol_admin)
+        superadmin = Usuario.objects.create_superuser(
+            email='super.acceso@celtuc.test', username='super.acceso', password='x',
+        )
+        self.superadmin = APIClient()
+        self.superadmin.force_authenticate(superadmin)
+
+    @staticmethod
+    def _ids(respuesta):
+        return {item['id'] for item in respuesta.data}
+
+    def _cajas_de(self, cliente):
+        r = cliente.get('/api/caja/cajas/')
+        self.assertEqual(r.status_code, 200)
+        return {c['sucursal'] for c in r.data}
+
+    # --- Lo que ve cada uno --------------------------------------------------------
+
+    def test_el_empleado_ve_solo_las_cajas_de_su_sucursal(self):
+        self.assertEqual(self._cajas_de(self.empleado_salta), {self.salta.pk})
+
+    def test_admin_y_superadmin_ven_todas(self):
+        # Aunque el admin tenga sucursal: ser admin manda.
+        for cliente in (self.superadmin, self.admin_con_sucursal):
+            self.assertTrue({self.solar.pk, self.salta.pk} <= self._cajas_de(cliente))
+
+    def test_empleado_sin_sucursal_ve_todas(self):
+        for cliente in (self.empleado_sin_sucursal, self.cuenta_sin_empleado):
+            self.assertTrue({self.solar.pk, self.salta.pk} <= self._cajas_de(cliente))
+
+    def test_el_empleado_no_ve_el_turno_de_otra_sucursal(self):
+        r = self.empleado_salta.get(f'/api/caja/cajas/{self.general_solar.pk}/estado/')
+        self.assertEqual(r.status_code, 404)
+        r = self.empleado_salta.get(f'/api/caja/cajas/{self.general_solar.pk}/')
+        self.assertEqual(r.status_code, 404)
+        r = self.empleado_salta.get(f'/api/caja/cajas/{self.general_salta.pk}/estado/')
+        self.assertEqual(r.status_code, 200)
+
+    def test_sucursales_abiertas_y_cierres_solo_de_la_propia(self):
+        for caja in (self.general_solar, self.general_salta):
+            sesion = abrir_caja(caja, fondo_inicial=0)
+            cerrar_caja(sesion, contado_por_medio=_contado(), fondo_siguiente=0)
+            abrir_caja(caja, fondo_inicial=0)
+
+        r = self.empleado_salta.get('/api/caja/sucursales/')
+        self.assertEqual(self._ids(r), {self.salta.pk})
+        r = self.empleado_salta.get('/api/caja/abiertas/')
+        self.assertEqual(set(r.data), {self.general_salta.pk})
+        r = self.empleado_salta.get('/api/caja/cierres/')
+        self.assertEqual({c['sucursal'] for c in r.data}, {self.salta.pk})
+        # Pedir explicitamente la otra sucursal no la destapa.
+        r = self.empleado_salta.get(f'/api/caja/cierres/?sucursal={self.solar.pk}')
+        self.assertEqual(r.data, [])
+
+        r = self.superadmin.get('/api/caja/cierres/')
+        self.assertTrue({self.solar.pk, self.salta.pk} <= {c['sucursal'] for c in r.data})
+        r = self.superadmin.get('/api/caja/abiertas/')
+        self.assertTrue({self.general_solar.pk, self.general_salta.pk} <= set(r.data))
+
+    # --- Lo que puede operar ----------------------------------------------------------
+
+    def test_el_empleado_no_abre_la_caja_de_otra_sucursal(self):
+        r = self.empleado_salta.post('/api/caja/abrir/', {
+            'caja': self.general_solar.pk, 'fondo_inicial': 0,
+        }, format='json')
+        self.assertEqual(r.status_code, 403)
+        self.assertIn('otra sucursal', r.data['detail'])
+        self.assertFalse(SesionCaja.objects.filter(caja=self.general_solar).exists())
+
+        r = self.empleado_salta.post('/api/caja/abrir/', {
+            'caja': self.general_salta.pk, 'fondo_inicial': 0,
+        }, format='json')
+        self.assertEqual(r.status_code, 201)
+
+    def test_el_empleado_no_mueve_ni_cierra_la_caja_de_otra_sucursal(self):
+        sesion = abrir_caja(self.general_solar, fondo_inicial=5000)
+        mov = registrar_movimiento(sesion, tipo=MovimientoCaja.Tipo.INGRESO, monto=100, motivo='Cambio')
+
+        r = self.empleado_salta.post('/api/caja/movimientos/', {
+            'sesion': sesion.pk, 'tipo': 'egreso', 'monto': 10, 'motivo': 'Gasto',
+        }, format='json')
+        self.assertEqual(r.status_code, 403)
+        r = self.empleado_salta.delete(f'/api/caja/movimientos/{mov.pk}/')
+        self.assertEqual(r.status_code, 403)
+        r = self.empleado_salta.post('/api/caja/cerrar/', {
+            'sesion': sesion.pk, 'contado_por_medio': _contado(efectivo=5100), 'fondo_siguiente': 0,
+        }, format='json')
+        self.assertEqual(r.status_code, 403)
+
+        sesion.refresh_from_db()
+        self.assertEqual(sesion.estado, SesionCaja.Estado.ABIERTA)
+        self.assertEqual(sesion.movimientos.count(), 1)
+
+        # El superadmin si puede.
+        r = self.superadmin.post('/api/caja/cerrar/', {
+            'sesion': sesion.pk, 'contado_por_medio': _contado(efectivo=5100), 'fondo_siguiente': 0,
+        }, format='json')
+        self.assertEqual(r.status_code, 201)
+
+    def test_el_empleado_opera_su_caja_de_punta_a_punta(self):
+        r = self.empleado_salta.post('/api/caja/abrir/', {
+            'caja': self.general_salta.pk, 'fondo_inicial': 1000,
+        }, format='json')
+        sesion_id = r.data['id']
+        r = self.empleado_salta.post('/api/caja/movimientos/', {
+            'sesion': sesion_id, 'tipo': 'egreso', 'monto': 200, 'motivo': 'Gasto',
+        }, format='json')
+        self.assertEqual(r.status_code, 201)
+        r = self.empleado_salta.delete(f'/api/caja/movimientos/{r.data["id"]}/')
+        self.assertEqual(r.status_code, 204)
+        r = self.empleado_salta.post('/api/caja/cerrar/', {
+            'sesion': sesion_id, 'contado_por_medio': _contado(efectivo=1000), 'fondo_siguiente': 1000,
+        }, format='json')
+        self.assertEqual(r.status_code, 201)
+
+    # --- Modo apagado: sin limites ----------------------------------------------------------
+
+    def test_con_el_modo_apagado_no_se_limita_a_nadie(self):
+        configurar_por_sucursal(activar=False)
+        compartida = Caja.objects.filter(sucursal__isnull=True, activa=True).first()
+        self.assertIn(None, self._cajas_de(self.empleado_salta))
+        r = self.empleado_salta.get(f'/api/caja/cajas/{compartida.pk}/estado/')
+        self.assertEqual(r.status_code, 200)
+        r = self.empleado_salta.post('/api/caja/abrir/', {
+            'caja': compartida.pk, 'fondo_inicial': 0,
+        }, format='json')
+        self.assertEqual(r.status_code, 201)

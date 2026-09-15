@@ -1,6 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Exists, OuterRef
+from django.http import Http404
 from django.shortcuts import get_object_or_404
 from rest_framework import generics
 from rest_framework.response import Response
@@ -22,7 +23,9 @@ from .models import (
     deshabilitar_caja_sucursal,
     eliminar_movimiento,
     habilitar_caja_sucursal,
+    puede_operar_caja,
     registrar_movimiento,
+    sucursal_restringida,
 )
 from .serializers import (
     AbrirCajaSerializer,
@@ -51,6 +54,16 @@ class _BaseCajaAdmin:
 
     permission_classes = [LecturaConPermisoEscrituraAdmin]
     permiso_requerido = 'ver_caja'
+
+
+# Con la caja por sucursal prendida, un empleado con sucursal solo ve y opera
+# las cajas de SU sucursal (admins y superadmin ven todas). Las listas se
+# filtran y lo de otra sucursal responde 404 al leer y 403 al operar.
+OTRA_SUCURSAL = 'Esa caja es de otra sucursal: solo podes operar la caja de tu sucursal.'
+
+
+def _prohibido_otra_sucursal():
+    return Response({'detail': OTRA_SUCURSAL}, status=403)
 
 
 class ConfigView(_BaseCajaAdmin, APIView):
@@ -104,6 +117,9 @@ class SucursalesCajaView(_BaseCajaAdmin, APIView):
 
     def get(self, request):
         qs = _sucursales_para_caja().order_by('orden', 'nombre')
+        propia = sucursal_restringida(request.user)
+        if propia is not None:
+            qs = qs.filter(pk=propia.pk)
         visibles = [s for s in qs if s.activa or s.tiene_caja]
         return Response(SucursalCajaSerializer(visibles, many=True).data)
 
@@ -125,12 +141,27 @@ class SucursalCajaDetailView(_BaseCajaAdmin, APIView):
         return Response(SucursalCajaSerializer(_sucursales_para_caja().get(pk=pk)).data)
 
 
-class CajaListCreateView(_BaseCajaAdmin, AuditoriaMixin, generics.ListCreateAPIView):
+class _CajasVisiblesMixin:
+    """Las cajas que el usuario puede ver (todas, o las de su sucursal)."""
+
+    def get_queryset(self):
+        qs = Caja.objects.all()
+        propia = sucursal_restringida(self.request.user)
+        if propia is not None:
+            qs = qs.filter(sucursal=propia)
+        return qs
+
+
+class CajaListCreateView(
+    _BaseCajaAdmin, AuditoriaMixin, _CajasVisiblesMixin, generics.ListCreateAPIView,
+):
     queryset = Caja.objects.all()
     serializer_class = CajaSerializer
 
 
-class CajaDetailView(_BaseCajaAdmin, AuditoriaMixin, generics.RetrieveUpdateDestroyAPIView):
+class CajaDetailView(
+    _BaseCajaAdmin, AuditoriaMixin, _CajasVisiblesMixin, generics.RetrieveUpdateDestroyAPIView,
+):
     # El DELETE hace borrado logico (AuditoriaMixin.perform_destroy).
     queryset = Caja.objects.all()
     serializer_class = CajaSerializer
@@ -154,6 +185,8 @@ class EstadoCajaView(_BaseCaja, APIView):
 
     def get(self, request, pk):
         caja = get_object_or_404(Caja, pk=pk)
+        if not puede_operar_caja(request.user, caja):
+            raise Http404
         sesion = (
             SesionCaja.objects.select_related('creado_por')
             .filter(caja=caja, estado=SesionCaja.Estado.ABIERTA)
@@ -172,10 +205,11 @@ class AbiertasView(_BaseCaja, APIView):
     """Ids de las cajas con turno abierto (para el selector multi-caja)."""
 
     def get(self, request):
-        ids = SesionCaja.objects.filter(estado=SesionCaja.Estado.ABIERTA).values_list(
-            'caja_id', flat=True,
-        )
-        return Response(list(ids))
+        qs = SesionCaja.objects.filter(estado=SesionCaja.Estado.ABIERTA)
+        propia = sucursal_restringida(request.user)
+        if propia is not None:
+            qs = qs.filter(caja__sucursal=propia)
+        return Response(list(qs.values_list('caja_id', flat=True)))
 
 
 class AbrirCajaView(_BaseCaja, APIView):
@@ -183,6 +217,8 @@ class AbrirCajaView(_BaseCaja, APIView):
         entrada = AbrirCajaSerializer(data=request.data)
         entrada.is_valid(raise_exception=True)
         datos = entrada.validated_data
+        if not puede_operar_caja(request.user, datos['caja']):
+            return _prohibido_otra_sucursal()
         try:
             sesion = abrir_caja(
                 datos['caja'],
@@ -203,6 +239,8 @@ class MovimientosView(_BaseCaja, APIView):
         entrada = CrearMovimientoSerializer(data=request.data)
         entrada.is_valid(raise_exception=True)
         datos = entrada.validated_data
+        if not puede_operar_caja(request.user, datos['sesion'].caja):
+            return _prohibido_otra_sucursal()
         try:
             movimiento = registrar_movimiento(
                 datos['sesion'],
@@ -220,7 +258,11 @@ class MovimientosView(_BaseCaja, APIView):
 
 class MovimientoDetailView(_BaseCaja, APIView):
     def delete(self, request, pk):
-        movimiento = get_object_or_404(MovimientoCaja.objects.select_related('sesion'), pk=pk)
+        movimiento = get_object_or_404(
+            MovimientoCaja.objects.select_related('sesion', 'sesion__caja'), pk=pk,
+        )
+        if not puede_operar_caja(request.user, movimiento.sesion.caja):
+            return _prohibido_otra_sucursal()
         try:
             eliminar_movimiento(movimiento, usuario=request.user)
         except ValidationError as e:
@@ -233,6 +275,8 @@ class CerrarCajaView(_BaseCaja, APIView):
         entrada = CerrarCajaSerializer(data=request.data)
         entrada.is_valid(raise_exception=True)
         datos = entrada.validated_data
+        if not puede_operar_caja(request.user, datos['sesion'].caja):
+            return _prohibido_otra_sucursal()
         try:
             cierre = cerrar_caja(
                 datos['sesion'],
@@ -265,6 +309,9 @@ class CierresView(_BaseCaja, APIView):
         sucursal = request.query_params.get('sucursal')
         if sucursal and sucursal.isdigit():
             qs = qs.filter(sesion__caja__sucursal_id=sucursal)
+        propia = sucursal_restringida(request.user)
+        if propia is not None:
+            qs = qs.filter(sesion__caja__sucursal=propia)
         try:
             limite = min(int(request.query_params.get('limite', 100)), 500)
         except ValueError:

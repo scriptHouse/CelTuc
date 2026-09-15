@@ -474,6 +474,7 @@ export function VentaRapida({
   cajasAbiertas = [],
   porSucursal = false,
   sucursalInicial,
+  soloSucursal,
 }: {
   cajaId?: string
   /** Cajas del local (con su canal fiscal) para mostrar a dónde va la plata. */
@@ -484,6 +485,11 @@ export function VentaRapida({
   porSucursal?: boolean
   /** Sucursal con la que arranca la venta (la que se está mirando en Caja). */
   sucursalInicial?: string
+  /**
+   * El empleado solo ve las cajas de esta sucursal: de una venta de otra
+   * sucursal no se sabe el estado de sus cajas, así que no se inventa.
+   */
+  soloSucursal?: string
 }) {
   const [abierta, setAbierta] = useState(false)
 
@@ -561,6 +567,7 @@ export function VentaRapida({
         cajasAbiertas={cajasAbiertas}
         porSucursal={porSucursal}
         sucursalInicial={sucursalInicial}
+        soloSucursal={soloSucursal}
       />
     </>
   )
@@ -575,6 +582,7 @@ function VentaModal({
   cajasAbiertas,
   porSucursal,
   sucursalInicial,
+  soloSucursal,
 }: {
   abierta: boolean
   onCerrar: () => void
@@ -584,6 +592,7 @@ function VentaModal({
   cajasAbiertas: string[]
   porSucursal: boolean
   sucursalInicial?: string
+  soloSucursal?: string
 }) {
   const toast = useToast()
   const queryClient = useQueryClient()
@@ -723,8 +732,13 @@ function VentaModal({
   )
   // La sucursal elegida no maneja caja: la venta vale igual, pero no entra a
   // ningún arqueo (así se configuró; no es un error).
+  // Venta de otra sucursal que la del empleado: sus cajas no se ven desde acá,
+  // así que solo se dice a qué sucursal va la plata (sin abierta/cerrada).
+  const ventaDeOtraSucursal =
+    porSucursal && Boolean(soloSucursal) && sucursalId != null && String(sucursalId) !== soloSucursal
   const sucursalSinCaja =
     porSucursal &&
+    !ventaDeOtraSucursal &&
     sucursalId != null &&
     !cajas.some((c) => c.activa && c.sucursalId === String(sucursalId))
   const nombreSucursal = activas.find((s) => s.id === sucursalId)?.nombre ?? 'Esta sucursal'
@@ -733,6 +747,7 @@ function VentaModal({
   // la MISMA venta se reparte entre las dos cajas (cada canal a la suya).
   const destinos = useMemo(() => {
     const acumulado = new Map<string, { caja: CajaRegistradora; monto: number; facturacion: string }>()
+    if (ventaDeOtraSucursal) return []
     const partes: Array<[FacturacionVenta, number]> = dividido
       ? pagos.map((p) => [p.facturacion, Number.isFinite(p.monto) ? p.monto : 0])
       : [[facturacion, total]]
@@ -751,7 +766,7 @@ function VentaModal({
       ...d,
       abierta: cajasAbiertas.includes(d.caja.id),
     }))
-  }, [dividido, pagos, facturacion, total, cajas, cajasAbiertas, ambitoCaja])
+  }, [dividido, pagos, facturacion, total, cajas, cajasAbiertas, ambitoCaja, ventaDeOtraSucursal])
 
   // ---- Cuenta que va a emitir la factura ------------------------------------
   // Las MISMAS cuentas (y los mismos límites mensuales) del módulo Facturación:
@@ -1501,6 +1516,15 @@ function VentaModal({
           )}
           {/* A qué caja(s) va la plata: con partes facturadas y no facturadas,
              una misma venta se reparte entre las dos cajas. */}
+          {ventaDeOtraSucursal && (
+            <p className="mt-2 flex items-start gap-1.5 text-xs text-ink-500">
+              <Wallet className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span>
+                Es una venta de <b>{nombreSucursal}</b>: la plata entra a la caja de esa sucursal,
+                no a la tuya.
+              </span>
+            </p>
+          )}
           {sucursalSinCaja && (
             <p className="mt-2 flex items-start gap-1.5 text-xs text-ink-500">
               <Wallet className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />

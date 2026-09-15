@@ -627,6 +627,12 @@ export function AyudaCaja() {
           la plata de un local nunca cae en el cajón de otro. Una sucursal <b>sin caja</b> vende
           igual, pero sus ventas no entran a ningún arqueo.
         </p>
+        <p>
+          Si tu cuenta tiene una <b>sucursal asignada</b>, ves y operás <b>solo la caja de tu
+          sucursal</b> (su turno, sus movimientos y sus cierres). El administrador y el
+          superadministrador ven todas: arriba eligen una sucursal o <b>«Todas»</b>, que muestra las
+          cajas de cada sucursal agrupadas.
+        </p>
       </AyudaSeccion>
 
       <AyudaSeccion titulo="La venta de mostrador (el botón VERDE)">
