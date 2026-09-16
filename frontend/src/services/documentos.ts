@@ -183,7 +183,7 @@ export function buscarClientesDocumento(busqueda: string): Promise<ClienteSugeri
   )
 }
 
-/** Un integrante del equipo, para sugerir en «Recibido por». */
+/** Un integrante del equipo, para sugerir en «Recepción». */
 export interface EmpleadoSugerido {
   id: number
   nombre: string
@@ -192,7 +192,7 @@ export interface EmpleadoSugerido {
 }
 
 /**
- * Nombres del equipo para el campo «Recibido por» de los papeles. Es un
+ * Nombres del equipo para el campo «Recepción» de los papeles. Es un
  * endpoint propio de Documentos (no el de Empleados, que pide `ver_empleados`):
  * trae solo el nombre, y el de la cuenta logueada adelante.
  */

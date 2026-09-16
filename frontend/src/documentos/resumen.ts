@@ -70,12 +70,17 @@ export function resumenRecepcion(d: RecepcionData): ResumenDocumento {
   }
 }
 
+/**
+ * Garantía / Reparación. El papel ya no tiene PRESUPUESTO: se archiva el precio
+ * de LISTA (campo `pendiente`), como el presupuesto de service, y si no se
+ * cargó, el de EFECTIVO (`sena`).
+ */
 export function resumenReparacion(d: ReparacionData): ResumenDocumento {
   return {
     referencia: d.cupon,
     cliente: d.recibiDe,
     detalle: juntar(d.equipos, d.falla, imei(d.imei)),
-    total: montoDe(d.presupuesto),
+    total: montoDe(d.pendiente) ?? montoDe(d.sena),
   }
 }
 

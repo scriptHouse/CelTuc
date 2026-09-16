@@ -35,9 +35,8 @@ export function ReparacionPdf({ datos, direccion }: { datos: ReparacionData; dir
         </View>
         <View style={{ width: GAP_W }} />
         <View style={{ width: RIGHT_W, borderWidth: BOX, borderColor: INK }}>
-          <PdfMiniRow label={REP_LABELS.presupuesto} value={datos.presupuesto} divider />
-          <PdfMiniRow label={REP_LABELS.sena} value={datos.sena} divider />
-          <PdfMiniRow label={REP_LABELS.pendiente} value={datos.pendiente} />
+          <PdfMiniRow label={REP_LABELS.pendiente} value={datos.pendiente} divider />
+          <PdfMiniRow label={REP_LABELS.sena} value={datos.sena} />
         </View>
       </View>
 

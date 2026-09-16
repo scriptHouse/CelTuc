@@ -1,7 +1,7 @@
 import { Document, Image, Page, StyleSheet, Text, View } from '@react-pdf/renderer'
 import type { ReactNode } from 'react'
 import { LOGO_CELTUC, ICON_FACEBOOK, ICON_INSTAGRAM } from './assets'
-import { EMPRESA, RECIBIDO_POR, lineaDireccion } from './content'
+import { EMPRESA, RECEPCION, lineaDireccion } from './content'
 import { BOX, FRAME, INK, STD_CONTENT_W, STD_PAD, STD_W, pt, type Run } from './kit'
 
 /* ============================================================================
@@ -99,7 +99,7 @@ function cuerpoQueEntra(texto: string, ancho: number, max: number, min: number):
 const HDR_LABEL_W = 85
 const HDR_BOX_W = 270
 const HDR_RECIBIDO_AIRE = 6
-/** Ancho de la etiqueta RECIBIDO POR: sobra, está alineada a la derecha. */
+/** Ancho de la etiqueta RECEPCION: sobra, está alineada a la derecha. */
 const HDR_RECIBIDO_ETQ_W = 130
 
 /** Encabezado CelTuc del formato nuevo (filas 2-4). Espeja `CtHeader` del kit HTML. */
@@ -118,7 +118,7 @@ export function PdfCtHeader({
   anio: string
   socials?: 'redes' | 'simple'
   direccion?: string
-  /** Renglón RECIBIDO POR (fila 4): aparece solo si se pasa, aunque sea ''. */
+  /** Renglón RECEPCION (fila 4): aparece solo si se pasa, aunque sea ''. */
   recibidoPor?: string
 }) {
   return (
@@ -154,9 +154,9 @@ export function PdfCtHeader({
         </View>
         {recibidoPor !== undefined ? (
           <View style={{ height: 20, flexDirection: 'row', alignItems: 'center' }}>
-            {/* La etiqueta es más larga que su columna. En @react-pdf un texto se
-                parte si no entra en su caja, así que va suelta (absoluta), pegada
-                a la caja y sobrando hacia la izquierda, igual que en el preview. */}
+            {/* La etiqueta va justa en su columna. En @react-pdf un texto se parte
+                si no entra en su caja, así que va suelta (absoluta), pegada a la
+                caja y con lugar de sobra hacia la izquierda, igual que en el preview. */}
             <Text
               style={{
                 position: 'absolute',
@@ -166,7 +166,7 @@ export function PdfCtHeader({
                 textAlign: 'right',
               }}
             >
-              {RECIBIDO_POR}
+              {RECEPCION}
             </Text>
             <View style={{ width: HDR_LABEL_W }} />
             <View style={{ width: HDR_BOX_W, height: 20, borderWidth: BOX, borderColor: INK, justifyContent: 'center' }}>
@@ -244,7 +244,7 @@ export function PdfDocShell({
   firmaIzq?: string
   firmaDer?: string
   direccion?: string
-  /** Renglón RECIBIDO POR del encabezado (ver `PdfCtHeader`). */
+  /** Renglón RECEPCION del encabezado (ver `PdfCtHeader`). */
   recibidoPor?: string
   children: ReactNode
 }) {

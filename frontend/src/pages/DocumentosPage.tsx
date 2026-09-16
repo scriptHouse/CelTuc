@@ -33,7 +33,7 @@ import {
 /** Clave de caché del próximo cupón correlativo (se invalida al archivar). */
 const QK_PROXIMO_CUPON = 'documentos-proximo-cupon'
 
-/** Clave de caché de los nombres del equipo que sugiere «Recibido por». */
+/** Clave de caché de los nombres del equipo que sugiere «Recepción». */
 const QK_EMPLEADOS = 'documentos-empleados'
 
 /** "19/08 14:30" para los cupones anteriores del editor. */
@@ -146,7 +146,7 @@ export function DocumentosPage() {
     queryFn: () => listarDocumentos({ tipo: active.id, limit: 8 }),
     enabled: vista === 'generar' && Boolean(cuponAuto),
   })
-  // Nombres del equipo para el campo «Recibido por» (Garantía / Reparación y
+  // Nombres del equipo para el campo «Recepción» (Garantía / Reparación y
   // Compra / Venta). Cambian poco: se piden una vez y quedan en caché. Si la
   // carga falla no se avisa nada: el campo sigue siendo de texto libre.
   const empleados = useQuery({

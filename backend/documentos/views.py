@@ -318,7 +318,7 @@ class ClientesParaDocumentoView(APIView):
 
 
 class EmpleadosParaDocumentoView(APIView):
-    """Nombres del equipo, para sugerir en el campo «Recibido por» de los papeles.
+    """Nombres del equipo, para sugerir en el campo «Recepción» de los papeles.
 
     Mismo criterio que el autocompletado de clientes: A PROPOSITO no reusa el
     listado de Empleados, que pide `ver_empleados` y trae la cuenta, el rol y la

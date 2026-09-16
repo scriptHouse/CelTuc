@@ -1,6 +1,6 @@
 import { useId, type CSSProperties, type ReactNode } from 'react'
 import { LOGO_CELTUC, ICON_FACEBOOK, ICON_INSTAGRAM } from './assets'
-import { EMPRESA, RECIBIDO_POR, lineaDireccion } from './content'
+import { EMPRESA, RECEPCION, lineaDireccion } from './content'
 
 /* ============================================================================
  * Kit de primitivas para los documentos de CelTuc (preview HTML rellenable).
@@ -243,12 +243,12 @@ export const STD_CONTENT_W = STD_W - STD_PAD * 2 // 754 (columnas B…I)
 const HDR_LEFT_W = 399 // columnas B…E
 const HDR_LABEL_W = 85 // columna F
 const HDR_BOX_W = 270 // columnas G…I
-const HDR_RECIBIDO_AIRE = 6 // entre la etiqueta RECIBIDO POR y su caja
+const HDR_RECIBIDO_AIRE = 6 // entre la etiqueta RECEPCION y su caja
 
 /**
  * Encabezado CelTuc del formato nuevo: logo + identidad (filas 2-4) y, a la
  * derecha, CUPON N° (fila 2), FECHA en tres cajas (fila 3) y, en los papeles
- * que lo usan, RECIBIDO POR (fila 4).
+ * que lo usan, RECEPCION (fila 4).
  */
 export function CtHeader({
   cupon,
@@ -280,12 +280,12 @@ export function CtHeader({
   /** Dirección configurable del encabezado. */
   direccion?: string
   /**
-   * Renglón RECIBIDO POR, debajo de la fecha. Aparece solo si se pasa
+   * Renglón RECEPCION, debajo de la fecha. Aparece solo si se pasa
    * `onRecibidoPor`: en los demás papeles esa fila sigue vacía, como siempre.
    */
   recibidoPor?: string
   onRecibidoPor?: Setter
-  /** Nombres que se sugieren en RECIBIDO POR (el equipo). */
+  /** Nombres que se sugieren en RECEPCION (el equipo). */
   sugerenciasRecibido?: readonly string[]
 }) {
   return (
@@ -327,11 +327,11 @@ export function CtHeader({
         </div>
         {onRecibidoPor ? (
           <div style={{ height: 20, display: 'flex', alignItems: 'center' }}>
-            {/* La etiqueta es más larga que su columna: se alinea contra la caja
-                y el sobrante cae hacia la izquierda, sobre el espacio vacío que
-                queda al lado de las redes (así la caja no se corre). */}
+            {/* La etiqueta se alinea contra la caja. Si no entra en su columna, el
+                sobrante cae hacia la izquierda, sobre el espacio vacío que queda
+                al lado de las redes (así la caja nunca se corre). */}
             <div style={{ width: HDR_LABEL_W, display: 'flex', justifyContent: 'flex-end', paddingRight: HDR_RECIBIDO_AIRE }}>
-              <span style={{ fontSize: pt(10), whiteSpace: 'nowrap', flexShrink: 0 }}>{RECIBIDO_POR}</span>
+              <span style={{ fontSize: pt(10), whiteSpace: 'nowrap', flexShrink: 0 }}>{RECEPCION}</span>
             </div>
             <div style={{ width: HDR_BOX_W, height: 20, border: `${BOX}px solid ${INK}`, boxSizing: 'border-box' }}>
               <CampoSugerido
@@ -340,7 +340,7 @@ export function CtHeader({
                 readOnly={readOnly}
                 sugerencias={sugerenciasRecibido}
                 align="center"
-                ariaLabel="Recibido por"
+                ariaLabel="Recepción"
               />
             </div>
           </div>
@@ -420,7 +420,7 @@ export function DocShell({
   firmaIzq?: string
   firmaDer?: string
   direccion?: string
-  /** Renglón RECIBIDO POR del encabezado (ver `CtHeader`). */
+  /** Renglón RECEPCION del encabezado (ver `CtHeader`). */
   recibidoPor?: string
   onRecibidoPor?: Setter
   sugerenciasRecibido?: readonly string[]

@@ -56,7 +56,7 @@ export interface PaperProps<T> {
   /** Dirección del encabezado (configurable desde la página). */
   direccion?: string
   /**
-   * Nombres del equipo, para sugerir en «Recibido por». Solo lo usan los
+   * Nombres del equipo, para sugerir en «Recepción». Solo lo usan los
    * papeles que tienen ese campo; si no llega (o falla la carga), el campo
    * sigue siendo de texto libre.
    */

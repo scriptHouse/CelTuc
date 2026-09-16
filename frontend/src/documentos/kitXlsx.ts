@@ -1,7 +1,7 @@
 import ExcelJS from 'exceljs'
 import { sanearXlsx } from '@/components/exportar/sanearXlsx'
 import { LOGO_CELTUC, ICON_FACEBOOK, ICON_INSTAGRAM } from './assets'
-import { EMPRESA, RECIBIDO_POR, lineaDireccion } from './content'
+import { EMPRESA, RECEPCION, lineaDireccion } from './content'
 import type { Run } from './kit'
 
 /* ============================================================================
@@ -103,7 +103,7 @@ export const ALIGN = {
 export const STD_COLS = [0.86, 11.43, 13, 16, 13.71, 11.43, 13, 13, 10.43, 0.86]
 
 /** Encabezado CelTuc del formato nuevo (filas 2-4): identidad + CUPON (fila 2),
- *  FECHA en tres cajas (fila 3) y, si se pasa `recibidoPor`, RECIBIDO POR (fila 4),
+ *  FECHA en tres cajas (fila 3) y, si se pasa `recibidoPor`, RECEPCION (fila 4),
  *  con logo e íconos. Agrega bordes al acumulador `b`. */
 export function ctHeaderXlsx(
   wb: ExcelJS.Workbook,
@@ -116,7 +116,7 @@ export function ctHeaderXlsx(
     mes: string
     anio: string
     direccion?: string
-    /** Renglón RECIBIDO POR: aparece solo si se pasa, aunque sea ''. */
+    /** Renglón RECEPCION: aparece solo si se pasa, aunque sea ''. */
     recibidoPor?: string
   },
 ) {
@@ -141,9 +141,9 @@ export function ctHeaderXlsx(
   b.h(7, 9, 3, 'bottom')
   ;[7, 8, 9].forEach((c) => b.add(c, 3, { left: MEDIUM, right: MEDIUM }))
   if (opts.recibidoPor !== undefined) {
-    // Etiqueta alineada a la derecha: es más larga que la columna F y así el
-    // sobrante cae sobre E4, que está vacía (centrada se cortaría contra G4).
-    put(ws, 'F4', RECIBIDO_POR, calibri(10), ALIGN.right)
+    // Etiqueta alineada a la derecha, pegada a la caja como en el preview. Si
+    // no entrara en F, el sobrante cae sobre E4, que está vacía.
+    put(ws, 'F4', RECEPCION, calibri(10), ALIGN.right)
     // El nombre ocupa las tres columnas de la caja. Al ser un rango combinado,
     // el borde va a la celda maestra (`cajaCompletaEn`) y NO por el acumulador
     // `b`: escribirle a H4/I4 le pisaría el borde a G4.

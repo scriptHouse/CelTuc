@@ -43,9 +43,8 @@ export function ReparacionPaper({ datos, onChange, readOnly, direccion, empleado
         </div>
         <div style={{ width: GAP_W }} />
         <div style={{ width: RIGHT_W, border: `${BOX}px solid ${INK}`, boxSizing: 'border-box' }}>
-          <MiniRow label={REP_LABELS.presupuesto} value={datos.presupuesto} onChange={set('presupuesto')} readOnly={readOnly} divider />
-          <MiniRow label={REP_LABELS.sena} value={datos.sena} onChange={set('sena')} readOnly={readOnly} divider />
-          <MiniRow label={REP_LABELS.pendiente} value={datos.pendiente} onChange={set('pendiente')} readOnly={readOnly} />
+          <MiniRow label={REP_LABELS.pendiente} value={datos.pendiente} onChange={set('pendiente')} readOnly={readOnly} divider />
+          <MiniRow label={REP_LABELS.sena} value={datos.sena} onChange={set('sena')} readOnly={readOnly} />
         </div>
       </div>
 

@@ -31,8 +31,12 @@ export function lineaDireccion(direccion: string): string {
  * papeles que registran quién tomó el equipo (Garantía / Reparación y
  * Compra / Venta). Vive acá por lo mismo que `lineaDireccion`: la usan el
  * preview, el PDF y el Excel.
+ *
+ * Sin tilde, como el resto de las etiquetas impresas (CUPON N°, GARANTIA
+ * REPARACION). Empezó llamándose «RECIBIDO POR»: el dato sigue guardándose
+ * como `recibidoPor`, porque así quedó en los documentos ya archivados.
  */
-export const RECIBIDO_POR = 'RECIBIDO POR'
+export const RECEPCION = 'RECEPCION'
 
 /**
  * Direcciones disponibles para el encabezado. Se elige una desde la página y

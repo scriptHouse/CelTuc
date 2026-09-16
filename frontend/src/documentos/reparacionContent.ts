@@ -17,7 +17,8 @@ export interface ReparacionData {
   imei: string
   /** Codigo de desbloqueo del equipo: sin el, el service no puede probarlo. */
   pin: string
-  presupuesto: string
+  /* PRESUPUESTO se sacó del papel el 16-sep-2026 (a pedido). Los documentos
+     archivados antes lo siguen teniendo en `datos`; nada lo vuelve a leer. */
   /* `sena` y `pendiente` conservan su nombre historico: en el papel son las
      etiquetas EFECTIVO y LISTA. No se renombran porque el historial guarda el
      formulario con estas claves y los documentos ya archivados las usan. */
@@ -41,7 +42,6 @@ export function reparacionVacia(): ReparacionData {
     mail: '',
     imei: '',
     pin: '',
-    presupuesto: '',
     sena: '',
     pendiente: '',
     observaciones: '',
@@ -65,7 +65,8 @@ export const REP_LABELS = {
   mail: 'MAIL:',
   imei: 'IMEI:',
   pin: 'PIN:',
-  presupuesto: 'PRESUPUESTO:',
+  // En el papel va primero LISTA y abajo EFECTIVO (el orden lo dan el Paper,
+  // el PDF y el XLSX, no este objeto).
   sena: 'EFECTIVO:',
   pendiente: 'LISTA:',
   observaciones: 'OBSERVACIONES:',

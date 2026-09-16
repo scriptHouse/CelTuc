@@ -397,7 +397,7 @@ class AutocompletadoClientesTests(TestCase):
 
 
 class SugerenciasRecibidoPorTests(TestCase):
-    """Los nombres que sugiere el campo «Recibido por» de los papeles."""
+    """Los nombres que sugiere el campo «Recepción» de los papeles."""
 
     def setUp(self):
         # Rol armado a mano y sin `ver_empleados`: los roles son configurables, y

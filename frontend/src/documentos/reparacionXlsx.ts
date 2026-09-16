@@ -28,10 +28,11 @@ export async function construirReparacionXlsx(d: ReparacionData, direccion?: str
     direccion,
     recibidoPor: d.recibidoPor,
   })
-  // La caja del equipo tiene una fila mas que la de importes: arrancan juntas
-  // y la izquierda baja un renglon, igual que en el PDF.
+  // La caja del equipo tiene dos filas mas que la de importes: arrancan juntas
+  // y la izquierda baja dos renglones. (En el preview y el PDF, en cambio, la
+  // caja de importes se estira hasta el alto de la del equipo.)
   b.caja(2, 11, 4, 14, [11, 12, 13]) // CEL / MAIL / IMEI / PIN
-  b.caja(6, 11, 9, 13, [11, 12]) // PRESUPUESTO / EFECTIVO / LISTA
+  b.caja(6, 11, 9, 12, [11]) // LISTA / EFECTIVO
   b.apply(ws)
   cajaCompletaEn(ws, 'A1')
   cajaCompletaEn(ws, 'B16') // observaciones (combinada, ancho de las dos cajas)
@@ -49,9 +50,8 @@ export async function construirReparacionXlsx(d: ReparacionData, direccion?: str
   put(ws, 'B12', con(REP_LABELS.mail, d.mail, REP_LABELS.mail), bold10, ALIGN.left)
   put(ws, 'B13', con(REP_LABELS.imei, d.imei, REP_LABELS.imei), bold10, ALIGN.left)
   put(ws, 'B14', con(REP_LABELS.pin, d.pin, REP_LABELS.pin), bold10, ALIGN.left)
-  put(ws, 'F11', con(REP_LABELS.presupuesto, d.presupuesto, REP_LABELS.presupuesto), bold10, ALIGN.left)
+  put(ws, 'F11', con(REP_LABELS.pendiente, d.pendiente, REP_LABELS.pendiente), bold10, ALIGN.left)
   put(ws, 'F12', con(REP_LABELS.sena, d.sena, REP_LABELS.sena), bold10, ALIGN.left)
-  put(ws, 'F13', con(REP_LABELS.pendiente, d.pendiente, REP_LABELS.pendiente), bold10, ALIGN.left)
 
   put(ws, 'B16', con(REP_LABELS.observaciones, d.observaciones, REP_LABELS.observaciones), bold10, ALIGN.left)
 
