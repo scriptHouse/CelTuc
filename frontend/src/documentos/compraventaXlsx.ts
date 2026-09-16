@@ -69,7 +69,14 @@ export async function construirCompraventaXlsx(d: CompraventaData, direccion?: s
   b.h(1, 10, 50, 'bottom')
   b.v(1, 2, 50, 'left')
   b.v(10, 2, 50, 'right')
-  ctHeaderXlsx(wb, ws, b, { cupon: d.cupon, dia: d.fechaDia, mes: d.fechaMes, anio: d.fechaAnio, direccion })
+  ctHeaderXlsx(wb, ws, b, {
+    cupon: d.cupon,
+    dia: d.fechaDia,
+    mes: d.fechaMes,
+    anio: d.fechaAnio,
+    direccion,
+    recibidoPor: d.recibidoPor,
+  })
   b.apply(ws)
   cajaCompletaEn(ws, 'A1')
 

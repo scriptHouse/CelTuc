@@ -5,6 +5,7 @@ from .views import (
     DocumentoArchivoView,
     DocumentoDetailView,
     DocumentoListCreateView,
+    EmpleadosParaDocumentoView,
     EnviarDocumentoEmailView,
     ProximoCuponView,
 )
@@ -15,6 +16,7 @@ urlpatterns = [
     path('', DocumentoListCreateView.as_view(), name='documento-list'),
     # Antes de `<int:pk>/` no hace falta (no colisiona), pero se lee mejor junto.
     path('clientes/', ClientesParaDocumentoView.as_view(), name='documento-clientes'),
+    path('empleados/', EmpleadosParaDocumentoView.as_view(), name='documento-empleados'),
     path('proximo-cupon/', ProximoCuponView.as_view(), name='documento-proximo-cupon'),
     path('<int:pk>/', DocumentoDetailView.as_view(), name='documento-detail'),
     path('<int:pk>/archivo/', DocumentoArchivoView.as_view(), name='documento-archivo'),

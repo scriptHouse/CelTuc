@@ -1,7 +1,7 @@
 import ExcelJS from 'exceljs'
 import { sanearXlsx } from '@/components/exportar/sanearXlsx'
 import { LOGO_CELTUC, ICON_FACEBOOK, ICON_INSTAGRAM } from './assets'
-import { EMPRESA, lineaDireccion } from './content'
+import { EMPRESA, RECIBIDO_POR, lineaDireccion } from './content'
 import type { Run } from './kit'
 
 /* ============================================================================
@@ -102,13 +102,23 @@ export const ALIGN = {
 /** Anchos de columna del formato estándar (Excel nuevo). */
 export const STD_COLS = [0.86, 11.43, 13, 16, 13.71, 11.43, 13, 13, 10.43, 0.86]
 
-/** Encabezado CelTuc del formato nuevo (filas 2-4): identidad + CUPON (fila 2) y
- *  FECHA en tres cajas (fila 3), con logo e íconos. Agrega bordes al acumulador `b`. */
+/** Encabezado CelTuc del formato nuevo (filas 2-4): identidad + CUPON (fila 2),
+ *  FECHA en tres cajas (fila 3) y, si se pasa `recibidoPor`, RECIBIDO POR (fila 4),
+ *  con logo e íconos. Agrega bordes al acumulador `b`. */
 export function ctHeaderXlsx(
   wb: ExcelJS.Workbook,
   ws: ExcelJS.Worksheet,
   b: Bordes,
-  opts: { socials?: 'redes' | 'simple'; cupon: string; dia: string; mes: string; anio: string; direccion?: string },
+  opts: {
+    socials?: 'redes' | 'simple'
+    cupon: string
+    dia: string
+    mes: string
+    anio: string
+    direccion?: string
+    /** Renglón RECIBIDO POR: aparece solo si se pasa, aunque sea ''. */
+    recibidoPor?: string
+  },
 ) {
   const ig = opts.socials === 'simple' ? 'CelTuc' : EMPRESA.instagram
   const fb = opts.socials === 'simple' ? 'CelTuc' : EMPRESA.facebook
@@ -130,6 +140,18 @@ export function ctHeaderXlsx(
   b.h(7, 9, 3, 'top')
   b.h(7, 9, 3, 'bottom')
   ;[7, 8, 9].forEach((c) => b.add(c, 3, { left: MEDIUM, right: MEDIUM }))
+  if (opts.recibidoPor !== undefined) {
+    // Etiqueta alineada a la derecha: es más larga que la columna F y así el
+    // sobrante cae sobre E4, que está vacía (centrada se cortaría contra G4).
+    put(ws, 'F4', RECIBIDO_POR, calibri(10), ALIGN.right)
+    // El nombre ocupa las tres columnas de la caja. Al ser un rango combinado,
+    // el borde va a la celda maestra (`cajaCompletaEn`) y NO por el acumulador
+    // `b`: escribirle a H4/I4 le pisaría el borde a G4.
+    ws.mergeCells('G4:I4')
+    // Texto libre: si no entra, Excel achica la letra hasta que entre entero.
+    put(ws, 'G4', opts.recibidoPor, calibri(11), { ...ALIGN.center, shrinkToFit: true })
+    cajaCompletaEn(ws, 'G4')
+  }
   // Imágenes
   const add = (uri: string, ext: 'jpeg' | 'png') => wb.addImage({ base64: uri.split(',')[1], extension: ext })
   ws.addImage(add(LOGO_CELTUC, 'jpeg'), { tl: { col: 1.05, row: 1.1 }, ext: { width: 56, height: 56 }, editAs: 'oneCell' })

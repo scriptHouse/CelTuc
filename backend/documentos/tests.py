@@ -16,8 +16,9 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from auditoria.models import RegistroAuditoria
+from empleados.models import Empleado
 from facturacion.models import Cliente
-from usuarios.models import Rol, Usuario
+from usuarios.models import Permiso, Rol, Usuario
 
 from .models import DocumentoGenerado
 
@@ -390,6 +391,51 @@ class AutocompletadoClientesTests(TestCase):
     def test_sin_termino_no_lista_la_base(self):
         self.assertEqual(self.cliente.get(self.url).data, [])
         self.assertEqual(self.cliente.get(self.url, {'buscar': 'a'}).data, [])
+
+    def test_pide_sesion(self):
+        self.assertEqual(APIClient().get(self.url).status_code, 401)
+
+
+class SugerenciasRecibidoPorTests(TestCase):
+    """Los nombres que sugiere el campo «Recibido por» de los papeles."""
+
+    def setUp(self):
+        # Rol armado a mano y sin `ver_empleados`: los roles son configurables, y
+        # quien completa papeles no tiene por qué poder ver el módulo Empleados.
+        rol = Rol.objects.create(nombre='Mostrador sin empleados test')
+        rol.permisos.set(Permiso.objects.filter(codigo='ver_panel'))
+        self.cuenta = Usuario.objects.create_user(
+            email='doc-rp@celtuc.ar', username='docrp', password='x', rol=rol,
+        )
+        self.cliente = APIClient()
+        self.cliente.force_authenticate(self.cuenta)
+        self.url = reverse('documentos:documento-empleados')
+        Empleado.objects.create(nombre='Ana', apellido='Alvarez')
+        Empleado.objects.create(nombre='Zoe', apellido='Zarate', usuario=self.cuenta)
+        Empleado.objects.create(nombre='Bruno', apellido='Benitez')
+
+    def test_un_empleado_sin_permiso_de_empleados_puede_pedirlos(self):
+        self.assertNotIn('ver_empleados', self.cuenta.codigos_permisos())
+        self.assertEqual(self.cliente.get(self.url).status_code, 200)
+
+    def test_el_propio_va_primero_y_el_resto_por_apellido(self):
+        r = self.cliente.get(self.url)
+        self.assertEqual([e['nombre'] for e in r.data], ['Zoe Zarate', 'Ana Alvarez', 'Bruno Benitez'])
+        self.assertEqual([e['propio'] for e in r.data], [True, False, False])
+
+    def test_devuelve_solo_el_nombre(self):
+        r = self.cliente.get(self.url)
+        self.assertEqual(set(r.data[0]), {'id', 'nombre', 'propio'})
+
+    def test_no_sugiere_empleados_dados_de_baja(self):
+        Empleado.objects.get(nombre='Bruno').delete()
+        nombres = [e['nombre'] for e in self.cliente.get(self.url).data]
+        self.assertNotIn('Bruno Benitez', nombres)
+
+    def test_un_nombre_repetido_sale_una_sola_vez(self):
+        Empleado.objects.create(nombre='ana', apellido='ALVAREZ')
+        nombres = [e['nombre'].casefold() for e in self.cliente.get(self.url).data]
+        self.assertEqual(nombres.count('ana alvarez'), 1)
 
     def test_pide_sesion(self):
         self.assertEqual(APIClient().get(self.url).status_code, 401)

@@ -17,6 +17,7 @@ export function ReparacionPdf({ datos, direccion }: { datos: ReparacionData; dir
       mes={datos.fechaMes}
       anio={datos.fechaAnio}
       direccion={direccion}
+      recibidoPor={datos.recibidoPor}
       garantia={REP_GARANTIA}
     >
       <PdfLine label={REP_LABELS.recibiDe} value={datos.recibiDe} height={20} fontSize={pt(10)} />

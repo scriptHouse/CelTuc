@@ -27,6 +27,14 @@ export function lineaDireccion(direccion: string): string {
 }
 
 /**
+ * Etiqueta del renglón que va debajo de la FECHA en el encabezado de los
+ * papeles que registran quién tomó el equipo (Garantía / Reparación y
+ * Compra / Venta). Vive acá por lo mismo que `lineaDireccion`: la usan el
+ * preview, el PDF y el Excel.
+ */
+export const RECIBIDO_POR = 'RECIBIDO POR'
+
+/**
  * Direcciones disponibles para el encabezado. Se elige una desde la página y
  * se aplica a TODOS los documentos (preview, PDF y Excel).
  */

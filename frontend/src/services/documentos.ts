@@ -183,6 +183,23 @@ export function buscarClientesDocumento(busqueda: string): Promise<ClienteSugeri
   )
 }
 
+/** Un integrante del equipo, para sugerir en «Recibido por». */
+export interface EmpleadoSugerido {
+  id: number
+  nombre: string
+  /** true si es el empleado de la cuenta que consulta (viene primero). */
+  propio: boolean
+}
+
+/**
+ * Nombres del equipo para el campo «Recibido por» de los papeles. Es un
+ * endpoint propio de Documentos (no el de Empleados, que pide `ver_empleados`):
+ * trae solo el nombre, y el de la cuenta logueada adelante.
+ */
+export function listarEmpleadosDocumento(): Promise<EmpleadoSugerido[]> {
+  return api.get<EmpleadoSugerido[]>('/documentos/empleados/', token())
+}
+
 /** Borrado lógico: sale del historial pero no se pierde. Solo administradores. */
 export function eliminarDocumento(id: number): Promise<void> {
   return api.del<void>(`/documentos/${id}/`, token())

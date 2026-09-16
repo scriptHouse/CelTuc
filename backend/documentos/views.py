@@ -317,6 +317,46 @@ class ClientesParaDocumentoView(APIView):
         ])
 
 
+class EmpleadosParaDocumentoView(APIView):
+    """Nombres del equipo, para sugerir en el campo «Recibido por» de los papeles.
+
+    Mismo criterio que el autocompletado de clientes: A PROPOSITO no reusa el
+    listado de Empleados, que pide `ver_empleados` y trae la cuenta, el rol y la
+    sucursal de cada uno. Aca va solo el nombre que el empleado escribiria a
+    mano en el papel, asi que alcanza con poder usar Documentos. Los empleados
+    dados de baja (borrado logico) no se sugieren.
+
+    El de la cuenta que consulta va primero: casi siempre es quien recibe el
+    equipo, asi queda a un click. Dos empleados con el mismo nombre salen una
+    sola vez (en el papel serian el mismo texto).
+    """
+
+    permission_classes = [HistorialDocumentos]
+
+    def get(self, request):
+        from empleados.models import Empleado
+
+        empleados = list(
+            Empleado.objects.order_by('apellido', 'nombre').only('id', 'nombre', 'apellido', 'usuario_id')
+        )
+        # `sort` es estable: el propio pasa adelante y el resto conserva el orden.
+        empleados.sort(key=lambda e: e.usuario_id != request.user.pk)
+
+        vistos = set()
+        sugeridos = []
+        for empleado in empleados:
+            nombre = empleado.nombre_completo
+            if not nombre or nombre.casefold() in vistos:
+                continue
+            vistos.add(nombre.casefold())
+            sugeridos.append({
+                'id': empleado.pk,
+                'nombre': nombre,
+                'propio': empleado.usuario_id == request.user.pk,
+            })
+        return Response(sugeridos)
+
+
 class DocumentoDetailView(APIView):
     """DELETE: saca el documento del historial (borrado logico). Solo admin."""
 

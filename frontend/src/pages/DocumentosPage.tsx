@@ -21,6 +21,7 @@ import { BuscarClienteModal } from '@/documentos/BuscarClienteModal'
 import { EnviarDocumentoModal } from '@/documentos/EnviarDocumentoModal'
 import {
   listarDocumentos,
+  listarEmpleadosDocumento,
   proximoCupon,
   registrarDocumento,
   type ClienteSugerido,
@@ -31,6 +32,9 @@ import {
 
 /** Clave de caché del próximo cupón correlativo (se invalida al archivar). */
 const QK_PROXIMO_CUPON = 'documentos-proximo-cupon'
+
+/** Clave de caché de los nombres del equipo que sugiere «Recibido por». */
+const QK_EMPLEADOS = 'documentos-empleados'
 
 /** "19/08 14:30" para los cupones anteriores del editor. */
 function fechaCorta(iso: string): string {
@@ -142,6 +146,17 @@ export function DocumentosPage() {
     queryFn: () => listarDocumentos({ tipo: active.id, limit: 8 }),
     enabled: vista === 'generar' && Boolean(cuponAuto),
   })
+  // Nombres del equipo para el campo «Recibido por» (Garantía / Reparación y
+  // Compra / Venta). Cambian poco: se piden una vez y quedan en caché. Si la
+  // carga falla no se avisa nada: el campo sigue siendo de texto libre.
+  const empleados = useQuery({
+    queryKey: [QK_EMPLEADOS],
+    queryFn: listarEmpleadosDocumento,
+    enabled: vista === 'generar',
+    staleTime: 5 * 60_000,
+    select: (lista) => lista.map((e) => e.nombre),
+  })
+
   // Un mismo papel se exporta varias veces (PDF y Excel): un renglón por cupón.
   const ultimos = useMemo(() => {
     const unicos: DocumentoGenerado[] = []
@@ -581,7 +596,7 @@ export function DocumentosPage() {
             <div className="mx-auto" style={{ maxWidth: Math.min(active.naturalW * 1.55, 820) }}>
               <div className="overflow-hidden rounded-[5px] bg-white shadow-[0_12px_44px_rgba(10,10,11,0.18)] ring-1 ring-black/5">
                 <PaperScaler naturalW={active.naturalW} naturalH={active.naturalH}>
-                  <Paper datos={datos} onChange={patch} direccion={direccion} />
+                  <Paper datos={datos} onChange={patch} direccion={direccion} empleados={empleados.data} />
                 </PaperScaler>
               </div>
             </div>

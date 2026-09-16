@@ -1,7 +1,7 @@
 import { Document, Image, Page, StyleSheet, Text, View } from '@react-pdf/renderer'
 import type { ReactNode } from 'react'
 import { LOGO_CELTUC, ICON_FACEBOOK, ICON_INSTAGRAM } from './assets'
-import { EMPRESA, lineaDireccion } from './content'
+import { EMPRESA, RECIBIDO_POR, lineaDireccion } from './content'
 import { BOX, FRAME, INK, STD_CONTENT_W, STD_PAD, STD_W, pt, type Run } from './kit'
 
 /* ============================================================================
@@ -74,8 +74,33 @@ export function PdfGap({ h }: { h: number }) {
 }
 
 const HDR_LEFT_W = 399
+/**
+ * Cuerpo (en px) con el que un texto de un solo renglón entra en `ancho`, sin
+ * pasar de `max` ni bajar de `min`.
+ *
+ * En @react-pdf un texto que no entra en una caja de alto fijo se corta con «…».
+ * Para un campo de texto libre conviene achicarlo antes que perder lo que se
+ * escribió. Mide con anchos promedio de Helvetica por tipo de carácter, un poco
+ * por encima de los reales: alcanza para elegir el cuerpo sin cargar las
+ * métricas de la fuente. Por debajo de `min` vuelve a cortarse con «…».
+ */
+function cuerpoQueEntra(texto: string, ancho: number, max: number, min: number): number {
+  let em = 0
+  for (const c of texto) {
+    if (c === ' ') em += 0.28
+    else if (c >= '0' && c <= '9') em += 0.56
+    else if (c !== c.toLowerCase()) em += 0.72 // mayúscula
+    else if (c !== c.toUpperCase()) em += 0.5 // minúscula
+    else em += 0.4 // puntuación y símbolos
+  }
+  return em === 0 ? max : Math.max(min, Math.min(max, ancho / em))
+}
+
 const HDR_LABEL_W = 85
 const HDR_BOX_W = 270
+const HDR_RECIBIDO_AIRE = 6
+/** Ancho de la etiqueta RECIBIDO POR: sobra, está alineada a la derecha. */
+const HDR_RECIBIDO_ETQ_W = 130
 
 /** Encabezado CelTuc del formato nuevo (filas 2-4). Espeja `CtHeader` del kit HTML. */
 export function PdfCtHeader({
@@ -85,6 +110,7 @@ export function PdfCtHeader({
   anio,
   socials = 'redes',
   direccion = EMPRESA.direccion,
+  recibidoPor,
 }: {
   cupon: string
   dia: string
@@ -92,6 +118,8 @@ export function PdfCtHeader({
   anio: string
   socials?: 'redes' | 'simple'
   direccion?: string
+  /** Renglón RECIBIDO POR (fila 4): aparece solo si se pasa, aunque sea ''. */
+  recibidoPor?: string
 }) {
   return (
     <View style={{ height: 60, flexDirection: 'row' }}>
@@ -124,7 +152,33 @@ export function PdfCtHeader({
             <PdfDateCell flex={78} value={anio} divider />
           </View>
         </View>
-        <View style={{ height: 20 }} />
+        {recibidoPor !== undefined ? (
+          <View style={{ height: 20, flexDirection: 'row', alignItems: 'center' }}>
+            {/* La etiqueta es más larga que su columna. En @react-pdf un texto se
+                parte si no entra en su caja, así que va suelta (absoluta), pegada
+                a la caja y sobrando hacia la izquierda, igual que en el preview. */}
+            <Text
+              style={{
+                position: 'absolute',
+                right: HDR_BOX_W + HDR_RECIBIDO_AIRE,
+                width: HDR_RECIBIDO_ETQ_W,
+                fontSize: pt(10),
+                textAlign: 'right',
+              }}
+            >
+              {RECIBIDO_POR}
+            </Text>
+            <View style={{ width: HDR_LABEL_W }} />
+            <View style={{ width: HDR_BOX_W, height: 20, borderWidth: BOX, borderColor: INK, justifyContent: 'center' }}>
+              {/* Texto libre: si es largo se achica para entrar entero en la caja. */}
+              <Text style={{ fontSize: cuerpoQueEntra(recibidoPor, HDR_BOX_W - 12, pt(11), pt(7)), textAlign: 'center' }}>
+                {recibidoPor}
+              </Text>
+            </View>
+          </View>
+        ) : (
+          <View style={{ height: 20 }} />
+        )}
       </View>
     </View>
   )
@@ -175,6 +229,7 @@ export function PdfDocShell({
   firmaIzq,
   firmaDer,
   direccion,
+  recibidoPor,
   children,
 }: {
   titulo: string
@@ -189,6 +244,8 @@ export function PdfDocShell({
   firmaIzq?: string
   firmaDer?: string
   direccion?: string
+  /** Renglón RECIBIDO POR del encabezado (ver `PdfCtHeader`). */
+  recibidoPor?: string
   children: ReactNode
 }) {
   const M = 28
@@ -200,7 +257,7 @@ export function PdfDocShell({
             {titulo}
           </PdfTitle>
           <PdfBody padL={STD_PAD} padR={STD_PAD}>
-            <PdfCtHeader cupon={cupon} dia={dia} mes={mes} anio={anio} direccion={direccion} />
+            <PdfCtHeader cupon={cupon} dia={dia} mes={mes} anio={anio} direccion={direccion} recibidoPor={recibidoPor} />
             <PdfGap h={7} />
             {children}
             <PdfGap h={10} />

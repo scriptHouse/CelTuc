@@ -7,6 +7,8 @@ export interface ReparacionData {
   fechaDia: string
   fechaMes: string
   fechaAnio: string
+  /** Empleado que tomó el equipo (texto libre; se sugieren los del equipo). */
+  recibidoPor: string
   recibiDe: string
   equipos: string
   falla: string
@@ -31,6 +33,7 @@ export function reparacionVacia(): ReparacionData {
     fechaDia: dia,
     fechaMes: mes,
     fechaAnio: anio,
+    recibidoPor: '',
     recibiDe: '',
     equipos: '',
     falla: '',

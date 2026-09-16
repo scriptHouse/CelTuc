@@ -35,7 +35,14 @@ export function CompraventaPdf({ datos, direccion }: { datos: CompraventaData; d
             {CV_TITULO}
           </PdfTitle>
           <PdfBody padL={STD_PAD} padR={STD_PAD}>
-            <PdfCtHeader cupon={datos.cupon} dia={datos.fechaDia} mes={datos.fechaMes} anio={datos.fechaAnio} direccion={direccion} />
+            <PdfCtHeader
+              cupon={datos.cupon}
+              dia={datos.fechaDia}
+              mes={datos.fechaMes}
+              anio={datos.fechaAnio}
+              direccion={direccion}
+              recibidoPor={datos.recibidoPor}
+            />
 
             <Text style={{ ...parr, marginTop: 10 }}>{CV_INTRO}</Text>
             <ClausulaPdf c={CV_PRIMERA} datos={datos} />

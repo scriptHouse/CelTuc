@@ -27,7 +27,7 @@ const LABEL_COL = 58 // ancho de etiqueta alineada en las características
 const SIGN_COL = 326
 const SIGN_GAP = STD_CONTENT_W - SIGN_COL * 2
 
-export function CompraventaPaper({ datos, onChange, readOnly, direccion }: PaperProps<CompraventaData>) {
+export function CompraventaPaper({ datos, onChange, readOnly, direccion, empleados }: PaperProps<CompraventaData>) {
   const set = (k: keyof CompraventaData) => (v: string) => onChange({ [k]: v })
 
   return (
@@ -47,6 +47,9 @@ export function CompraventaPaper({ datos, onChange, readOnly, direccion }: Paper
           onAnio={set('fechaAnio')}
           readOnly={readOnly}
           direccion={direccion}
+          recibidoPor={datos.recibidoPor}
+          onRecibidoPor={set('recibidoPor')}
+          sugerenciasRecibido={empleados}
         />
 
         <p style={{ ...parr, marginTop: 10 }}>{CV_INTRO}</p>

@@ -21,6 +21,8 @@ export interface CompraventaData {
   fechaDia: string
   fechaMes: string
   fechaAnio: string
+  /** Empleado que tomó el equipo (texto libre; se sugieren los del equipo). */
+  recibidoPor: string
   nombreVendedor: string
   dniVendedor: string
   marca: string
@@ -45,6 +47,7 @@ export function compraventaVacia(): CompraventaData {
     fechaDia: dia,
     fechaMes: mes,
     fechaAnio: anio,
+    recibidoPor: '',
     nombreVendedor: '',
     dniVendedor: '',
     marca: CV_MARCA_DEFECTO,

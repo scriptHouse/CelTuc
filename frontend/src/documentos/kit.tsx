@@ -1,6 +1,6 @@
-import type { CSSProperties, ReactNode } from 'react'
+import { useId, type CSSProperties, type ReactNode } from 'react'
 import { LOGO_CELTUC, ICON_FACEBOOK, ICON_INSTAGRAM } from './assets'
-import { EMPRESA, lineaDireccion } from './content'
+import { EMPRESA, RECIBIDO_POR, lineaDireccion } from './content'
 
 /* ============================================================================
  * Kit de primitivas para los documentos de CelTuc (preview HTML rellenable).
@@ -62,6 +62,57 @@ export function Field({
       className="ct-doc-field"
       style={{ ...fieldBase, textAlign: align, height: '100%', ...style }}
     />
+  )
+}
+
+/**
+ * Campo de texto libre con sugerencias. Al tocarlo, el navegador despliega la
+ * lista y la va filtrando mientras se escribe; si lo que se busca no está, se
+ * escribe igual lo que haga falta.
+ *
+ * Es el `<datalist>` nativo a propósito: la lista la dibuja el navegador como
+ * una ventanita propia, así que no la recorta el papel ni la achica el escalado
+ * del preview, y en el celular funciona igual que cualquier campo.
+ */
+export function CampoSugerido({
+  value,
+  onChange,
+  readOnly,
+  sugerencias = [],
+  align = 'left',
+  ariaLabel,
+}: {
+  value: string
+  onChange: Setter
+  readOnly?: boolean
+  sugerencias?: readonly string[]
+  align?: CSSProperties['textAlign']
+  ariaLabel: string
+}) {
+  const lista = useId()
+  const conLista = !readOnly && sugerencias.length > 0
+  return (
+    <>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        readOnly={readOnly}
+        aria-label={ariaLabel}
+        list={conLista ? lista : undefined}
+        // Sin esto el navegador mezcla en la lista lo que se tipeó otras veces.
+        autoComplete="off"
+        className="ct-doc-field"
+        style={{ ...fieldBase, textAlign: align, height: '100%' }}
+      />
+      {conLista && (
+        <datalist id={lista}>
+          {sugerencias.map((s) => (
+            <option key={s} value={s} />
+          ))}
+        </datalist>
+      )}
+    </>
   )
 }
 
@@ -192,10 +243,12 @@ export const STD_CONTENT_W = STD_W - STD_PAD * 2 // 754 (columnas B…I)
 const HDR_LEFT_W = 399 // columnas B…E
 const HDR_LABEL_W = 85 // columna F
 const HDR_BOX_W = 270 // columnas G…I
+const HDR_RECIBIDO_AIRE = 6 // entre la etiqueta RECIBIDO POR y su caja
 
 /**
  * Encabezado CelTuc del formato nuevo: logo + identidad (filas 2-4) y, a la
- * derecha, CUPON N° (fila 2) y FECHA en tres cajas (fila 3).
+ * derecha, CUPON N° (fila 2), FECHA en tres cajas (fila 3) y, en los papeles
+ * que lo usan, RECIBIDO POR (fila 4).
  */
 export function CtHeader({
   cupon,
@@ -209,6 +262,9 @@ export function CtHeader({
   readOnly,
   socials = 'redes',
   direccion = EMPRESA.direccion,
+  recibidoPor,
+  onRecibidoPor,
+  sugerenciasRecibido,
 }: {
   cupon: string
   onCupon: Setter
@@ -223,6 +279,14 @@ export function CtHeader({
   socials?: 'redes' | 'simple'
   /** Dirección configurable del encabezado. */
   direccion?: string
+  /**
+   * Renglón RECIBIDO POR, debajo de la fecha. Aparece solo si se pasa
+   * `onRecibidoPor`: en los demás papeles esa fila sigue vacía, como siempre.
+   */
+  recibidoPor?: string
+  onRecibidoPor?: Setter
+  /** Nombres que se sugieren en RECIBIDO POR (el equipo). */
+  sugerenciasRecibido?: readonly string[]
 }) {
   return (
     <div style={{ height: 60, display: 'flex' }}>
@@ -261,7 +325,28 @@ export function CtHeader({
             </div>
           </div>
         </div>
-        <div style={{ height: 20 }} />
+        {onRecibidoPor ? (
+          <div style={{ height: 20, display: 'flex', alignItems: 'center' }}>
+            {/* La etiqueta es más larga que su columna: se alinea contra la caja
+                y el sobrante cae hacia la izquierda, sobre el espacio vacío que
+                queda al lado de las redes (así la caja no se corre). */}
+            <div style={{ width: HDR_LABEL_W, display: 'flex', justifyContent: 'flex-end', paddingRight: HDR_RECIBIDO_AIRE }}>
+              <span style={{ fontSize: pt(10), whiteSpace: 'nowrap', flexShrink: 0 }}>{RECIBIDO_POR}</span>
+            </div>
+            <div style={{ width: HDR_BOX_W, height: 20, border: `${BOX}px solid ${INK}`, boxSizing: 'border-box' }}>
+              <CampoSugerido
+                value={recibidoPor ?? ''}
+                onChange={onRecibidoPor}
+                readOnly={readOnly}
+                sugerencias={sugerenciasRecibido}
+                align="center"
+                ariaLabel="Recibido por"
+              />
+            </div>
+          </div>
+        ) : (
+          <div style={{ height: 20 }} />
+        )}
       </div>
     </div>
   )
@@ -313,6 +398,9 @@ export function DocShell({
   firmaIzq,
   firmaDer,
   direccion,
+  recibidoPor,
+  onRecibidoPor,
+  sugerenciasRecibido,
   children,
 }: {
   titulo: string
@@ -332,6 +420,10 @@ export function DocShell({
   firmaIzq?: string
   firmaDer?: string
   direccion?: string
+  /** Renglón RECIBIDO POR del encabezado (ver `CtHeader`). */
+  recibidoPor?: string
+  onRecibidoPor?: Setter
+  sugerenciasRecibido?: readonly string[]
   children: ReactNode
 }) {
   return (
@@ -351,6 +443,9 @@ export function DocShell({
           onAnio={onAnio}
           readOnly={readOnly}
           direccion={direccion}
+          recibidoPor={recibidoPor}
+          onRecibidoPor={onRecibidoPor}
+          sugerenciasRecibido={sugerenciasRecibido}
         />
         <Spacer h={7} />
         {children}

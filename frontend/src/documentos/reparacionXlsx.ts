@@ -20,7 +20,14 @@ export async function construirReparacionXlsx(d: ReparacionData, direccion?: str
   b.h(1, 10, 52, 'bottom')
   b.v(1, 2, 52, 'left')
   b.v(10, 2, 52, 'right')
-  ctHeaderXlsx(wb, ws, b, { cupon: d.cupon, dia: d.fechaDia, mes: d.fechaMes, anio: d.fechaAnio, direccion })
+  ctHeaderXlsx(wb, ws, b, {
+    cupon: d.cupon,
+    dia: d.fechaDia,
+    mes: d.fechaMes,
+    anio: d.fechaAnio,
+    direccion,
+    recibidoPor: d.recibidoPor,
+  })
   // La caja del equipo tiene una fila mas que la de importes: arrancan juntas
   // y la izquierda baja un renglon, igual que en el PDF.
   b.caja(2, 11, 4, 14, [11, 12, 13]) // CEL / MAIL / IMEI / PIN
