@@ -219,7 +219,12 @@ fi
 echo ""
 echo ">> [1/6] Respaldo previo..."
 STAMP="$(date +%Y%m%d-%H%M%S)"
-BACKUP_DIR="/var/backups/$PROJECT/$STAMP"
+# En el directorio del proyecto, NO en /var/backups: deploy.sh corre adentro
+# del runner y /var/www/<proyecto> es lo unico montado desde el host; un
+# /var/backups del contenedor se pierde al recrearlo. La carpeta queda fuera
+# de git (untracked) y `git reset --hard` no la toca.
+BACKUP_ROOT="$ROOT/.deploy-backups"
+BACKUP_DIR="$BACKUP_ROOT/$STAMP"
 mkdir -p "$BACKUP_DIR"
 
 [[ -f .env ]] && cp .env "$BACKUP_DIR/environment.env" 2>/dev/null || true
@@ -446,7 +451,7 @@ if [[ "$RETAIN" -gt 0 ]]; then
       | awk -F'|' '$2 ~ /:rollback-/' | sort -r | tail -n +"$((RETAIN + 1))" \
       | cut -d'|' -f2 | xargs -r docker image rm -f >/dev/null 2>&1 || true
   done
-  (cd "/var/backups/$PROJECT" 2>/dev/null && ls -t | tail -n +"$((RETAIN + 1))" | xargs -r rm -rf) || true
+  (cd "$BACKUP_ROOT" 2>/dev/null && ls -t | tail -n +"$((RETAIN + 1))" | xargs -r rm -rf) || true
 fi
 
 if [[ "$PRUNE_AFTER" -eq 1 ]]; then
