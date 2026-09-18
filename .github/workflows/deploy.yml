@@ -1,109 +1,48 @@
-name: Deploy CelTuc
+name: Deploy celtuc
 
 on:
   push:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      todo:
+        description: Reconstruir todo (ignorar el rebuild selectivo)
+        type: boolean
+        default: false
 
+# Si llega un push mas nuevo mientras hay un deploy corriendo, ESPERA a que
+# termine: cancelar a mitad de un up -d deja imagenes reemplazadas a medias.
 concurrency:
-  group: celtuc-production
+  group: deploy-celtuc
   cancel-in-progress: false
 
-permissions:
-  contents: read
-
 env:
-  DEPLOY_PATH: /var/www/celtuc
-  DEPLOY_URL: https://celtuc.scripthouse.com.ar
+  APP_DIR: /var/www/celtuc
 
 jobs:
   deploy:
-    name: Deploy production
-    # Runner self-hosted DENTRO del VPS (contenedor `celtuc-runner`, ver
-    # docker-compose.yml, perfil "prod"): el deploy corre en el propio
-    # servidor, sin SSH desde afuera. El esquema anterior (SSH desde
-    # ubuntu-latest) daba "Connection timed out" porque el puerto 22 está
-    # rate-limitado (ufw LIMIT) + fail2ban, y las IPs de los runners de
-    # GitHub (Azure) terminaban filtradas.
+    name: Deploy a produccion
     runs-on: [self-hosted, celtuc]
-    environment:
-      name: production
-      url: https://celtuc.scripthouse.com.ar
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Preflight
-        shell: bash
+      - name: Traer los cambios
+        working-directory: ${{ env.APP_DIR }}
         run: |
           set -euo pipefail
-          # El .env (secretos + DATABASE_URL) vive solo en el servidor. Si falta,
-          # cortamos antes de desplegar un backend que no podria arrancar.
-          test -d "$DEPLOY_PATH"
-          test -f "$DEPLOY_PATH/.env"
-          docker compose version
+          git fetch --prune origin main
+          git reset --hard origin/main
 
-      - name: Sync project files
-        shell: bash
+      - name: Desplegar
+        working-directory: ${{ env.APP_DIR }}
+        env:
+          # Para el seguimiento de deploys en vivo del panel interno.
+          PANEL_INGEST_TOKEN: ${{ secrets.PANEL_INGEST_TOKEN }}
         run: |
-          set -euo pipefail
-          # --delete mantiene el server igual al repo, pero excluimos lo que solo
-          # vive en el servidor (.env) o se genera en runtime, para no borrarlo.
-          rsync -a --delete \
-            --exclude='.git/' \
-            --exclude='.github/' \
-            --exclude='.vscode/' \
-            --exclude='.env' \
-            --exclude='backend/.env' \
-            --exclude='backend/.venv/' \
-            --exclude='backend/db.sqlite3' \
-            --exclude='backend/staticfiles/' \
-            --exclude='frontend/node_modules/' \
-            --exclude='frontend/dist/' \
-            --exclude='frontend/*.tsbuildinfo' \
-            --exclude='*.log' \
-            ./ "$DEPLOY_PATH/"
+          chmod +x scripts/deploy.sh
+          ./scripts/deploy.sh ${{ inputs.todo && '--all' || '' }}
 
-      - name: Build and restart
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$DEPLOY_PATH"
-          chmod +x deploy.sh deploy/entrypoint.sh
-          ./deploy.sh
-
-      - name: Verify container
-        shell: bash
-        run: |
-          set -euo pipefail
-          for i in $(seq 1 24); do
-            status=$(docker inspect -f '{{.State.Health.Status}}' celtuc 2>/dev/null || true)
-            docker ps --filter name=celtuc --format 'table {{.Names}}\t{{.Status}}'
-            if [ "$status" = healthy ]; then
-              docker exec celtuc curl -fsS http://127.0.0.1/api/health/
-              exit 0
-            fi
-            sleep 5
-          done
-          docker logs --tail=120 celtuc
-          exit 1
-
-      - name: Verify public URL
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Tras reiniciar, Traefik tarda unos segundos en registrar el backend.
-          # Reintentamos /api/health/ (backend) en vez de fallar al primer intento.
-          for i in $(seq 1 20); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$DEPLOY_URL/api/health/" || true)
-            if [ "$code" = "200" ]; then
-              echo "OK ($code): $DEPLOY_URL/api/health/"
-              exit 0
-            fi
-            echo "intento $i/20: $DEPLOY_URL/api/health/ devolvio '$code'; reintento en 5s..."
-            sleep 5
-          done
-          echo "ERROR: $DEPLOY_URL/api/health/ no devolvio 200 tras 20 intentos."
-          exit 1
+      - name: Estado final
+        if: always()
+        working-directory: ${{ env.APP_DIR }}
+        run: docker compose ps

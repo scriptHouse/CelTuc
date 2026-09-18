@@ -62,6 +62,9 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /var/www/celtuc:/var/www/celtuc
+      # Solo la deploy key de este repo (no todo /root/.ssh del host),
+      # para que el workflow pueda hacer git fetch del repo privado.
+      - /root/.ssh-celtuc:/root/.ssh:ro
       - runner-data:/tmp/runner
     networks:
       - web
