@@ -51,7 +51,6 @@ import {
   cambiarMedioPago,
   crearEmisor,
   eliminarComprobante,
-  emitirComprobante,
   enviarComprobanteEmail,
   guardarLimites,
   listarComprobantes,
@@ -65,7 +64,6 @@ import {
   eliminarConcepto,
   type ConceptoFacturaInput,
   type EmisorInput,
-  type LimiteExcedido,
   type LimiteMes,
   type NuevoComprobante,
 } from '@/services/facturacion'
@@ -79,7 +77,11 @@ import {
   ultimoCierreDeCaja,
   type AbrirCajaInput,
 } from '@/services/caja'
-import { tomarBorradorFacturaVenta, type BorradorFacturaVenta } from '@/lib/borradorFactura'
+import {
+  prefillDesdeVenta,
+  tomarBorradorFacturaVenta,
+  type PrefillFacturaVenta,
+} from '@/lib/borradorFactura'
 import {
   conceptoPorDefecto,
   MAX_LARGO_CONCEPTO,
@@ -87,6 +89,7 @@ import {
 } from '@/lib/conceptoGenerico'
 import { AperturaModal, type AperturaValues } from '@/components/caja/AperturaModal'
 import { cajasDelAmbito } from '@/components/caja/medios'
+import { useEmitirFactura } from '@/components/facturacion/useEmitirFactura'
 import { CuentaCard } from '@/components/facturacion/CuentaCard'
 import { DevolverStockModal } from '@/components/facturacion/DevolverStockModal'
 import { NotaCreditoModal } from '@/components/facturacion/NotaCreditoModal'
@@ -332,27 +335,8 @@ export function FacturacionPage() {
       )
       return
     }
-    const esRI = cuenta.condicion === 'responsable_inscripto'
     setEmisorId(cuenta.id)
-    setPrefill({
-      ventaId: borrador.ventaId,
-      // El precio de la venta es lo que pagó el cliente (final). En A/B el
-      // ítem viaja NETO y el modal le suma el 21 %: se divide acá para que el
-      // total de la factura coincida con lo cobrado en el mostrador.
-      items: borrador.items.map((i) => ({
-        descripcion: i.descripcion,
-        cantidad: i.cantidad,
-        precioUnitario: esRI
-          ? Math.round((i.precioFinal / (1 + IVA_RATE)) * 100) / 100
-          : i.precioFinal,
-        productoId: i.productoId,
-        itemServiceId: i.itemServiceId,
-      })),
-      observaciones: borrador.observaciones,
-      pagada: true, // la venta de mostrador ya se cobró
-      medioPago: borrador.medioPago,
-      cliente: borrador.cliente,
-    })
+    setPrefill(prefillDesdeVenta(borrador, cuenta.condicion))
     setFacturaModal(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [emisores])
@@ -431,67 +415,16 @@ export function FacturacionPage() {
     queryClient.invalidateQueries({ queryKey: ['fact-resumen'] })
   }
 
-  const emitirMut = useMutation({
-    mutationFn: (input: NuevoComprobante) => emitirComprobante(input),
-    onSuccess: (c) => {
-      invalidarComprobantes()
-      queryClient.invalidateQueries({ queryKey: ['inv-stock'] })
-      queryClient.invalidateQueries({ queryKey: ['inv-movimientos'] })
+  // La emisión (CAE, avisos de stock y el 409 del tope mensual) vive en un hook
+  // compartido: es la MISMA que usa el modal abierto desde Caja.
+  const emitirMut = useEmitirFactura({
+    onEmitida: (c) => {
       setFacturaModal(false)
       setPrefill(null)
       setDetalleId(c.id)
-      toast.success(`Factura ${c.tipo} emitida`, c.cae ? `CAE ${c.cae}` : `Total ${money(c.total)}`)
-      // La factura salió igual: esto es solo lo que NO se pudo descontar.
-      if (c.avisos_stock?.length) toast.info('Stock sin descontar', c.avisos_stock.join(' '))
       // ¿La caja que recibe esta plata está abierta? Si no, se avisa y se
       // ofrece abrirla acá mismo (mejor esfuerzo: no bloquea nada).
       void chequearCajaAbierta(c)
-    },
-    onError: async (e: Error, variables) => {
-      // El backend avisa (409) ANTES de pedir el CAE si el mes queda pasado del
-      // tope. Se muestra el detalle y, si el usuario confirma, se emite igual.
-      const aviso = e instanceof ApiError && e.status === 409
-        ? (e.data as Partial<LimiteExcedido> | null)
-        : null
-      if (aviso?.codigo === 'limite_mensual_excedido') {
-        const ok = await confirm({
-          title: `Se supera el límite de ${aviso.mes_nombre ?? 'este mes'}`,
-          tone: 'warning',
-          icon: Gauge,
-          confirmLabel: 'Emitir de todas formas',
-          cancelLabel: 'No emitir',
-          description: (
-            <span className="block space-y-2.5">
-              <span className="block">
-                Esta factura pasa el <strong>límite de facturación mensual</strong> configurado
-                para la cuenta.
-              </span>
-              <span className="block space-y-1 rounded-xl bg-ink-50 px-3.5 py-2.5 text-left">
-                <span className="flex items-center justify-between gap-3">
-                  <span>Límite de {aviso.mes_nombre ?? 'el mes'}</span>
-                  <span className="tnum font-medium text-ink-900">{money(aviso.limite ?? 0)}</span>
-                </span>
-                <span className="flex items-center justify-between gap-3">
-                  <span>Ya facturado</span>
-                  <span className="tnum font-medium text-ink-900">{money(aviso.facturado ?? 0)}</span>
-                </span>
-                <span className="flex items-center justify-between gap-3">
-                  <span>Esta factura</span>
-                  <span className="tnum font-medium text-ink-900">{money(aviso.total_factura ?? 0)}</span>
-                </span>
-                <span className="flex items-center justify-between gap-3 border-t border-line pt-1.5 font-semibold text-ink-950">
-                  <span>Se pasa por</span>
-                  <span className="tnum">{money(aviso.excedente ?? 0)}</span>
-                </span>
-              </span>
-              <span className="block">¿Querés emitirla de todas formas?</span>
-            </span>
-          ),
-        })
-        if (ok) emitirMut.mutate({ ...variables, confirmar_limite: true })
-        return
-      }
-      toast.error('No se pudo emitir', e.message)
     },
   })
 
@@ -1285,24 +1218,8 @@ function ConceptosManagerModal({ open, onClose }: { open: boolean; onClose: () =
 }
 
 /** Precarga del modal de emisión cuando la factura nace de una venta de Caja. */
-interface PrefillFactura {
-  /** Venta de mostrador que se está facturando (se liga al emitir). */
-  ventaId: number
-  items: Array<{
-    descripcion: string
-    cantidad: number
-    precioUnitario: number
-    /** Origen del ítem: solo para el concepto genérico (el stock ya se movió). */
-    productoId?: number
-    itemServiceId?: number
-  }>
-  observaciones: string
-  pagada: boolean
-  /** Con qué se cobró en el mostrador (precarga el medio de la factura). */
-  medioPago?: MedioPagoComprobante
-  /** Cliente cargado en el mostrador (si la venta lo tenía). */
-  cliente?: BorradorFacturaVenta['cliente']
-}
+/** La precarga del modal cuando la factura nace de una venta de mostrador. */
+export type PrefillFactura = PrefillFacturaVenta
 
 // ===== Detalle (con CAE y QR) =====
 
@@ -1750,7 +1667,11 @@ interface BorradorItem {
 let _k = 0
 const nextKey = () => `bi-${_k++}`
 
-function NuevaFacturaModal({
+/**
+ * Modal de emisión: el ÚNICO lugar donde se arma una factura. Caja lo abre tal
+ * cual (con los ítems de la venta precargados) para no repetir nada de acá.
+ */
+export function NuevaFacturaModal({
   open,
   emisor,
   productos,

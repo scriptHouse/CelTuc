@@ -789,6 +789,8 @@ export interface MovimientoCaja {
   detalle?: string
   /** Cómo se facturó la venta que originó el movimiento (solo tipo venta). */
   facturacion?: FacturacionVenta
+  /** Se cobró distinto de lo que indicaba la caja (alguien lo aceptó a propósito). */
+  fueraDeCircuito?: boolean
   usuario: string
   fecha: string // ISO
 }

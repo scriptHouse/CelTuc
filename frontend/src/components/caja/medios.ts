@@ -198,6 +198,65 @@ export function nombreCaja(caja: Pick<CajaRegistradora, 'nombre' | 'sucursalNomb
   return caja.sucursalNombre ? `${caja.nombre} · ${caja.sucursalNombre}` : caja.nombre
 }
 
+// ===== Circuito de cobro de cada caja ========================================
+
+/**
+ * Cómo se cobra en cada caja, según el canal fiscal donde estás parado. Es el
+ * espejo de `CIRCUITO_POR_CANAL` del backend (`inventario/models.py`):
+ *
+ * - **Responsable Inscripto**: efectivo sin factura, transferencia y tarjeta
+ *   con Factura A/B.
+ * - **Monotributo**: efectivo sin factura, transferencia financiera sin factura
+ *   y tarjeta con Factura C.
+ *
+ * Nada está prohibido: cobrar distinto avisa con un cartel, hay que aceptarlo y
+ * queda registrado en la venta quién lo aceptó.
+ */
+export type Circuito = Partial<Record<MedioPagoCaja, FacturacionVenta>>
+
+export const CIRCUITO_POR_CANAL: Record<Exclude<CanalCaja, ''>, Circuito> = {
+  factura_ri: {
+    efectivo: 'sin_factura',
+    transferencia: 'factura_ri',
+    tarjeta: 'factura_ri',
+  },
+  general: {
+    efectivo: 'sin_factura',
+    transf_financiera: 'sin_factura',
+    tarjeta: 'factura_c',
+  },
+}
+
+/** Nombre del circuito para mostrar («circuito de Monotributo»). */
+export const CIRCUITO_LABEL: Record<Exclude<CanalCaja, ''>, string> = {
+  factura_ri: 'Responsable Inscripto',
+  general: 'Monotributo',
+}
+
+/** El circuito de la caja donde estás parado (null en una caja común). */
+export function circuitoDeCanal(canal?: CanalCaja | null): Circuito | null {
+  if (canal === 'factura_ri' || canal === 'general') return CIRCUITO_POR_CANAL[canal]
+  return null
+}
+
+/** ¿Ese medio con esa facturación es lo que sugiere el circuito? */
+export function enCircuito(
+  circuito: Circuito | null,
+  medio: MedioPagoCaja,
+  facturacion: FacturacionVenta,
+): boolean {
+  if (!circuito) return true
+  return circuito[medio] === facturacion
+}
+
+/** La facturación que el circuito indica para ese medio (null si no lo usa). */
+export function facturacionDelCircuito(
+  circuito: Circuito | null,
+  medio: MedioPagoCaja,
+): FacturacionVenta | null {
+  return circuito?.[medio] ?? null
+}
+
 /** La caja que recibiría una venta según cómo se factura (o null si no hay canales). */
 export function cajaParaFacturacion(
   cajas: CajaRegistradora[],

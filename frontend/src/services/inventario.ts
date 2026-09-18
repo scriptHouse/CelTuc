@@ -451,6 +451,8 @@ export interface PagoVenta {
    */
   emisor?: number | null
   emisor_nombre?: string | null
+  /** Esta parte se cobró fuera del circuito de la caja (y alguien lo aceptó). */
+  fuera_de_circuito?: boolean
   monto: number
 }
 
@@ -474,6 +476,16 @@ export interface Venta {
   cliente_nombre?: string | null
   /** Factura que después se emitió por esta venta (para no contarla dos veces). */
   comprobante?: number | null
+  /**
+   * Constancia de que se cobró fuera del circuito de la caja: quién lo aceptó,
+   * cuándo y qué partes. Null = todo siguió lo que indicaba la caja.
+   */
+  desvio_circuito?: {
+    circuito: string
+    aceptado_por: string
+    aceptado_en: string
+    partes: Array<{ medio: string; facturacion: string; monto: string }>
+  } | null
   /** Id del primer movimiento de caja generado (null si no había turno abierto). */
   movimiento_caja?: number | null
   /** Todos los movimientos de arqueo creados: uno por medio cobrado. */
@@ -530,6 +542,12 @@ export interface VentaInput {
   caja?: number
   /** True = el vendedor confirmó vender con faltante: el stock queda negativo. */
   permitir_faltante?: boolean
+  /**
+   * Canal de la caja donde se cobró («factura_ri» o «general»): el backend marca
+   * las partes que no siguen el circuito de esa caja y guarda quién aceptó el
+   * aviso. Sin esto no se marca nada (ventas fuera de Caja, o caja común).
+   */
+  circuito?: string
 }
 
 export function registrarVenta(input: VentaInput): Promise<Venta> {

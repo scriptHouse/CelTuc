@@ -44,6 +44,14 @@ export function CierreDetalleModal({
     {} as Partial<Record<FacturacionVenta, { monto: number; ops: number }>>,
   )
   const facturacionesConVentas = FACTURACIONES.filter((f) => porFacturacion[f.value])
+  // Lo que se cobró distinto de lo que indicaba la caja (se aceptó el aviso).
+  const fueraDeCircuito = cierre.movimientos.reduce(
+    (acc, m) =>
+      m.tipo === 'venta' && m.fueraDeCircuito
+        ? { monto: acc.monto + m.monto, ops: acc.ops + 1 }
+        : acc,
+    { monto: 0, ops: 0 },
+  )
   const denomsContadas = Object.entries(cierre.conteoCierre ?? {})
     .map(([den, cant]) => [Number(den), cant] as [number, number])
     .filter(([, cant]) => cant > 0)
@@ -91,6 +99,18 @@ export function CierreDetalleModal({
               />
             ))}
           </Seccion>
+
+          {fueraDeCircuito.ops > 0 && (
+            <Seccion titulo="Fuera del circuito">
+              <Linea
+                l={`Ventas cobradas distinto (${fueraDeCircuito.ops})`}
+                r={money(fueraDeCircuito.monto)}
+              />
+              <p className="mt-1 text-[0.66rem] leading-relaxed text-ink-400">
+                Se aceptó a propósito y quedó registrado en cada venta.
+              </p>
+            </Seccion>
+          )}
 
           {facturacionesConVentas.length > 0 && (
             <Seccion titulo="Ventas por facturación">

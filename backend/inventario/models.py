@@ -332,6 +332,10 @@ class Venta(ModeloBase):
     )
     nota = models.CharField('nota', max_length=200, blank=True)
     total = models.DecimalField('total ($)', max_digits=14, decimal_places=2, default=0)
+    # Si el cobro se salio del circuito sugerido por la caja donde se estaba
+    # parado (ver `CIRCUITO_POR_CANAL`), acá queda la constancia: quién aceptó
+    # el aviso, cuándo y qué partes se cobraron distinto. Vacio = todo en regla.
+    desvio_circuito = models.JSONField('desvio del circuito', null=True, blank=True)
 
     class Meta:
         db_table = 'inventario_ventas'
@@ -341,6 +345,40 @@ class Venta(ModeloBase):
 
     def __str__(self):
         return f'Venta #{self.pk} · {self.sucursal} · ${self.total}'
+
+
+# Circuito de cobro sugerido segun la caja donde se esta parado (su canal
+# fiscal, `caja.Caja.Canal`). Es el mismo mapa que muestra el mostrador: con la
+# caja del Responsable Inscripto la transferencia y la tarjeta van con Factura
+# A/B; con la de Monotributo, la transferencia financiera va sin factura y la
+# tarjeta con Factura C. El efectivo nunca se factura en ninguno de los dos.
+# Cobrar otra combinacion no esta prohibido: avisa, pide confirmacion y queda
+# registrado en `Venta.desvio_circuito` (el espejo vive en el front, en
+# `components/caja/medios.ts`).
+CIRCUITO_POR_CANAL = {
+    'factura_ri': {
+        Venta.FormaPago.EFECTIVO: Venta.Facturacion.SIN_FACTURA,
+        Venta.FormaPago.TRANSFERENCIA: Venta.Facturacion.FACTURA_RI,
+        Venta.FormaPago.TARJETA: Venta.Facturacion.FACTURA_RI,
+    },
+    'general': {
+        Venta.FormaPago.EFECTIVO: Venta.Facturacion.SIN_FACTURA,
+        Venta.FormaPago.TRANSF_FINANCIERA: Venta.Facturacion.SIN_FACTURA,
+        Venta.FormaPago.TARJETA: Venta.Facturacion.FACTURA_C,
+    },
+}
+
+
+def en_circuito(circuito, medio, facturacion):
+    """¿Ese medio con esa facturacion es lo sugerido por la caja `circuito`?
+
+    Sin circuito (caja comun, o venta fuera de Caja) no hay nada que sugerir:
+    todo vale.
+    """
+    sugerido = CIRCUITO_POR_CANAL.get(circuito or '')
+    if sugerido is None:
+        return True
+    return sugerido.get(medio) == facturacion
 
 
 class ItemVenta(models.Model):
@@ -467,6 +505,10 @@ class PagoVenta(models.Model):
         verbose_name='cuenta que factura',
     )
     monto = models.DecimalField('monto ($)', max_digits=14, decimal_places=2)
+    # Esta parte se cobro FUERA del circuito sugerido por la caja (por ejemplo,
+    # tarjeta sin factura estando en la caja del Responsable Inscripto). Quien
+    # acepto el aviso queda en `Venta.desvio_circuito`.
+    fuera_de_circuito = models.BooleanField('fuera del circuito', default=False)
 
     class Meta:
         db_table = 'inventario_ventas_pagos'
@@ -630,7 +672,8 @@ def _normalizar_pagos(pagos, *, forma_pago, facturacion, total):
 
 
 def registrar_venta(sucursal, items, *, forma_pago='', facturacion='', nota='',
-                    cliente=None, usuario=None, permitir_faltante=False, pagos=None):
+                    cliente=None, usuario=None, permitir_faltante=False, pagos=None,
+                    circuito=''):
     """Crea la venta y descuenta el stock, todo o nada.
 
     `items` es una lista de renglones: ``(producto, cantidad, precio_unitario)``
@@ -650,6 +693,10 @@ def registrar_venta(sucursal, items, *, forma_pago='', facturacion='', nota='',
     tiene que sumar el total exacto. Sin `pagos`, la venta entera va en
     `forma_pago`, como siempre. En los dos casos queda al menos una fila en
     `PagoVenta` y `forma_pago` termina siendo el medio de mayor monto.
+
+    `circuito` es el canal de la caja donde se estaba parado al cobrar (ver
+    `CIRCUITO_POR_CANAL`): las partes que no siguen lo sugerido quedan marcadas
+    y la venta guarda quien acepto el aviso. Sin `circuito` no se marca nada.
     """
     if not items:
         raise ValidationError('La venta no tiene items.')
@@ -686,17 +733,38 @@ def registrar_venta(sucursal, items, *, forma_pago='', facturacion='', nota='',
         partes = _normalizar_pagos(
             pagos, forma_pago=venta.forma_pago, facturacion=venta.facturacion, total=total,
         )
+        # Lo que se cobro distinto de lo que sugeria la caja queda marcado parte
+        # por parte, y la venta guarda quien acepto el aviso: es la constancia
+        # de que alguien decidio salirse del circuito.
+        fuera = [
+            (medio, fact, monto)
+            for medio, fact, _emisor, monto in partes
+            if not en_circuito(circuito, medio, fact)
+        ]
         PagoVenta.objects.bulk_create([
-            PagoVenta(venta=venta, medio=medio, facturacion=fact, emisor=emisor, monto=monto)
+            PagoVenta(
+                venta=venta, medio=medio, facturacion=fact, emisor=emisor, monto=monto,
+                fuera_de_circuito=not en_circuito(circuito, medio, fact),
+            )
             for medio, fact, emisor, monto in partes
         ])
+        if fuera:
+            venta.desvio_circuito = {
+                'circuito': circuito,
+                'aceptado_por': getattr(usuario, 'username', '') or '',
+                'aceptado_en': timezone.now().isoformat(),
+                'partes': [
+                    {'medio': medio, 'facturacion': fact, 'monto': str(monto)}
+                    for medio, fact, monto in fuera
+                ],
+            }
         # Los valores principales (los de la parte de mayor monto) son los que
         # sigue viendo todo lo que ya leia `forma_pago` / `facturacion`:
         # reportes, filtros del admin e historiales.
         principal = max(partes, key=lambda parte: parte[3])
         venta.forma_pago = principal[0]
         venta.facturacion = principal[1]
-        venta.save(update_fields=['total', 'forma_pago', 'facturacion'])
+        venta.save(update_fields=['total', 'forma_pago', 'facturacion', 'desvio_circuito'])
     return venta
 
 

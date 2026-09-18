@@ -2163,3 +2163,149 @@ class VaciarStockApiTests(TestCase):
         self.assertEqual(registros.count(), 1)
         self.assertEqual(registros.first().accion, 'crear')
         self.assertEqual(registros.first().modelo, 'vaciado de stock')
+
+
+class CircuitoDeCobroTests(TestCase):
+    """Cobrar distinto de lo que sugiere la caja queda marcado y con firma.
+
+    El circuito depende de la caja donde se esta parado: con la del Responsable
+    Inscripto la transferencia y la tarjeta van con Factura A/B; con la de
+    Monotributo, la transferencia financiera va sin factura y la tarjeta con
+    Factura C. El efectivo nunca se factura. Nada se bloquea: se marca.
+    """
+
+    def setUp(self):
+        self.producto = _producto('Modulo circuito test')
+        self.sucursal = Sucursal.objects.create(nombre='Solar circuito test', orden=1)
+        aplicar_ajuste(self.producto, self.sucursal, delta=50)
+        self.usuario = Usuario.objects.create_user(
+            email='cajero.circuito@celtuc.test', username='cajero.circuito', password='x',
+        )
+
+    def _venta(self, **kwargs):
+        return registrar_venta(
+            self.sucursal,
+            [(self.producto, 1, Decimal('10000'))],
+            usuario=self.usuario,
+            **kwargs,
+        )
+
+    def test_el_circuito_ri_no_marca_nada(self):
+        for medio, facturacion in (
+            ('efectivo', 'sin_factura'),
+            ('transferencia', 'factura_ri'),
+            ('tarjeta', 'factura_ri'),
+        ):
+            venta = self._venta(forma_pago=medio, facturacion=facturacion, circuito='factura_ri')
+            self.assertIsNone(venta.desvio_circuito, f'{medio} {facturacion}')
+            self.assertFalse(venta.pagos.get().fuera_de_circuito)
+
+    def test_el_circuito_monotributo_no_marca_nada(self):
+        for medio, facturacion in (
+            ('efectivo', 'sin_factura'),
+            ('transf_financiera', 'sin_factura'),
+            ('tarjeta', 'factura_c'),
+        ):
+            venta = self._venta(forma_pago=medio, facturacion=facturacion, circuito='general')
+            self.assertIsNone(venta.desvio_circuito, f'{medio} {facturacion}')
+
+    def test_salirse_del_circuito_queda_registrado_con_quien_lo_hizo(self):
+        venta = self._venta(forma_pago='tarjeta', facturacion='sin_factura', circuito='factura_ri')
+        self.assertTrue(venta.pagos.get().fuera_de_circuito)
+        desvio = venta.desvio_circuito
+        self.assertEqual(desvio['circuito'], 'factura_ri')
+        self.assertEqual(desvio['aceptado_por'], 'cajero.circuito')
+        self.assertTrue(desvio['aceptado_en'])
+        self.assertEqual(
+            desvio['partes'], [{'medio': 'tarjeta', 'facturacion': 'sin_factura', 'monto': '10000.00'}],
+        )
+
+    def test_un_medio_que_no_es_del_circuito_tambien_se_marca(self):
+        # La transferencia comun no es del circuito de Monotributo (usa la financiera).
+        venta = self._venta(forma_pago='transferencia', facturacion='sin_factura', circuito='general')
+        self.assertTrue(venta.pagos.get().fuera_de_circuito)
+        self.assertEqual(venta.desvio_circuito['circuito'], 'general')
+
+    def test_sin_circuito_no_se_marca_nada(self):
+        """Ventas de siempre (sin caja o caja comun): nada cambia."""
+        venta = self._venta(forma_pago='tarjeta', facturacion='sin_factura')
+        self.assertIsNone(venta.desvio_circuito)
+        self.assertFalse(venta.pagos.get().fuera_de_circuito)
+
+    def test_cobro_dividido_marca_solo_la_parte_que_se_sale(self):
+        venta = registrar_venta(
+            self.sucursal,
+            [(self.producto, 1, Decimal('10000'))],
+            usuario=self.usuario,
+            circuito='factura_ri',
+            pagos=[
+                {'medio': 'transferencia', 'facturacion': 'factura_ri', 'monto': Decimal('6000')},
+                {'medio': 'tarjeta', 'facturacion': 'factura_c', 'monto': Decimal('4000')},
+            ],
+        )
+        por_medio = {p.medio: p for p in venta.pagos.all()}
+        self.assertFalse(por_medio['transferencia'].fuera_de_circuito)
+        self.assertTrue(por_medio['tarjeta'].fuera_de_circuito)
+        self.assertEqual(len(venta.desvio_circuito['partes']), 1)
+        self.assertEqual(venta.desvio_circuito['partes'][0]['medio'], 'tarjeta')
+
+    def test_api_guarda_el_circuito_y_la_caja_lo_muestra(self):
+        from caja.models import Caja, abrir_caja
+
+        caja_ri = Caja.objects.get(canal=Caja.Canal.FACTURA_RI)
+        caja_general = Caja.objects.get(canal=Caja.Canal.GENERAL)
+        abrir_caja(caja_ri, fondo_inicial=0)
+        abrir_caja(caja_general, fondo_inicial=0)
+        rol = Rol.objects.create(nombre='Cajero circuito api test')
+        rol.permisos.set(Permiso.objects.filter(codigo__in=('ver_caja', 'ver_inventario')))
+        self.usuario.rol = rol
+        self.usuario.save(update_fields=['rol'])
+        cliente = APIClient()
+        cliente.force_authenticate(self.usuario)
+
+        r = cliente.post('/api/inventario/ventas/', {
+            'sucursal': self.sucursal.pk,
+            'forma_pago': 'tarjeta',
+            'facturacion': 'factura_ri',
+            'circuito': 'factura_ri',
+            'items': [{'producto': self.producto.pk, 'cantidad': 1, 'precio_unitario': 10000}],
+        }, format='json')
+        self.assertEqual(r.status_code, 201)
+        self.assertIsNone(r.data['desvio_circuito'])
+
+        r = cliente.post('/api/inventario/ventas/', {
+            'sucursal': self.sucursal.pk,
+            'forma_pago': 'tarjeta',
+            'facturacion': 'factura_c',  # en la caja RI no corresponde
+            'circuito': 'factura_ri',
+            'items': [{'producto': self.producto.pk, 'cantidad': 1, 'precio_unitario': 5000}],
+        }, format='json')
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.data['desvio_circuito']['aceptado_por'], 'cajero.circuito')
+        self.assertTrue(r.data['pagos'][0]['fuera_de_circuito'])
+
+        # Salirse del circuito ademas manda la plata a la OTRA caja: la Factura C
+        # entra siempre a la de Monotributo, aunque se cobre parado en la RI.
+        self.assertEqual(r.data['caja_arqueo'], caja_general.nombre)
+        estado = cliente.get(f'/api/caja/cajas/{caja_general.pk}/estado/').data
+        marcados = [m for m in estado['movimientos'] if m['fuera_de_circuito']]
+        self.assertEqual(len(marcados), 1)
+        self.assertEqual(float(marcados[0]['monto']), 5000)
+        # Lo que siguio el circuito quedo en la caja RI, sin marca.
+        estado_ri = cliente.get(f'/api/caja/cajas/{caja_ri.pk}/estado/').data
+        self.assertEqual(len(estado_ri['movimientos']), 1)
+        self.assertFalse(estado_ri['movimientos'][0]['fuera_de_circuito'])
+
+    def test_api_rechaza_un_circuito_inventado(self):
+        cliente = APIClient()
+        cliente.force_authenticate(
+            Usuario.objects.create_superuser(
+                email='admin.circuito@celtuc.test', username='admin.circuito', password='x',
+            )
+        )
+        r = cliente.post('/api/inventario/ventas/', {
+            'sucursal': self.sucursal.pk,
+            'circuito': 'cualquier_cosa',
+            'items': [{'producto': self.producto.pk, 'cantidad': 1, 'precio_unitario': 100}],
+        }, format='json')
+        self.assertEqual(r.status_code, 400)

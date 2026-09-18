@@ -134,6 +134,7 @@ class MovimientoCajaSerializer(serializers.ModelSerializer):
     monto = _decimal()
     venta = serializers.PrimaryKeyRelatedField(read_only=True)
     facturacion = serializers.SerializerMethodField()
+    fuera_de_circuito = serializers.SerializerMethodField()
     usuario = serializers.SerializerMethodField()
     fecha = serializers.DateTimeField(source='creado', read_only=True)
 
@@ -141,7 +142,7 @@ class MovimientoCajaSerializer(serializers.ModelSerializer):
         model = MovimientoCaja
         fields = (
             'id', 'caja', 'sesion', 'tipo', 'medio', 'monto', 'motivo', 'detalle',
-            'venta', 'facturacion', 'usuario', 'fecha',
+            'venta', 'facturacion', 'fuera_de_circuito', 'usuario', 'fecha',
         )
 
     def get_facturacion(self, obj):
@@ -154,6 +155,10 @@ class MovimientoCajaSerializer(serializers.ModelSerializer):
         if obj.pago_id:
             return obj.pago.facturacion
         return obj.venta.facturacion if obj.venta_id else None
+
+    def get_fuera_de_circuito(self, obj):
+        """Esta parte se cobro distinto de lo que sugeria la caja (y se acepto)."""
+        return bool(obj.pago.fuera_de_circuito) if obj.pago_id else False
 
     def get_usuario(self, obj):
         return obj.creado_por.username if obj.creado_por_id else None

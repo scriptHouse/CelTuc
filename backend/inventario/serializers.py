@@ -8,6 +8,7 @@ from productos.models import CategoriaProducto, Producto
 
 from .importacion import MAX_COLUMNAS, MAX_UNIDADES, precio_planilla
 from .models import (
+    CIRCUITO_POR_CANAL,
     ItemVenta,
     MovimientoStock,
     PagoVenta,
@@ -126,7 +127,9 @@ class PagoVentaSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PagoVenta
-        fields = ('medio', 'facturacion', 'emisor', 'emisor_nombre', 'monto')
+        fields = (
+            'medio', 'facturacion', 'emisor', 'emisor_nombre', 'monto', 'fuera_de_circuito',
+        )
 
 
 class VentaSerializer(serializers.ModelSerializer):
@@ -144,7 +147,8 @@ class VentaSerializer(serializers.ModelSerializer):
         model = Venta
         fields = (
             'id', 'sucursal', 'sucursal_nombre', 'forma_pago', 'pagos', 'facturacion', 'nota',
-            'total', 'usuario', 'items', 'cliente', 'cliente_nombre', 'comprobante', 'creado',
+            'total', 'usuario', 'items', 'cliente', 'cliente_nombre', 'comprobante',
+            'desvio_circuito', 'creado',
         )
 
     def get_usuario(self, obj):
@@ -240,6 +244,11 @@ class CrearVentaSerializer(serializers.Serializer):
     # True = el vendedor ya confirmo la advertencia de stock insuficiente: la
     # venta se registra igual y el stock queda en negativo.
     permitir_faltante = serializers.BooleanField(required=False, default=False)
+    # Canal de la caja donde se estaba parado al cobrar: lo que no sigue ese
+    # circuito queda marcado y la venta guarda quien acepto el aviso.
+    circuito = serializers.ChoiceField(
+        choices=sorted(CIRCUITO_POR_CANAL), required=False, allow_blank=True, default='',
+    )
 
     def validate_items(self, value):
         if not value:

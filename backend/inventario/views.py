@@ -304,6 +304,7 @@ class VentasView(_BaseInventario, APIView):
                 usuario=usuario,
                 permitir_faltante=datos.get('permitir_faltante', False),
                 pagos=datos.get('pagos'),
+                circuito=datos.get('circuito', ''),
             )
         except ValidationError as e:
             return Response({'detail': ' '.join(e.messages)}, status=400)

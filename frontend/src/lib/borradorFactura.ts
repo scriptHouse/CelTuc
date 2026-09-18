@@ -1,11 +1,12 @@
 import type { CondicionEmisor, CondicionFiscal, DocTipo, MedioPagoComprobante } from '@/types'
+import { IVA_RATE } from '@/lib/afip'
 
 /**
- * Puente entre Caja y Facturación: al registrar una venta de mostrador marcada
- * como facturable, se deja acá un borrador y se navega a /facturacion. La
- * página lo toma UNA vez (se borra al leer), elige la cuenta que corresponde
- * (RI o Monotributo) y abre el modal de emisión de siempre con todo
- * precargado. La emisión en sí es 100 % el flujo existente (mismo modal,
+ * Puente entre Caja y Facturación: una venta de mostrador marcada como
+ * facturable se convierte en la precarga del modal de emisión de siempre
+ * (`prefillDesdeVenta`). Caja abre ese modal ahí mismo; el borrador guardado
+ * acá es el camino alternativo (se deja y se navega a /facturacion, que lo
+ * toma UNA vez). La emisión en sí es 100 % el flujo existente (mismo modal,
  * mismas validaciones, mismo backend ARCA): acá solo viajan datos.
  */
 
@@ -42,6 +43,56 @@ export interface BorradorFacturaVenta {
     docTipo?: DocTipo
     docNumero?: string
     condicion?: CondicionFiscal
+  }
+}
+
+/** Lo que el modal de emisión recibe precargado cuando nace de una venta. */
+export interface PrefillFacturaVenta {
+  /** Venta de mostrador que se está facturando (se liga al emitir). */
+  ventaId: number
+  items: Array<{
+    descripcion: string
+    cantidad: number
+    precioUnitario: number
+    /** Origen del ítem: solo para el concepto genérico (el stock ya se movió). */
+    productoId?: number
+    itemServiceId?: number
+  }>
+  observaciones: string
+  pagada: boolean
+  /** Con qué se cobró en el mostrador (precarga el medio de la factura). */
+  medioPago?: MedioPagoComprobante
+  /** Cliente cargado en el mostrador (si la venta lo tenía). */
+  cliente?: BorradorFacturaVenta['cliente']
+}
+
+/**
+ * Convierte la venta de mostrador en la precarga del modal de emisión.
+ *
+ * El precio de la venta es lo que pagó el cliente (final). En A/B el ítem viaja
+ * NETO y el modal le suma el 21 %: se divide acá para que el total de la
+ * factura coincida con lo cobrado en el mostrador.
+ */
+export function prefillDesdeVenta(
+  borrador: BorradorFacturaVenta,
+  condicion: CondicionEmisor,
+): PrefillFacturaVenta {
+  const esRI = condicion === 'responsable_inscripto'
+  return {
+    ventaId: borrador.ventaId,
+    items: borrador.items.map((i) => ({
+      descripcion: i.descripcion,
+      cantidad: i.cantidad,
+      precioUnitario: esRI
+        ? Math.round((i.precioFinal / (1 + IVA_RATE)) * 100) / 100
+        : i.precioFinal,
+      productoId: i.productoId,
+      itemServiceId: i.itemServiceId,
+    })),
+    observaciones: borrador.observaciones,
+    pagada: true, // la venta de mostrador ya se cobró
+    medioPago: borrador.medioPago,
+    cliente: borrador.cliente,
   }
 }
 

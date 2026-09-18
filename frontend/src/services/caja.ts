@@ -92,6 +92,7 @@ interface MovimientoDTO {
   detalle: string
   venta: number | null
   facturacion: string | null
+  fuera_de_circuito: boolean
   usuario: string | null
   fecha: string
 }
@@ -191,6 +192,7 @@ function mapMovimiento(dto: MovimientoDTO): MovimientoCaja {
     motivo: dto.motivo,
     detalle: dto.detalle || undefined,
     facturacion: (dto.facturacion as MovimientoCaja['facturacion']) ?? undefined,
+    fueraDeCircuito: Boolean(dto.fuera_de_circuito),
     usuario: dto.usuario ?? '—',
     fecha: dto.fecha,
   }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  AlertTriangle,
   ArrowUpFromLine,
   Banknote,
   ChevronRight,
@@ -584,6 +585,9 @@ export function CajaPage() {
           porSucursal={porSucursal}
           sucursalInicial={porSucursal && sucursalId && sucursalId !== TODAS ? sucursalId : undefined}
           soloSucursal={soloMiSucursal ? sucursalDelUsuario : undefined}
+          // La caja en la que estás parado define el circuito de cobro que se
+          // presetea en la venta (RI o Monotributo).
+          canalCaja={cajaActual?.canal ?? ''}
         />
       )}
 
@@ -891,7 +895,18 @@ export function CajaPage() {
                           <Icon className="h-4 w-4" strokeWidth={1.75} />
                         </span>
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-ink-900">{m.motivo}</p>
+                          <p className="flex items-center gap-1.5 truncate text-sm font-medium text-ink-900">
+                            {m.motivo}
+                            {m.fueraDeCircuito && (
+                              <span
+                                title="Se cobró distinto de lo que indica esta caja; alguien lo aceptó."
+                                className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[0.62rem] font-semibold uppercase tracking-wide text-amber-800 ring-1 ring-amber-500/25 dark:text-amber-300"
+                              >
+                                <AlertTriangle className="h-3 w-3" aria-hidden />
+                                Fuera de circuito
+                              </span>
+                            )}
+                          </p>
                           <p className="truncate text-xs text-ink-400">
                             <span className="tnum">{horaDe(m.fecha)}</span> · {m.usuario}
                             {m.tipo !== 'venta' ? '' : ` · ${MEDIO_LABEL[m.medio]}`}

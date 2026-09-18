@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import type {
   CajaRegistradora,
+  CanalCaja,
   Cliente,
   CondicionEmisor,
   Emisor,
@@ -32,7 +33,12 @@ import type {
   SeccionPreciosService,
 } from '@/types'
 import { MEDIOS_PAGO_CAJA } from '@/types'
-import { buscarClientes, listarEmisores, obtenerLimites } from '@/services/facturacion'
+import {
+  buscarClientes,
+  listarConceptos,
+  listarEmisores,
+  obtenerLimites,
+} from '@/services/facturacion'
 import { listarSecciones } from '@/services/preciosService'
 import { listarProductos } from '@/services/productos'
 import {
@@ -47,13 +53,29 @@ import {
   FACTURACIONES,
   FORMAS_POR_FACTURACION,
   cajaParaFacturacion,
+  circuitoDeCanal,
+  enCircuito,
+  facturacionDelCircuito,
   facturacionSugerida,
   formasPara,
   nombreCaja,
 } from '@/components/caja/medios'
+import {
+  AlertaCircuitoModal,
+  type DesvioCircuito,
+} from '@/components/caja/AlertaCircuitoModal'
 import { CuentaCard } from '@/components/facturacion/CuentaCard'
 import { LimiteUsoBar } from '@/components/facturacion/LimiteUsoBar'
-import { guardarBorradorFacturaVenta } from '@/lib/borradorFactura'
+import { useEmitirFactura } from '@/components/facturacion/useEmitirFactura'
+// El modal de emisión es el de Facturación, tal cual: Caja lo abre con la venta
+// precargada para no tener una segunda forma de hacer una factura.
+import { NuevaFacturaModal } from '@/pages/FacturacionPage'
+import {
+  guardarBorradorFacturaVenta,
+  prefillDesdeVenta,
+  type BorradorFacturaVenta,
+  type PrefillFacturaVenta,
+} from '@/lib/borradorFactura'
 import { puedeVer } from '@/lib/permisos'
 import { useAuth } from '@/store/auth'
 import { useConfirm } from '@/components/ConfirmProvider'
@@ -475,6 +497,7 @@ export function VentaRapida({
   porSucursal = false,
   sucursalInicial,
   soloSucursal,
+  canalCaja = '',
 }: {
   cajaId?: string
   /** Cajas del local (con su canal fiscal) para mostrar a dónde va la plata. */
@@ -490,6 +513,11 @@ export function VentaRapida({
    * sucursal no se sabe el estado de sus cajas, así que no se inventa.
    */
   soloSucursal?: string
+  /**
+   * Canal fiscal de la caja en la que estás parado: define el circuito de cobro
+   * que se presetea (y avisa si se cobra distinto). Vacío = caja común, sin circuito.
+   */
+  canalCaja?: CanalCaja
 }) {
   const [abierta, setAbierta] = useState(false)
 
@@ -568,6 +596,7 @@ export function VentaRapida({
         porSucursal={porSucursal}
         sucursalInicial={sucursalInicial}
         soloSucursal={soloSucursal}
+        canalCaja={canalCaja}
       />
     </>
   )
@@ -583,6 +612,7 @@ function VentaModal({
   porSucursal,
   sucursalInicial,
   soloSucursal,
+  canalCaja,
 }: {
   abierta: boolean
   onCerrar: () => void
@@ -593,6 +623,7 @@ function VentaModal({
   porSucursal: boolean
   sucursalInicial?: string
   soloSucursal?: string
+  canalCaja: CanalCaja
 }) {
   const toast = useToast()
   const queryClient = useQueryClient()
@@ -708,6 +739,10 @@ function VentaModal({
     setDividido(false)
     setPagos([])
     setFacturacion('sin_factura')
+    // Cada venta arranca con el circuito limpio: lo aceptado en la anterior no
+    // se hereda.
+    aceptados.current.clear()
+    setAlerta(null)
     setSugeridoPorMedio(false)
     setLineas([])
     setNota('')
@@ -721,6 +756,69 @@ function VentaModal({
     (a, l) => a + l.cantidad * (Number.isFinite(l.precio) ? l.precio : 0),
     0,
   )
+
+  // --- Circuito de cobro de la caja donde estás parado ------------------------
+  // En la caja del Responsable Inscripto: efectivo sin factura, transferencia y
+  // tarjeta con Factura A/B. En la de Monotributo: efectivo sin factura,
+  // transferencia financiera sin factura y tarjeta con Factura C. Eso se
+  // presetea solo; cobrar distinto se puede, pero avisa con un cartel que hay
+  // que aceptar y queda registrado en la venta quién lo aceptó.
+  const canalCircuito = canalCaja === 'factura_ri' || canalCaja === 'general' ? canalCaja : null
+  const circuito = useMemo(() => circuitoDeCanal(canalCaja), [canalCaja])
+
+  /** La facturación que corresponde a ese medio (circuito, o la de siempre). */
+  const sugerirFacturacion = useCallback(
+    (medio: FormaPago, actual: FacturacionVenta): FacturacionVenta =>
+      facturacionDelCircuito(circuito, medio) ?? facturacionSugerida(medio, actual),
+    [circuito],
+  )
+
+  // --- Emitir la factura sin salir de Caja ------------------------------------
+  // Se abre el MISMO modal de Facturación con la venta precargada y se emite con
+  // la misma función (CAE, avisos de stock y tope mensual incluidos).
+  const [facturaAbierta, setFacturaAbierta] = useState(false)
+  const [prefillFactura, setPrefillFactura] = useState<PrefillFacturaVenta | null>(null)
+  const [emisorFactura, setEmisorFactura] = useState<Emisor | null>(null)
+
+  function cerrarFactura() {
+    setFacturaAbierta(false)
+    setPrefillFactura(null)
+    setEmisorFactura(null)
+  }
+  const emitirFactura = useEmitirFactura({ onEmitida: cerrarFactura })
+
+  // Lo que el modal necesita: el catálogo con precio de lista, los conceptos
+  // activos y el tope mensual de la cuenta (mismas queries que Facturación, así
+  // comparten caché).
+  const productosParaFactura = useMemo(
+    () =>
+      catalogo
+        .filter((p) => p.activo && p.efectivo?.lista_ars != null)
+        .map((p) => ({
+          id: String(p.id),
+          nombre: [p.nombre, p.calidad].filter(Boolean).join(' · '),
+          precio: Number(p.efectivo!.lista_ars),
+        })),
+    [catalogo],
+  )
+  const { data: conceptos = [] } = useQuery({
+    queryKey: ['facturacion-conceptos'],
+    queryFn: listarConceptos,
+    enabled: facturaAbierta,
+    retry: false,
+  })
+  const conceptosActivos = useMemo(() => conceptos.filter((c) => c.activo), [conceptos])
+  const { data: limitesFactura } = useQuery({
+    queryKey: ['fact-limites', emisorFactura?.id, Number(hoyArgentina().slice(0, 4))],
+    queryFn: () => obtenerLimites(emisorFactura!.id, Number(hoyArgentina().slice(0, 4))),
+    enabled: emisorFactura != null,
+    retry: false,
+  })
+
+  // Desvíos ya aceptados en esta venta (no se vuelve a preguntar por lo mismo).
+  const aceptados = useRef(new Set<string>())
+  const [alerta, setAlerta] = useState<{ desvios: DesvioCircuito[]; aplicar: () => void } | null>(null)
+  const claveDesvio = (medio: FormaPago, facturacion: FacturacionVenta) => `${medio}|${facturacion}`
 
   // Con caja por sucursal, la plata va a las cajas de la sucursal de ESTA venta.
   const ambitoCaja = useMemo(
@@ -767,6 +865,57 @@ function VentaModal({
       abierta: cajasAbiertas.includes(d.caja.id),
     }))
   }, [dividido, pagos, facturacion, total, cajas, cajasAbiertas, ambitoCaja, ventaDeOtraSucursal])
+
+  /** La caja que recibe esa facturación, si NO es en la que estás parado. */
+  const cajaDeOtroCanal = useCallback(
+    (facturacion: FacturacionVenta) => {
+      const destino = cajaParaFacturacion(cajas, facturacion, ambitoCaja)
+      if (!destino || (cajaId && destino.id === cajaId)) return null
+      return nombreCaja(destino)
+    },
+    [cajas, ambitoCaja, cajaId],
+  )
+
+  /**
+   * Corre `aplicar` solo si lo elegido sigue el circuito de la caja. Si no,
+   * muestra el cartel: aceptar aplica el cambio (y lo deja registrado), volver
+   * no cambia nada.
+   */
+  const conCircuito = useCallback(
+    (cambios: Array<[FormaPago, FacturacionVenta]>, aplicar: () => void) => {
+      if (!circuito || !canalCircuito) {
+        aplicar()
+        return
+      }
+      const vistos = new Set<string>()
+      const desvios: DesvioCircuito[] = []
+      for (const [medio, facturacion] of cambios) {
+        const clave = claveDesvio(medio, facturacion)
+        if (enCircuito(circuito, medio, facturacion) || aceptados.current.has(clave)) continue
+        if (vistos.has(clave)) continue
+        vistos.add(clave)
+        desvios.push({
+          medio,
+          facturacion,
+          sugerido: facturacionDelCircuito(circuito, medio),
+          cajaDestino: cajaDeOtroCanal(facturacion),
+        })
+      }
+      if (desvios.length === 0) {
+        aplicar()
+        return
+      }
+      setAlerta({ desvios, aplicar })
+    },
+    [circuito, canalCircuito, cajaDeOtroCanal],
+  )
+
+  function aceptarDesvio() {
+    if (!alerta) return
+    for (const d of alerta.desvios) aceptados.current.add(claveDesvio(d.medio, d.facturacion))
+    alerta.aplicar()
+    setAlerta(null)
+  }
 
   // ---- Cuenta que va a emitir la factura ------------------------------------
   // Las MISMAS cuentas (y los mismos límites mensuales) del módulo Facturación:
@@ -1082,6 +1231,9 @@ function VentaModal({
         cliente: clienteSel?.id,
         cliente_datos: hayDatosNuevos ? datosCliente : undefined,
         caja: cajaId ? Number(cajaId) : undefined,
+        // El circuito de la caja donde se cobró: el backend marca las partes
+        // que no lo siguen y guarda quién aceptó el aviso.
+        circuito: canalCircuito ?? undefined,
         permitir_faltante: permitirFaltante || undefined,
         items: lineas.map((l) => ({
           tipo: l.tipo,
@@ -1133,7 +1285,7 @@ function VentaModal({
           confirmLabel: 'Facturar ahora',
           cancelLabel: 'Después',
           description:
-            `La venta #${venta.id} ya quedó registrada. Te llevo a Facturación para emitir la ` +
+            `La venta #${venta.id} ya quedó registrada. Abro acá mismo el formulario para emitir la ` +
             `${esRI ? 'Factura A/B (Responsable Inscripto)' : 'Factura C (Monotributo)'} por ` +
             `${money0(tramo.monto)}${parcial ? ' (la parte facturada de la venta)' : ''}` +
             `${cuenta ? ` con la cuenta «${cuenta.nombre}»` : ''}, con CAE, como siempre.` +
@@ -1142,7 +1294,7 @@ function VentaModal({
               : ''),
         })
         if (ok) {
-          guardarBorradorFacturaVenta({
+          const borrador: BorradorFacturaVenta = {
             ventaId: venta.id,
             emisorCondicion: tramo.condicion,
             // La cuenta elegida acá es la que va a quedar seleccionada allá.
@@ -1179,8 +1331,19 @@ function VentaModal({
                   condicion: clienteSel?.condicion,
                 }
               : undefined,
-          })
-          navigate('/facturacion')
+          }
+          // La cuenta elegida en el mostrador manda; si no hay ninguna a mano,
+          // queda el camino de siempre: el borrador y Facturación.
+          const cuentaFactura =
+            cuenta ?? emisores.find((e) => e.activo && e.condicion === tramo.condicion)
+          if (cuentaFactura) {
+            setEmisorFactura(cuentaFactura)
+            setPrefillFactura(prefillDesdeVenta(borrador, cuentaFactura.condicion))
+            setFacturaAbierta(true)
+          } else {
+            guardarBorradorFacturaVenta(borrador)
+            navigate('/facturacion')
+          }
         }
       }
     },
@@ -1224,10 +1387,16 @@ function VentaModal({
       })
       if (!ok) return
     }
-    guardar.mutate(hayFaltantes)
+    // Última red: si algo quedó fuera del circuito sin haberse aceptado (por
+    // ejemplo, un medio que se corrigió solo), se avisa antes de cobrar.
+    const partes: Array<[FormaPago, FacturacionVenta]> = dividido
+      ? pagos.map((p) => [p.medio, p.facturacion])
+      : [[formaPago, facturacion]]
+    conCircuito(partes, () => guardar.mutate(hayFaltantes))
   }
 
   return (
+    <>
     <Modal open={abierta} onClose={onCerrar} size="xl" labelledBy="venta-rapida-titulo">
       <div className="border-b border-line px-5 py-4">
         <h2 id="venta-rapida-titulo" className="text-lg font-semibold text-ink-950">
@@ -1270,19 +1439,23 @@ function VentaModal({
               value={formaPago}
               onChange={(v) => {
                 const medio = v as FormaPago
-                setFormaPago(medio)
-                // El medio SUGIERE como se factura (efectivo sin factura,
-                // transferencia con Factura A/B, etc.). Es preseleccion: si
-                // despues tocan el pill, manda lo que eligieron ahi.
-                const sugerida = facturacionSugerida(medio, facturacion)
-                setFacturacion(sugerida)
-                setSugeridoPorMedio(true)
-                // Con cobro dividido, este selector es la primera parte.
-                setPagos((ps) =>
-                  ps.length
-                    ? [{ ...ps[0], medio, facturacion: sugerida, emisorId: null }, ...ps.slice(1)]
-                    : ps,
-                )
+                // El medio SUGIERE como se factura: con la caja del RI la
+                // transferencia y la tarjeta van con Factura A/B; con la de
+                // Monotributo, la financiera sin factura y la tarjeta con
+                // Factura C. Es preseleccion: si despues tocan el pill, manda
+                // lo que eligieron ahi (avisando si se sale del circuito).
+                const sugerida = sugerirFacturacion(medio, facturacion)
+                conCircuito([[medio, sugerida]], () => {
+                  setFormaPago(medio)
+                  setFacturacion(sugerida)
+                  setSugeridoPorMedio(true)
+                  // Con cobro dividido, este selector es la primera parte.
+                  setPagos((ps) =>
+                    ps.length
+                      ? [{ ...ps[0], medio, facturacion: sugerida, emisorId: null }, ...ps.slice(1)]
+                      : ps,
+                  )
+                })
               }}
             />
             <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
@@ -1335,24 +1508,23 @@ function VentaModal({
                         value={p.medio}
                         onChange={(v) => {
                           const medio = v as FormaPago
-                          setPagos((ps) =>
-                            ps.map((x) =>
-                              x.key === p.key
-                                ? {
-                                    ...x,
-                                    medio,
-                                    // El medio sugiere como se factura ESTA parte.
-                                    facturacion: facturacionSugerida(medio, x.facturacion),
-                                    emisorId: null,
-                                  }
-                                : x,
-                            ),
-                          )
-                          if (i === 0) {
-                            setFormaPago(medio)
-                            setFacturacion((f) => facturacionSugerida(medio, f))
-                            setSugeridoPorMedio(true)
-                          }
+                          // El medio sugiere como se factura ESTA parte (según
+                          // el circuito de la caja donde estás parado).
+                          const sugerida = sugerirFacturacion(medio, p.facturacion)
+                          conCircuito([[medio, sugerida]], () => {
+                            setPagos((ps) =>
+                              ps.map((x) =>
+                                x.key === p.key
+                                  ? { ...x, medio, facturacion: sugerida, emisorId: null }
+                                  : x,
+                              ),
+                            )
+                            if (i === 0) {
+                              setFormaPago(medio)
+                              setFacturacion(sugerida)
+                              setSugeridoPorMedio(true)
+                            }
+                          })
                         }}
                       />
                     </div>
@@ -1396,19 +1568,17 @@ function VentaModal({
                         value={p.facturacion}
                         onChange={(v) => {
                           const fact = v as FacturacionVenta
-                          setPagos((ps) =>
-                            ps.map((x) =>
-                              x.key === p.key
-                                ? {
-                                    ...x,
-                                    facturacion: fact,
-                                    emisorId: null,
-                                    medio: medioValido(x.medio, fact),
-                                  }
-                                : x,
-                            ),
-                          )
-                          if (i === 0) setFormaPago((m) => medioValido(m, fact))
+                          const medio = medioValido(p.medio, fact)
+                          conCircuito([[medio, fact]], () => {
+                            setPagos((ps) =>
+                              ps.map((x) =>
+                                x.key === p.key
+                                  ? { ...x, facturacion: fact, emisorId: null, medio }
+                                  : x,
+                              ),
+                            )
+                            if (i === 0) setFormaPago((m) => medioValido(m, fact))
+                          })
                         }}
                       />
                     </div>
@@ -1476,19 +1646,24 @@ function VentaModal({
                   role="radio"
                   aria-checked={activa}
                   onClick={() => {
-                    setFacturacion(f.value)
-                    setSugeridoPorMedio(false)
                     // Con cobro dividido, elegir acá aplica a TODAS las partes;
                     // después cada una se puede cambiar por separado. El medio
                     // se corrige solo si el que había ya no corresponde.
-                    setPagos((ps) =>
-                      ps.map((p) => ({
-                        ...p,
-                        facturacion: f.value,
-                        medio: medioValido(p.medio, f.value),
-                      })),
-                    )
-                    setFormaPago((m) => medioValido(m, f.value))
+                    const cambios: Array<[FormaPago, FacturacionVenta]> = dividido
+                      ? pagos.map((p) => [medioValido(p.medio, f.value), f.value])
+                      : [[medioValido(formaPago, f.value), f.value]]
+                    conCircuito(cambios, () => {
+                      setFacturacion(f.value)
+                      setSugeridoPorMedio(false)
+                      setPagos((ps) =>
+                        ps.map((p) => ({
+                          ...p,
+                          facturacion: f.value,
+                          medio: medioValido(p.medio, f.value),
+                        })),
+                      )
+                      setFormaPago((m) => medioValido(m, f.value))
+                    })
                   }}
                   className={cn(
                     'flex flex-col items-start gap-0.5 rounded-2xl border px-3 py-2.5 text-left transition-all duration-150',
@@ -1917,5 +2092,36 @@ function VentaModal({
         </div>
       </div>
     </Modal>
+
+    {/* La factura de la venta: el modal de Facturación, con CAE y todo, abierto
+        acá mismo con los datos de la venta ya cargados. */}
+    {emisorFactura && prefillFactura && (
+      <NuevaFacturaModal
+        open={facturaAbierta}
+        emisor={emisorFactura}
+        productos={productosParaFactura}
+        conceptos={conceptosActivos}
+        limites={limitesFactura?.limites}
+        anioLimites={limitesFactura?.anio}
+        prefill={prefillFactura}
+        saving={emitirFactura.isPending}
+        onClose={cerrarFactura}
+        onSubmit={(payload) => emitirFactura.mutate({ ...payload, emisor: emisorFactura.id })}
+      />
+    )}
+
+    {/* Cobrar distinto de lo que indica la caja: se avisa, se acepta a
+        propósito y queda registrado quién fue. */}
+    {canalCircuito && (
+      <AlertaCircuitoModal
+        open={alerta != null}
+        canal={canalCircuito}
+        desvios={alerta?.desvios ?? []}
+        usuario={usuario?.username ?? 'tu usuario'}
+        onVolver={() => setAlerta(null)}
+        onAceptar={aceptarDesvio}
+      />
+    )}
+    </>
   )
 }
