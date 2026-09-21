@@ -714,6 +714,24 @@ export type ConteoBilletes = Record<number, number>
 /** Billetes ARS en circulación (BCRA); la config elige cuáles mostrar. */
 export const DENOMINACIONES_ARS = [20000, 10000, 2000, 1000, 500, 200, 100, 50, 20, 10]
 
+/**
+ * Cómo se cuenta el efectivo al cerrar: tocando + por cada billete, escribiendo
+ * el total, o eligiendo en el momento (quien cierra puede pasar de una a otra).
+ */
+export type ModoConteoCaja = 'billetes' | 'total' | 'elegir'
+
+/**
+ * Cuánta plata queda en el cajón para el próximo turno: se pregunta cada vez
+ * (proponiendo el fondo sugerido), se deja siempre el fondo sugerido, o se deja
+ * todo el efectivo contado.
+ */
+export type ModoFondoCaja = 'preguntar' | 'fijo' | 'todo'
+
+/** Tope de tareas antes de cerrar (el backend valida lo mismo). */
+export const MAX_TAREAS_CIERRE = 10
+/** Largo máximo de cada tarea antes de cerrar. */
+export const MAX_LARGO_TAREA = 120
+
 /** Preferencias del módulo: cada función pro se puede prender o apagar. */
 export interface CajaConfig {
   /** Ocultar el esperado del efectivo durante el conteo (se revela al confirmar). */
@@ -737,6 +755,14 @@ export interface CajaConfig {
    * compartidas por todo el negocio. Se cambia con `cambiarModoPorSucursal`.
    */
   porSucursal: boolean
+  /** Cómo se cuenta el efectivo en el cierre. */
+  modoConteo: ModoConteoCaja
+  /** Preguntar si transferencias y tarjetas coinciden (apagado: se toma lo anotado). */
+  controlarOtrosMedios: boolean
+  /** Cuánta plata queda para el próximo turno. */
+  modoFondo: ModoFondoCaja
+  /** Tareas que quien cierra tiene que tildar antes de contar. */
+  tareasCierre: string[]
 }
 
 /**
@@ -843,6 +869,10 @@ export interface CierreCaja {
   notaDiferencia?: string
   /** Si el arqueo se hizo sin ver el esperado. */
   cierreCiego: boolean
+  /** false = transferencias y tarjetas no se revisaron: se tomó lo anotado. */
+  otrosMediosControlados: boolean
+  /** Lo que quien cerró tildó antes de contar (tareas y cierre del posnet). */
+  tareasConfirmadas: string[]
   /** Efectivo que quedó como fondo del próximo turno. */
   fondoSiguiente: number
   /** Efectivo retirado a bóveda/depósito al cerrar. */
@@ -851,14 +881,18 @@ export interface CierreCaja {
   movimientos: MovimientoCaja[]
 }
 
-/** Motivos predefinidos cuando la diferencia supera la tolerancia (patrón Fudo). */
+/**
+ * Motivos para explicar una diferencia del cierre (patrón Fudo), escritos como
+ * los diría quien atiende. El texto elegido queda tal cual en el comprobante.
+ */
 export const MOTIVOS_DIFERENCIA_CAJA = [
-  'Faltante de efectivo',
-  'Sobrante de efectivo',
-  'Divergencia de terminal de tarjeta',
-  'Error de carga de movimientos',
-  'Vuelto mal dado',
-  'Otro',
+  'Se dio mal un vuelto',
+  'Una venta no se cargó',
+  'Se sacó plata y no se anotó',
+  'Se cargó algo de más',
+  'El posnet o el banco no coincide',
+  'No sé qué pasó',
+  'Otro motivo',
 ]
 
 /** Motivos sugeridos por tipo de movimiento manual. */

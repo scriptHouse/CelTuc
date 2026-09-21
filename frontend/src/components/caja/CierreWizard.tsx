@@ -1,54 +1,86 @@
-import { Fragment, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import {
-  AlertTriangle,
-  ArrowLeft,
-  ArrowRight,
-  Banknote,
-  Check,
-  EyeOff,
-  Landmark,
-  Lock,
-  Mail,
-  Printer,
-  ScrollText,
-  X,
-} from 'lucide-react'
-import type { CajaConfig, CajaRegistradora, CierreCaja, ConteoBilletes, MedioPagoCaja, MovimientoCaja, SesionCaja } from '@/types'
-import { MEDIOS_CON_LOTE, MEDIOS_PAGO_CAJA, MOTIVOS_DIFERENCIA_CAJA } from '@/types'
-import { money, money0, num } from '@/lib/format'
-import { cn, ctStagger } from '@/lib/utils'
+import { ArrowLeft, ArrowRight, Check, CircleHelp, Lock, X } from 'lucide-react'
+import type {
+  CajaConfig,
+  CajaRegistradora,
+  CierreCaja,
+  ConteoBilletes,
+  MedioPagoCaja,
+  MovimientoCaja,
+  SesionCaja,
+} from '@/types'
+import { MEDIOS_CON_LOTE, MEDIOS_PAGO_CAJA } from '@/types'
+import { plata } from '@/lib/format'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
-import { Card } from '@/components/ui/Card'
-import { Input } from '@/components/ui/Input'
-import { Select } from '@/components/ui/Select'
-import { Textarea } from '@/components/ui/Textarea'
 import { useToast } from '@/components/ToastProvider'
 import { useConfirm } from '@/components/ConfirmProvider'
 import { calcularResumenSesion } from '@/services/caja'
 import type { CerrarCajaInput } from '@/services/caja'
-import { DenomGrid } from '@/components/caja/DenomGrid'
-import { DiffChip } from '@/components/caja/DiffChip'
 import { CierreDetalleModal } from '@/components/caja/CierreDetalleModal'
-import { MEDIO_ICONO, MEDIO_LABEL, nombreCaja, operacionesLabel, totalConteo } from '@/components/caja/medios'
+import { DiffChip } from '@/components/caja/DiffChip'
+import { nombreCaja, totalConteo } from '@/components/caja/medios'
+import {
+  OTROS_MEDIOS,
+  TAREA_LOTE,
+  centavos,
+  hayMonto,
+  infoPaso,
+  leerMonto,
+  medioRevisado,
+  montoATexto,
+  pasoVigente,
+  pasosDelCierre,
+  tareasDelCierre,
+} from '@/components/caja/cierre/pasos'
+import type { FormaConteo, OtroMedio, PasoCierre, RevisionMedio } from '@/components/caja/cierre/pasos'
+import { AyudaPaso } from '@/components/caja/cierre/piezas'
+import { PasoTareas } from '@/components/caja/cierre/PasoTareas'
+import { PasoEfectivo } from '@/components/caja/cierre/PasoEfectivo'
+import { PasoOtrosCobros } from '@/components/caja/cierre/PasoOtrosCobros'
+import { PasoResultado } from '@/components/caja/cierre/PasoResultado'
+import { PasoFondo } from '@/components/caja/cierre/PasoFondo'
+import { PasoConfirmar } from '@/components/caja/cierre/PasoConfirmar'
+import { CierreListo } from '@/components/caja/cierre/CierreListo'
 
 /**
- * El Ritual: cierre de caja guiado en 3 actos — Revisar → Contar → Confirmar —
- * (patrón Square Close of Day + Toast Shift Review + Shopify float).
- *  1. Checklist de pre-cierre (evita la causa n.º 1 de descuadres).
- *  2. Arqueo: billetes con la grilla, otros medios contra lote/extractos.
- *     Con cierre ciego, el esperado del efectivo no se muestra acá.
- *  3. Diferencia por medio, motivo si excede la tolerancia, fondo del próximo
- *     turno con retiro calculado, y el comprobante Z como resultado.
+ * El cierre de caja, paso a paso y con una sola cosa por pantalla (patrón
+ * «El Ritual»: Square Close of Day + Toast Shift Review + Shopify float),
+ * pensado para que lo haga cualquiera sin que nadie le explique:
+ *
+ *  1. Antes de empezar — las tareas a tildar (cierre del posnet, las propias).
+ *  2. Contar efectivo — tocando cada billete, o escribiendo el total.
+ *  3. Otros cobros — «¿es lo mismo que ves?» para transferencias y tarjetas.
+ *  4. ¿Cuadra? — la respuesta grande, la cuenta explicada y, si no cuadra,
+ *     volver a contar o contar qué pasó.
+ *  5. Para mañana — cuánto queda en el cajón y cuánto se guarda aparte.
+ *  6. Cerrar — el resumen en palabras y el botón final.
+ *
+ * Cada paso aparece solo si hace falta y según la configuración (Configurar →
+ * Cierre de caja). Cada pantalla trae su «¿Qué hago acá?», que se puede
+ * esconder (se recuerda en este navegador).
  */
 
-const zNum = (n: number) => `Z-${String(n).padStart(4, '0')}`
+const CLAVE_AYUDAS = 'celtuc-caja-cierre-ayudas'
 
-const TITULOS: Record<1 | 2 | 3, { titulo: string; sub: string }> = {
-  1: { titulo: 'Revisá el turno', sub: 'Chequeá que no quede nada afuera antes de contar.' },
-  2: { titulo: 'Contá lo que hay', sub: 'Billetes con la grilla; tarjetas y billeteras contra sus comprobantes.' },
-  3: { titulo: 'Confirmá el cierre', sub: 'Diferencia, fondo del próximo turno y comprobante Z.' },
+function leerAyudasVisibles(): boolean {
+  try {
+    return localStorage.getItem(CLAVE_AYUDAS) !== 'ocultas'
+  } catch {
+    return true
+  }
 }
+
+function guardarAyudasVisibles(visibles: boolean) {
+  try {
+    localStorage.setItem(CLAVE_AYUDAS, visibles ? 'visibles' : 'ocultas')
+  } catch {
+    /* sin localStorage (modo privado) las ayudas se ven siempre */
+  }
+}
+
+const MEDIOS: MedioPagoCaja[] = MEDIOS_PAGO_CAJA.map((m) => m.value)
 
 export function CierreWizard({
   caja,
@@ -71,68 +103,173 @@ export function CierreWizard({
   const confirm = useConfirm()
 
   const resumen = useMemo(() => calcularResumenSesion(sesion, movimientos), [sesion, movimientos])
-  const otrosMedios = useMemo(() => MEDIOS_PAGO_CAJA.filter((m) => m.value !== 'efectivo'), [])
 
-  const [paso, setPaso] = useState<1 | 2 | 3>(1)
+  // --- Qué tiene este cierre ------------------------------------------------------
+
+  const huboTarjeta = MEDIOS_CON_LOTE.some((m) => resumen.ventasPorMedio[m] > 0)
+  const tareas = useMemo(() => tareasDelCierre(config, huboTarjeta), [config, huboTarjeta])
+  const controlados = config.controlarOtrosMedios
+  /** Los medios con algo anotado: se preguntan uno por uno. */
+  const mediosARevisar = useMemo(
+    () => (controlados ? OTROS_MEDIOS.filter((m) => resumen.esperadoPorMedio[m] !== 0) : []),
+    [controlados, resumen],
+  )
+  /** Los que no tienen nada anotado (por si entró plata que no se cargó). */
+  const mediosExtra = useMemo(
+    () => (controlados ? OTROS_MEDIOS.filter((m) => resumen.esperadoPorMedio[m] === 0) : []),
+    [controlados, resumen],
+  )
+
+  // --- Estado ---------------------------------------------------------------------
+
+  const [paso, setPaso] = useState<PasoCierre>(() => (tareas.length > 0 ? 'tareas' : 'efectivo'))
   const [dir, setDir] = useState<'fwd' | 'back'>('fwd')
-  const [loteOk, setLoteOk] = useState(false)
+  const [ayudas, setAyudas] = useState(leerAyudasVisibles)
+
+  const [hechas, setHechas] = useState<string[]>([])
+
+  const [forma, setForma] = useState<FormaConteo>(config.modoConteo === 'total' ? 'total' : 'billetes')
   const [conteo, setConteo] = useState<ConteoBilletes>({})
-  const [sueltos, setSueltos] = useState(0)
-  const [contadoOtros, setContadoOtros] = useState<Partial<Record<MedioPagoCaja, string>>>(() => {
-    const init: Partial<Record<MedioPagoCaja, string>> = {}
-    for (const m of MEDIOS_PAGO_CAJA) {
-      if (m.value !== 'efectivo') init[m.value] = resumen.esperadoPorMedio[m.value] ? String(resumen.esperadoPorMedio[m.value]) : ''
-    }
-    return init
-  })
-  const [fondoSiguiente, setFondoSiguiente] = useState(() => String(config.fondoSugerido || ''))
-  const [confirmoDif, setConfirmoDif] = useState(false)
-  const [motivoDif, setMotivoDif] = useState('')
-  const [notaDif, setNotaDif] = useState('')
+  const [sueltos, setSueltos] = useState('')
+  const [totalEscrito, setTotalEscrito] = useState('')
+
+  const [revision, setRevision] = useState<Partial<Record<OtroMedio, RevisionMedio>>>({})
+  const [montosExtra, setMontosExtra] = useState<Partial<Record<OtroMedio, string>>>({})
+
+  /** La diferencia que se marcó como vista (si cambia al recontar, hay que volver a verla). */
+  const [difVista, setDifVista] = useState<number | null>(null)
+  const [motivo, setMotivo] = useState('')
+  const [nota, setNota] = useState('')
+
+  /** null = todavía no se tocó: se propone el fondo de la configuración. */
+  const [fondoTexto, setFondoTexto] = useState<string | null>(null)
+
   const [guardando, setGuardando] = useState(false)
   const [resultado, setResultado] = useState<CierreCaja | null>(null)
   const [verDetalle, setVerDetalle] = useState(false)
 
-  // --- Derivados -------------------------------------------------------------
+  // --- Cuentas --------------------------------------------------------------------
 
-  const contadoEfectivo = totalConteo(conteo, sueltos)
+  // Si la configuración cambia en el medio, manda la configuración.
+  const formaEfectiva: FormaConteo = config.modoConteo === 'elegir' ? forma : config.modoConteo
+  const contadoEfectivo = centavos(
+    formaEfectiva === 'billetes' ? totalConteo(conteo, leerMonto(sueltos)) : leerMonto(totalEscrito),
+  )
+
   const contadoPorMedio = useMemo(() => {
     const r = { efectivo: contadoEfectivo } as Record<MedioPagoCaja, number>
-    for (const m of otrosMedios) r[m.value] = Number(contadoOtros[m.value]) || 0
+    for (const m of OTROS_MEDIOS) {
+      const anotado = resumen.esperadoPorMedio[m]
+      if (!controlados) {
+        r[m] = anotado // no se revisa: vale lo que anotó el sistema
+      } else if (mediosARevisar.includes(m)) {
+        const rv = revision[m]
+        r[m] = rv?.respuesta === 'otro' && hayMonto(rv.monto) ? leerMonto(rv.monto) : anotado
+      } else {
+        r[m] = leerMonto(montosExtra[m] ?? '')
+      }
+    }
     return r
-  }, [contadoEfectivo, contadoOtros, otrosMedios])
+  }, [contadoEfectivo, controlados, mediosARevisar, montosExtra, resumen, revision])
 
   const diferenciaPorMedio = useMemo(() => {
     const r = {} as Record<MedioPagoCaja, number>
-    for (const m of MEDIOS_PAGO_CAJA) r[m.value] = contadoPorMedio[m.value] - resumen.esperadoPorMedio[m.value]
+    for (const m of MEDIOS) r[m] = centavos(contadoPorMedio[m] - resumen.esperadoPorMedio[m])
     return r
   }, [contadoPorMedio, resumen])
+  const difTotal = centavos(MEDIOS.reduce((a, m) => a + diferenciaPorMedio[m], 0))
+  const requiereMotivo = config.toleranciaActiva && Math.abs(difTotal) > config.toleranciaMonto
 
-  const difTotal = MEDIOS_PAGO_CAJA.reduce((a, m) => a + diferenciaPorMedio[m.value], 0)
-  const necesitaLote = config.exigirLote && MEDIOS_CON_LOTE.some((m) => resumen.ventasPorMedio[m] > 0)
-  const excedeTolerancia = config.toleranciaActiva && Math.abs(difTotal) > config.toleranciaMonto
-  const fondoNum = Math.max(0, Number(fondoSiguiente) || 0)
-  const fondoExcede = fondoNum > contadoEfectivo
-  const retiroFinal = Math.max(0, contadoEfectivo - fondoNum)
+  /** Transferencias y tarjetas que se muestran en el resultado y el resumen. */
+  const otrosMostrados = controlados
+    ? OTROS_MEDIOS.filter((m) => mediosARevisar.includes(m) || contadoPorMedio[m] !== 0)
+    : []
 
-  const puedeContinuar = paso !== 1 || !necesitaLote || loteOk
-  const puedeCerrar =
-    !guardando && (difTotal === 0 || (excedeTolerancia ? Boolean(motivoDif) && notaDif.trim().length > 0 : confirmoDif))
+  const fondoPedido = fondoTexto === null ? config.fondoSugerido : leerMonto(fondoTexto)
+  const fondoFinal = centavos(
+    config.modoFondo === 'fijo'
+      ? Math.min(config.fondoSugerido, contadoEfectivo)
+      : config.modoFondo === 'todo'
+        ? contadoEfectivo
+        : Math.max(0, Math.min(fondoPedido, contadoEfectivo)),
+  )
+  const retiroFinal = centavos(Math.max(0, contadoEfectivo - fondoFinal))
 
-  // --- Acciones ---------------------------------------------------------------
+  // --- Pasos ----------------------------------------------------------------------
 
-  function irA(nuevo: 1 | 2 | 3) {
-    setDir(nuevo > paso ? 'fwd' : 'back')
-    setPaso(nuevo)
+  // «Para mañana» depende solo de la configuración (no de lo contado): así la
+  // cantidad de pasos no cambia en el medio («Paso 2 de 5» sigue siendo de 5).
+  const pasos = pasosDelCierre({
+    tareas: tareas.length > 0,
+    otros: mediosARevisar.length > 0,
+    fondo: config.modoFondo === 'preguntar',
+  })
+  const actual = pasoVigente(paso, pasos)
+  const indice = pasos.indexOf(actual)
+  const info = infoPaso(actual, formaEfectiva)
+
+  const faltanTareas = tareas.filter((t) => !hechas.includes(t.clave)).length
+  const faltanRevisar = mediosARevisar.filter((m) => !medioRevisado(revision[m])).length
+  const difAceptada =
+    difTotal === 0 ||
+    (requiereMotivo ? Boolean(motivo) && nota.trim().length > 0 : difVista === difTotal)
+
+  // Cada paso arranca arriba de todo (en el celular, el botón quedó abajo).
+  const primerPaso = useRef(true)
+  useEffect(() => {
+    if (primerPaso.current) {
+      primerPaso.current = false
+      return
+    }
+    const reducir = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    window.scrollTo({ top: 0, behavior: reducir ? 'auto' : 'smooth' })
+  }, [actual])
+
+  // --- Acciones -------------------------------------------------------------------
+
+  function irA(destino: PasoCierre) {
+    const i = pasos.indexOf(destino)
+    if (i === -1 || destino === actual) return
+    setDir(i > indice ? 'fwd' : 'back')
+    setPaso(destino)
   }
 
-  async function handleCancelar() {
-    if (contadoEfectivo > 0 || paso > 1) {
+  function mostrarAyudas(visibles: boolean) {
+    setAyudas(visibles)
+    guardarAyudasVisibles(visibles)
+  }
+
+  async function adelante() {
+    if (actual === 'confirmar') {
+      await handleCerrar()
+      return
+    }
+    if (actual === 'efectivo' && contadoEfectivo === 0) {
       const ok = await confirm({
-        title: '¿Cancelar el cierre?',
-        description: 'Se pierde el conteo cargado hasta ahora. El turno sigue abierto.',
-        confirmLabel: 'Cancelar cierre',
-        cancelLabel: 'Seguir contando',
+        title: '¿El cajón está vacío?',
+        description: 'Contaste $ 0 en efectivo. Si de verdad no hay plata, seguí. Si no, contá los billetes.',
+        confirmLabel: 'Sí, está vacío',
+        cancelLabel: 'Volver a contar',
+        tone: 'warning',
+      })
+      if (!ok) return
+    }
+    const siguiente = pasos[indice + 1]
+    if (siguiente) irA(siguiente)
+  }
+
+  function atras() {
+    if (indice > 0) irA(pasos[indice - 1])
+  }
+
+  async function handleSalir() {
+    const hayAvance = indice > 0 || hechas.length > 0 || contadoEfectivo > 0
+    if (hayAvance) {
+      const ok = await confirm({
+        title: '¿Salir sin cerrar la caja?',
+        description: 'Se pierde lo que contaste hasta ahora. La caja sigue abierta y la podés cerrar más tarde.',
+        confirmLabel: 'Salir sin cerrar',
+        cancelLabel: 'Seguir cerrando',
         tone: 'warning',
       })
       if (!ok) return
@@ -140,17 +277,42 @@ export function CierreWizard({
     onSalir()
   }
 
+  async function reiniciarConteo() {
+    const ok = await confirm({
+      title: '¿Empezar a contar de nuevo?',
+      description: 'Se borra todo lo que contaste en efectivo.',
+      confirmLabel: 'Borrar y empezar',
+      cancelLabel: 'No, dejarlo',
+      tone: 'warning',
+    })
+    if (!ok) return
+    setConteo({})
+    setSueltos('')
+  }
+
+  function cambiarForma(nueva: FormaConteo) {
+    // Si ya se contaron billetes, el total escrito arranca con esa suma.
+    if (nueva === 'total' && !totalEscrito.trim()) {
+      const contado = totalConteo(conteo, leerMonto(sueltos))
+      if (contado > 0) setTotalEscrito(String(centavos(contado)))
+    }
+    setForma(nueva)
+  }
+
   async function handleCerrar() {
     setGuardando(true)
     try {
       const cierre = await onCerrar({
         contadoPorMedio,
-        conteoCierre: Object.values(conteo).some((c) => c > 0) ? conteo : undefined,
-        fondoSiguiente: Math.min(fondoNum, contadoEfectivo),
-        motivoDiferencia: difTotal !== 0 && excedeTolerancia ? motivoDif : undefined,
-        notaDiferencia: difTotal !== 0 && excedeTolerancia ? notaDif : undefined,
+        conteoCierre:
+          formaEfectiva === 'billetes' && Object.values(conteo).some((c) => c > 0) ? conteo : undefined,
+        fondoSiguiente: fondoFinal,
+        motivoDiferencia: difTotal !== 0 && motivo ? motivo : undefined,
+        notaDiferencia: difTotal !== 0 && nota.trim() ? nota.trim() : undefined,
+        tareasConfirmadas: tareas.map((t) => t.registro),
       })
       setResultado(cierre)
+      window.scrollTo({ top: 0 })
     } catch (e) {
       toast.error('No se pudo cerrar la caja', e instanceof Error ? e.message : undefined)
     } finally {
@@ -158,423 +320,255 @@ export function CierreWizard({
     }
   }
 
-  // --- Pantalla de éxito (comprobante Z emitido) -------------------------------
+  // --- Terminado: el comprobante ya existe ---------------------------------------------
 
   if (resultado) {
     return (
-      <div className="animate-fade-in mx-auto max-w-xl">
-        <Card className="px-6 py-10 text-center sm:px-10">
-          <span className="relative mx-auto grid h-16 w-16 place-items-center rounded-3xl bg-ink-950 text-on-ink">
-            <span aria-hidden className="ct-modal-halo absolute -inset-2 rounded-[1.4rem] border border-ink-300" />
-            <Check className="h-7 w-7" strokeWidth={2} />
-          </span>
-          <h2 className="mt-5 text-xl font-bold tracking-[-0.02em] text-ink-950">Caja cerrada</h2>
-          <p className="tnum mt-1 text-xs uppercase tracking-[0.14em] text-ink-400">
-            Comprobante {zNum(resultado.numero)} · {nombreCaja(caja)}
-          </p>
-
-          <div className="mt-6 grid grid-cols-2 gap-2.5 text-left">
-            <CeldaZ label="Ventas del turno" valor={money0(resultado.ventasPorMedio ? Object.values(resultado.ventasPorMedio).reduce((a, v) => a + v, 0) : 0)} />
-            <div className="rounded-xl border border-line bg-canvas/70 p-3">
-              <p className="text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-ink-400">Diferencia</p>
-              <div className="mt-1.5"><DiffChip valor={resultado.diferenciaTotal} /></div>
-            </div>
-            <CeldaZ label="Retirado a bóveda" valor={money0(resultado.retiroFinal)} icono={Landmark} />
-            <CeldaZ label="Fondo que queda" valor={money0(resultado.fondoSiguiente)} />
-          </div>
-
-          <div className="mt-6 flex flex-wrap justify-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setVerDetalle(true)}>
-              <ScrollText className="h-4 w-4" />
-              Ver comprobante
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => toast.info('Impresión térmica', 'Se habilita al conectar la impresora (backend).')}
-            >
-              <Printer className="h-4 w-4" />
-              Imprimir
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => toast.info('Envío por email', 'Se habilita al conectar el backend.')}
-            >
-              <Mail className="h-4 w-4" />
-              Enviar
-            </Button>
-          </div>
-
-          <Button className="mt-7 w-full" onClick={onSalir}>
-            Volver a Caja
-          </Button>
-        </Card>
-
+      <>
+        <CierreListo
+          cierre={resultado}
+          caja={caja}
+          conLote={tareas.some((t) => t.clave === TAREA_LOTE.clave)}
+          onVerComprobante={() => setVerDetalle(true)}
+          onSalir={onSalir}
+        />
         <CierreDetalleModal open={verDetalle} cierre={resultado} onClose={() => setVerDetalle(false)} />
-      </div>
+      </>
     )
   }
 
-  // --- Asistente ---------------------------------------------------------------
+  // --- La barra de abajo: qué falta y el botón para seguir -------------------------------
+
+  const barra = ((): BarraAcciones => {
+    switch (actual) {
+    case 'tareas':
+      return {
+        etiqueta: 'Empezar a contar',
+        corta: 'Empezar',
+        puede: faltanTareas === 0,
+        info:
+          faltanTareas > 0 ? (
+            <InfoTexto>
+              Te falta tildar {faltanTareas === 1 ? '1 tarea' : `${faltanTareas} tareas`}
+            </InfoTexto>
+          ) : (
+            <InfoTexto ok>Todo tildado</InfoTexto>
+          ),
+      }
+    case 'efectivo':
+      return {
+        etiqueta: 'Listo, ya conté',
+        corta: 'Ya conté',
+        puede: true,
+        info: (
+          <InfoMonto
+            etiqueta="Contaste"
+            valor={contadoEfectivo}
+            extra={config.cierreCiego ? undefined : `de ${plata(resumen.esperadoPorMedio.efectivo)}`}
+          />
+        ),
+      }
+    case 'otros':
+      return {
+        etiqueta: 'Seguir',
+        puede: faltanRevisar === 0,
+        info:
+          faltanRevisar > 0 ? (
+            <InfoTexto>Te falta revisar {faltanRevisar === 1 ? '1' : faltanRevisar}</InfoTexto>
+          ) : (
+            <InfoTexto ok>Todo revisado</InfoTexto>
+          ),
+      }
+    case 'resultado':
+      return {
+        etiqueta: 'Seguir',
+        puede: difAceptada,
+        info: difAceptada ? (
+          <DiffChip valor={difTotal} />
+        ) : (
+          <InfoTexto>{requiereMotivo ? 'Elegí qué pasó y contalo' : 'Tocá «Vi la diferencia»'}</InfoTexto>
+        ),
+      }
+    case 'fondo':
+      return {
+        etiqueta: 'Seguir',
+        puede: true,
+        info: <InfoMonto etiqueta="Queda en el cajón" valor={fondoFinal} />,
+      }
+    case 'confirmar':
+      return {
+        etiqueta: guardando ? 'Cerrando…' : 'Cerrar la caja',
+        corta: guardando ? 'Cerrando…' : 'Cerrar caja',
+        puede: !guardando,
+        cerrar: true,
+        info: <InfoTexto>Es el último paso</InfoTexto>,
+      }
+    }
+  })()
+
+  // --- El asistente ----------------------------------------------------------------------
 
   return (
     <div className="animate-fade-in mx-auto max-w-3xl">
-      {/* Encabezado propio del ritual */}
+      {/* Encabezado: dónde estoy y qué hay que hacer */}
       <div className="ct-rise mb-5 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <span className="mb-1.5 flex items-center gap-2 text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-ink-400">
-            <span aria-hidden className="h-px w-5 rounded-full bg-ink-300" />
-            Cierre de caja · {nombreCaja(caja)} · turno #{sesion.numero}
-          </span>
-          <h1 className="text-balance text-2xl font-bold tracking-[-0.02em] text-ink-950">
-            {TITULOS[paso].titulo}
+          <p className="mb-2 inline-flex max-w-full items-center gap-1.5 rounded-full bg-ink-100 py-1 pl-2 pr-2.5 text-xs text-ink-600">
+            <Lock className="h-3.5 w-3.5 shrink-0" strokeWidth={2} aria-hidden />
+            <span className="shrink-0">Cerrando</span>
+            <b className="min-w-0 truncate font-semibold text-ink-900">{nombreCaja(caja)}</b>
+            <span className="tnum hidden shrink-0 text-ink-400 sm:inline">· turno #{sesion.numero}</span>
+          </p>
+          <h1 className="text-balance text-2xl font-bold tracking-[-0.02em] text-ink-950 sm:text-[1.75rem]">
+            {info.titulo}
           </h1>
-          <p className="mt-1 text-sm text-ink-500">{TITULOS[paso].sub}</p>
+          <p className="mt-1 text-pretty text-sm leading-relaxed text-ink-500 sm:text-[0.95rem]">{info.bajada}</p>
         </div>
-        <Button variant="ghost" size="sm" onClick={handleCancelar} className="shrink-0">
-          <X className="h-4 w-4" />
-          Cancelar
-        </Button>
+        <div className="flex shrink-0 items-center gap-1">
+          {!ayudas && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => mostrarAyudas(true)}
+              aria-label="Mostrar las ayudas"
+              className="px-2.5 sm:px-3"
+            >
+              <CircleHelp className="h-4 w-4" />
+              <span className="hidden sm:inline">Ayuda</span>
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" onClick={handleSalir} aria-label="Salir sin cerrar" className="px-2.5 sm:px-3">
+            <X className="h-4 w-4" />
+            <span className="hidden sm:inline">Salir</span>
+          </Button>
+        </div>
       </div>
 
-      <Stepper paso={paso} />
+      <BarraPasos pasos={pasos} actual={actual} forma={formaEfectiva} onIr={irA} />
 
-      {/* Contenido del paso (la key reinicia la animación de entrada) */}
-      <div key={`${paso}-${dir}`} className={dir === 'back' ? 'ct-step-back' : 'ct-step-fwd'}>
-        {paso === 1 && (
-          <div className="space-y-4">
-            <Card className="overflow-hidden">
-              <ItemChecklist
-                done
-                indice={0}
-                titulo="Ventas registradas"
-                descripcion={
-                  resumen.operacionesTotal > 0
-                    ? `${operacionesLabel(resumen.operacionesTotal)} · ${money0(resumen.ventasTotal)}`
-                    : 'Sin ventas en el turno'
-                }
-              />
-              <ItemChecklist
-                done
-                indice={1}
-                titulo="Movimientos con motivo"
-                descripcion={
-                  resumen.movimientosManuales > 0
-                    ? `${num(resumen.movimientosManuales)} movimientos manuales (ingresos, egresos, retiros)`
-                    : 'Sin movimientos manuales'
-                }
-              />
-              {necesitaLote && (
-                <ItemChecklist
-                  done={loteOk}
-                  indice={2}
-                  titulo="Cierre de lote de tarjetas"
-                  descripcion="Hacé el cierre de lote en la terminal (Payway) y guardá el ticket: contra eso se concilian débito y crédito."
-                  accion={
-                    <Button size="sm" variant={loteOk ? 'secondary' : 'outline'} onClick={() => setLoteOk((v) => !v)}>
-                      {loteOk ? (
-                        <>
-                          <Check className="h-4 w-4" />
-                          Hecho
-                        </>
-                      ) : (
-                        'Marcar hecho'
-                      )}
-                    </Button>
-                  }
-                />
-              )}
-            </Card>
+      {ayudas && (
+        <div className="mb-4">
+          <AyudaPaso key={actual} texto={info.ayuda} onOcultar={() => mostrarAyudas(false)} />
+        </div>
+      )}
 
-            <Card>
-              <p className="border-b border-line px-4 py-3 text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-ink-400">
-                Ventas por medio de pago
-              </p>
-              <div className="divide-y divide-line">
-                {MEDIOS_PAGO_CAJA.filter((m) => resumen.ventasPorMedio[m.value] > 0).map((m, i) => {
-                  const Icon = MEDIO_ICONO[m.value]
-                  return (
-                    <div key={m.value} className="ct-stagger-fade flex items-center gap-3 px-4 py-3" style={ctStagger(i)}>
-                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-ink-50 text-ink-500 ring-1 ring-line">
-                        <Icon className="h-4 w-4" strokeWidth={1.75} />
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-ink-900">{m.label}</p>
-                        <p className="tnum text-xs text-ink-400">{operacionesLabel(resumen.operacionesPorMedio[m.value])}</p>
-                      </div>
-                      <span className="tnum ml-auto text-sm font-semibold text-ink-950">
-                        {money(resumen.ventasPorMedio[m.value])}
-                      </span>
-                    </div>
-                  )
-                })}
-                {resumen.ventasTotal === 0 && (
-                  <p className="px-4 py-4 text-sm text-ink-400">No hubo ventas en este turno.</p>
-                )}
-              </div>
-            </Card>
-          </div>
+      {/* El paso (la key reinicia la animación de entrada) */}
+      <div key={actual} className={dir === 'back' ? 'ct-step-back' : 'ct-step-fwd'}>
+        {actual === 'tareas' && (
+          <PasoTareas
+            tareas={tareas}
+            hechas={hechas}
+            onToggle={(clave) =>
+              setHechas((prev) => (prev.includes(clave) ? prev.filter((c) => c !== clave) : [...prev, clave]))
+            }
+          />
         )}
 
-        {paso === 2 && (
-          <div className="space-y-4">
-            {config.cierreCiego && (
-              <div className="flex items-center gap-2.5 rounded-2xl border border-dashed border-line-strong bg-surface px-4 py-3 text-xs leading-relaxed text-ink-500">
-                <EyeOff className="h-4 w-4 shrink-0 text-ink-400" aria-hidden />
-                <span>
-                  <b className="font-semibold text-ink-800">Cierre ciego activo:</b> contá el efectivo sin mirar el
-                  esperado — se revela en el próximo paso. Así el arqueo refleja lo que hay de verdad.
-                </span>
-              </div>
-            )}
-
-            {/* Efectivo */}
-            <Card>
-              <div className="flex items-center gap-3 border-b border-line px-4 py-3.5">
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-ink-950 text-on-ink">
-                  <Banknote className="h-4.5 w-4.5" strokeWidth={1.75} />
-                </span>
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-ink-950">Efectivo</p>
-                  <p className="text-xs text-ink-400">
-                    {config.cierreCiego ? (
-                      'Grilla de billetes + sueltos'
-                    ) : (
-                      <>
-                        Esperado: <b className="tnum text-ink-600">{money(resumen.esperadoPorMedio.efectivo)}</b>
-                      </>
-                    )}
-                  </p>
-                </div>
-                <span key={contadoEfectivo} className="ct-count tnum ml-auto text-lg font-bold text-ink-950">
-                  {money0(contadoEfectivo)}
-                </span>
-              </div>
-              <div className="px-4 py-3">
-                <DenomGrid
-                  denominaciones={config.denominaciones}
-                  conteo={conteo}
-                  sueltos={sueltos}
-                  onConteo={setConteo}
-                  onSueltos={setSueltos}
-                />
-              </div>
-            </Card>
-
-            {/* Otros medios */}
-            <Card>
-              <div className="border-b border-line px-4 py-3">
-                <p className="text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-ink-400">Otros medios</p>
-                <p className="mt-0.5 text-xs text-ink-400">
-                  Verificá contra el ticket de cierre de lote y los extractos; vienen precargados con lo registrado.
-                </p>
-              </div>
-              <div className="divide-y divide-line">
-                {otrosMedios.map((m, i) => {
-                  const Icon = MEDIO_ICONO[m.value]
-                  return (
-                    <div key={m.value} className="ct-stagger-fade flex items-center gap-3 px-4 py-3" style={ctStagger(i)}>
-                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-ink-50 text-ink-500 ring-1 ring-line">
-                        <Icon className="h-4 w-4" strokeWidth={1.75} />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-ink-900">{m.label}</p>
-                        <p className="tnum text-xs text-ink-400">
-                          Esperado {money(resumen.esperadoPorMedio[m.value])}
-                          {MEDIOS_CON_LOTE.includes(m.value) && ' · contra lote'}
-                        </p>
-                      </div>
-                      <Input
-                        type="number"
-                        inputMode="numeric"
-                        min={0}
-                        step="0.01"
-                        value={contadoOtros[m.value] ?? ''}
-                        onChange={(e) => setContadoOtros((prev) => ({ ...prev, [m.value]: e.target.value }))}
-                        onFocus={(e) => e.target.select()}
-                        placeholder="0"
-                        aria-label={`Contado de ${m.label}`}
-                        className="tnum h-10 w-32 shrink-0 text-right sm:w-36"
-                      />
-                    </div>
-                  )
-                })}
-              </div>
-            </Card>
-          </div>
+        {actual === 'efectivo' && (
+          <PasoEfectivo
+            config={config}
+            forma={formaEfectiva}
+            onForma={cambiarForma}
+            conteo={conteo}
+            onConteo={setConteo}
+            sueltos={sueltos}
+            onSueltos={setSueltos}
+            total={totalEscrito}
+            onTotal={setTotalEscrito}
+            onReiniciar={reiniciarConteo}
+            esperado={resumen.esperadoPorMedio.efectivo}
+          />
         )}
 
-        {paso === 3 && (
-          <div className="space-y-4">
-            {/* Esperado vs. contado por medio */}
-            <Card className="overflow-hidden">
-              <div className="hidden grid-cols-[1.15fr_1fr_1fr_auto] gap-3 border-b border-line px-4 py-2.5 text-[0.66rem] font-semibold uppercase tracking-[0.12em] text-ink-400 sm:grid">
-                <span>Medio</span>
-                <span className="text-right">Esperado</span>
-                <span className="text-right">Contado</span>
-                <span className="w-[9.5rem] text-right">Diferencia</span>
-              </div>
-              <div className="divide-y divide-line">
-                {MEDIOS_PAGO_CAJA.filter(
-                  (m) => resumen.esperadoPorMedio[m.value] !== 0 || contadoPorMedio[m.value] !== 0,
-                ).map((m, i) => (
-                  <div
-                    key={m.value}
-                    className="ct-stagger-fade grid grid-cols-2 gap-x-3 gap-y-1 px-4 py-3 sm:grid-cols-[1.15fr_1fr_1fr_auto] sm:items-center"
-                    style={ctStagger(i)}
-                  >
-                    <p className="col-span-2 text-sm font-medium text-ink-900 sm:col-span-1">{MEDIO_LABEL[m.value]}</p>
-                    <p className="tnum text-xs text-ink-500 sm:text-right sm:text-sm">
-                      <span className="sm:hidden">Esp. </span>
-                      {money(resumen.esperadoPorMedio[m.value])}
-                    </p>
-                    <p className="tnum text-right text-xs font-semibold text-ink-900 sm:text-sm">
-                      <span className="font-normal text-ink-500 sm:hidden">Cont. </span>
-                      {money(contadoPorMedio[m.value])}
-                    </p>
-                    <div className="col-span-2 sm:col-span-1 sm:w-[9.5rem] sm:text-right">
-                      <DiffChip valor={diferenciaPorMedio[m.value]} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="flex items-center justify-between gap-3 border-t border-line-strong bg-canvas/60 px-4 py-3.5">
-                <span className="text-sm font-semibold text-ink-950">Diferencia total</span>
-                <DiffChip valor={difTotal} />
-              </div>
-            </Card>
+        {actual === 'otros' && (
+          <PasoOtrosCobros
+            medios={mediosARevisar}
+            extras={mediosExtra}
+            resumen={resumen}
+            revision={revision}
+            onRevision={(medio, r) => setRevision((prev) => ({ ...prev, [medio]: r }))}
+            montosExtra={montosExtra}
+            onMontoExtra={(medio, texto) => setMontosExtra((prev) => ({ ...prev, [medio]: texto }))}
+          />
+        )}
 
-            {/* Justificación según el tamaño del problema */}
-            {difTotal !== 0 && excedeTolerancia && (
-              <Card className="space-y-3.5 p-4">
-                <div className="flex items-start gap-2.5">
-                  <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-ink-950 text-on-ink">
-                    <AlertTriangle className="h-4 w-4" strokeWidth={1.75} />
-                  </span>
-                  <div>
-                    <p className="text-sm font-semibold text-ink-950">
-                      La diferencia supera la tolerancia de {money0(config.toleranciaMonto)}
-                    </p>
-                    <p className="mt-0.5 text-xs leading-relaxed text-ink-500">
-                      Antes de cerrar, recontá. Si la diferencia es real, dejá motivo y nota: quedan en el comprobante Z.
-                    </p>
-                  </div>
-                </div>
-                <div className="grid gap-3.5 sm:grid-cols-2">
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium text-ink-500">Motivo</label>
-                    <Select
-                      options={MOTIVOS_DIFERENCIA_CAJA.map((m) => ({ value: m, label: m }))}
-                      value={motivoDif}
-                      onChange={setMotivoDif}
-                      placeholder="Elegí un motivo"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium text-ink-500">Nota (obligatoria)</label>
-                    <Textarea
-                      rows={2}
-                      value={notaDif}
-                      onChange={(e) => setNotaDif(e.target.value)}
-                      placeholder="Ej: se dio vuelto de más en la venta de las 12:40."
-                    />
-                  </div>
-                </div>
-              </Card>
-            )}
+        {actual === 'resultado' && (
+          <PasoResultado
+            config={config}
+            sesion={sesion}
+            resumen={resumen}
+            otros={otrosMostrados}
+            controlados={controlados}
+            contadoPorMedio={contadoPorMedio}
+            diferenciaPorMedio={diferenciaPorMedio}
+            difTotal={difTotal}
+            requiereMotivo={requiereMotivo}
+            motivo={motivo}
+            onMotivo={setMotivo}
+            nota={nota}
+            onNota={setNota}
+            vista={difVista === difTotal}
+            onVista={() => setDifVista((v) => (v === difTotal ? null : difTotal))}
+            onRecontar={() => irA('efectivo')}
+            onRevisarOtros={pasos.includes('otros') ? () => irA('otros') : undefined}
+          />
+        )}
 
-            {difTotal !== 0 && !excedeTolerancia && (
-              <button
-                type="button"
-                onClick={() => setConfirmoDif((v) => !v)}
-                aria-pressed={confirmoDif}
-                className={cn(
-                  'flex w-full items-center gap-3 rounded-2xl border bg-surface px-4 py-3.5 text-left transition-colors',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900',
-                  confirmoDif ? 'border-ink-950' : 'border-line hover:border-line-strong',
-                )}
-              >
-                <span
-                  aria-hidden
-                  className={cn(
-                    'grid h-6 w-6 shrink-0 place-items-center rounded-lg border transition-all duration-150',
-                    confirmoDif
-                      ? 'border-ink-950 bg-ink-950 text-on-ink'
-                      : 'border-line-strong bg-surface text-transparent',
-                  )}
-                >
-                  <Check className="h-4 w-4" strokeWidth={2.5} />
-                </span>
-                <span className="text-sm leading-relaxed text-ink-800">
-                  Confirmo la diferencia{' '}
-                  <span className="text-ink-500">
-                    (dentro de la tolerancia{config.toleranciaActiva ? ` de ${money0(config.toleranciaMonto)}` : ''}) —
-                    queda registrada en el Z.
-                  </span>
-                </span>
-              </button>
-            )}
+        {actual === 'fondo' && (
+          <PasoFondo
+            contado={contadoEfectivo}
+            fondo={fondoFinal}
+            texto={fondoTexto ?? montoATexto(fondoFinal)}
+            onTexto={setFondoTexto}
+            sugerido={config.fondoSugerido}
+            fondoDeHoy={sesion.fondoInicial}
+          />
+        )}
 
-            {/* Fondo del próximo turno (patrón Shopify) */}
-            <Card className="p-4">
-              <p className="text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-ink-400">
-                Fondo para el próximo turno
-              </p>
-              <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
-                <div className="sm:w-48">
-                  <label className="mb-1.5 block text-xs font-medium text-ink-500">Dejar en caja</label>
-                  <Input
-                    type="number"
-                    inputMode="numeric"
-                    min={0}
-                    step="0.01"
-                    value={fondoSiguiente}
-                    onChange={(e) => setFondoSiguiente(e.target.value)}
-                    onFocus={(e) => e.target.select()}
-                    className="tnum"
-                  />
-                </div>
-                <div className="flex-1 pb-1 text-sm leading-relaxed text-ink-500">
-                  {fondoExcede ? (
-                    <span className="flex items-start gap-1.5 text-ink-700">
-                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-ink-400" aria-hidden />
-                      El fondo supera el efectivo contado: queda todo en caja ({money(contadoEfectivo)}) y no se retira nada.
-                    </span>
-                  ) : (
-                    <>
-                      Retirás para bóveda / depósito:{' '}
-                      <b key={retiroFinal} className="ct-count tnum text-base text-ink-950">{money(retiroFinal)}</b>
-                    </>
-                  )}
-                </div>
-              </div>
-            </Card>
-          </div>
+        {actual === 'confirmar' && (
+          <PasoConfirmar
+            caja={caja}
+            sesion={sesion}
+            resumen={resumen}
+            config={config}
+            pasos={pasos}
+            otros={otrosMostrados}
+            controlados={controlados}
+            contadoPorMedio={contadoPorMedio}
+            diferenciaPorMedio={diferenciaPorMedio}
+            difTotal={difTotal}
+            motivo={difTotal !== 0 ? motivo : ''}
+            nota={difTotal !== 0 ? nota : ''}
+            fondo={fondoFinal}
+            retiro={retiroFinal}
+            tareas={tareas}
+            onIrA={irA}
+          />
         )}
       </div>
 
-      {/* Navegación */}
-      <div className="mt-6 flex items-center justify-between gap-3">
-        <Button variant="outline" onClick={() => irA((paso - 1) as 1 | 2)} className={cn(paso === 1 && 'invisible')}>
-          <ArrowLeft className="h-4 w-4" />
-          Volver
-        </Button>
-        {paso < 3 ? (
-          <Button
-            onClick={() => irA((paso + 1) as 2 | 3)}
-            disabled={!puedeContinuar}
-            title={!puedeContinuar ? 'Marcá el cierre de lote para continuar' : undefined}
-          >
-            {paso === 1 ? 'Empezar el arqueo' : 'Ver diferencia'}
-            <ArrowRight className="h-4 w-4" />
+      {/* Barra de abajo: siempre a mano (en el celular, arriba del menú). */}
+      <div className="sticky bottom-[calc(5.75rem_+_env(safe-area-inset-bottom))] z-20 mt-6 lg:bottom-5">
+        <div className="flex items-center gap-2 rounded-[1.35rem] border border-line bg-surface/92 p-2 shadow-[0_18px_45px_rgba(10,10,11,0.14)] backdrop-blur-xl sm:gap-3">
+          {indice > 0 && (
+            <Button
+              variant="outline"
+              onClick={atras}
+              aria-label="Volver al paso anterior"
+              className="h-12 w-12 shrink-0 px-0 sm:w-auto sm:px-4"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span className="hidden sm:inline">Volver</span>
+            </Button>
+          )}
+          <div className="min-w-0 flex-1 px-1.5">{barra.info}</div>
+          <Button onClick={adelante} disabled={!barra.puede} className="h-12 shrink-0 px-4 text-[0.95rem] sm:px-5">
+            {barra.cerrar && <Lock className="h-4 w-4" />}
+            <span className="sm:hidden">{barra.corta ?? barra.etiqueta}</span>
+            <span className="hidden sm:inline">{barra.etiqueta}</span>
+            {!barra.cerrar && <ArrowRight className="h-4 w-4" />}
           </Button>
-        ) : (
-          <Button onClick={handleCerrar} disabled={!puedeCerrar}>
-            <Lock className="h-4 w-4" />
-            {guardando ? 'Cerrando…' : 'Cerrar caja y emitir Z'}
-          </Button>
-        )}
+        </div>
       </div>
     </div>
   )
@@ -582,98 +576,145 @@ export function CierreWizard({
 
 // ===== Piezas =====
 
-function Stepper({ paso }: { paso: 1 | 2 | 3 }) {
-  const pasos = ['Revisar', 'Contar', 'Confirmar']
+/**
+ * La barra de pasos. En el celular: «Paso 2 de 5» y una rayita por paso. En
+ * pantallas más grandes: todos los pasos con su nombre; los ya hechos se
+ * pueden tocar para volver.
+ */
+function BarraPasos({
+  pasos,
+  actual,
+  forma,
+  onIr,
+}: {
+  pasos: PasoCierre[]
+  actual: PasoCierre
+  forma: FormaConteo
+  onIr: (paso: PasoCierre) => void
+}) {
+  const i = pasos.indexOf(actual)
+  const siguiente = pasos[i + 1]
+
   return (
-    <ol className="ct-rise mb-6 flex items-center gap-2.5" aria-label="Pasos del cierre">
-      {pasos.map((nombre, i) => {
-        const n = i + 1
-        const actual = paso === n
-        const hecho = paso > n
-        return (
-          <Fragment key={nombre}>
-            <li className="flex items-center gap-2">
-              <span
-                className={cn(
-                  'grid h-7 w-7 place-items-center rounded-full border text-xs font-bold transition-all duration-300',
-                  hecho && 'border-ink-300 bg-ink-100 text-ink-700',
-                  actual && 'border-ink-950 bg-ink-950 text-on-ink shadow-[0_8px_18px_rgba(10,10,11,0.22)]',
-                  !hecho && !actual && 'border-line-strong bg-surface text-ink-400',
-                )}
-                aria-current={actual ? 'step' : undefined}
+    <nav aria-label="Pasos del cierre" className="ct-rise mb-5">
+      {/* Celular */}
+      <div className="sm:hidden">
+        <div className="flex items-baseline justify-between gap-3 text-xs">
+          <span className="font-semibold text-ink-900">
+            Paso {i + 1} de {pasos.length}
+          </span>
+          <span className="truncate text-ink-400">
+            {siguiente ? `Después: ${infoPaso(siguiente, forma).corto}` : 'Es el último'}
+          </span>
+        </div>
+        <div className="mt-2 flex gap-1.5" aria-hidden>
+          {pasos.map((p, j) => (
+            <span
+              key={p}
+              className={cn(
+                'h-1.5 flex-1 rounded-full transition-colors duration-500',
+                j <= i ? 'bg-ink-950' : 'bg-ink-200',
+              )}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Tablet y compu */}
+      <ol className="hidden sm:grid" style={{ gridTemplateColumns: `repeat(${pasos.length}, minmax(0, 1fr))` }}>
+        {pasos.map((p, j) => {
+          const hecho = j < i
+          const esActual = j === i
+          const Icono = infoPaso(p, forma).icono
+          return (
+            <li key={p} className="relative flex justify-center">
+              {j < pasos.length - 1 && (
+                <span aria-hidden className="absolute left-1/2 top-4 h-px w-full overflow-hidden bg-line-strong">
+                  <span
+                    className={cn(
+                      'absolute inset-0 origin-left bg-ink-950 transition-transform duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]',
+                      hecho ? 'scale-x-100' : 'scale-x-0',
+                    )}
+                  />
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => onIr(p)}
+                disabled={!hecho}
+                aria-current={esActual ? 'step' : undefined}
+                title={hecho ? `Volver a «${infoPaso(p, forma).corto}»` : undefined}
+                className="group relative z-10 flex max-w-full flex-col items-center gap-1.5 rounded-xl px-1 pb-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900 disabled:cursor-default"
               >
-                {hecho ? <Check className="h-3.5 w-3.5" strokeWidth={2.5} /> : n}
-              </span>
-              <span
-                className={cn(
-                  'text-xs font-semibold',
-                  actual ? 'text-ink-950' : 'hidden text-ink-400 sm:inline',
-                )}
-              >
-                {nombre}
-              </span>
-            </li>
-            {n < 3 && (
-              <li aria-hidden className="relative h-px flex-1 overflow-hidden rounded-full bg-line-strong">
                 <span
                   className={cn(
-                    'absolute inset-0 origin-left bg-ink-950 transition-transform duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]',
-                    hecho ? 'scale-x-100' : 'scale-x-0',
+                    'grid h-8 w-8 place-items-center rounded-full border text-xs font-bold transition-all duration-300',
+                    hecho && 'border-ink-300 bg-ink-100 text-ink-700 group-hover:border-ink-950',
+                    esActual && 'border-ink-950 bg-ink-950 text-on-ink shadow-[0_8px_18px_rgba(10,10,11,0.22)]',
+                    !hecho && !esActual && 'border-line-strong bg-surface text-ink-400',
                   )}
-                />
-              </li>
-            )}
-          </Fragment>
-        )
-      })}
-    </ol>
+                >
+                  {hecho ? (
+                    <Check className="h-4 w-4" strokeWidth={2.5} />
+                  ) : esActual ? (
+                    <Icono className="h-4 w-4" strokeWidth={2} />
+                  ) : (
+                    j + 1
+                  )}
+                </span>
+                <span
+                  className={cn(
+                    'max-w-full text-center text-[0.68rem] font-semibold leading-tight',
+                    esActual ? 'text-ink-950' : hecho ? 'text-ink-600 group-hover:text-ink-950' : 'text-ink-400',
+                  )}
+                >
+                  {infoPaso(p, forma).corto}
+                </span>
+              </button>
+            </li>
+          )
+        })}
+      </ol>
+    </nav>
   )
 }
 
-function ItemChecklist({
-  done,
-  indice,
-  titulo,
-  descripcion,
-  accion,
-}: {
-  done: boolean
-  indice: number
-  titulo: string
-  descripcion: string
-  accion?: ReactNode
-}) {
+interface BarraAcciones {
+  etiqueta: string
+  /** Versión corta del botón para el celular. */
+  corta?: string
+  info: ReactNode
+  puede: boolean
+  /** Es el botón final (candado, sin flecha). */
+  cerrar?: boolean
+}
+
+/** Un texto corto en la barra de abajo (qué falta, o que ya está). */
+function InfoTexto({ children, ok }: { children: ReactNode; ok?: boolean }) {
   return (
-    <div
-      className="ct-stagger-fade flex items-center gap-3 border-b border-line px-4 py-3.5 last:border-b-0"
-      style={ctStagger(indice)}
+    <p
+      className={cn(
+        'flex items-center gap-1.5 text-sm font-medium leading-tight',
+        ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-ink-600',
+      )}
     >
-      <span
-        className={cn(
-          'grid h-7 w-7 shrink-0 place-items-center rounded-full transition-all duration-200',
-          done ? 'bg-ink-950 text-on-ink' : 'border-[1.5px] border-dashed border-line-strong text-transparent',
-        )}
-        aria-hidden
-      >
-        <Check className="h-4 w-4" strokeWidth={2.5} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-ink-900">{titulo}</p>
-        <p className="mt-0.5 text-xs leading-relaxed text-ink-500">{descripcion}</p>
-      </div>
-      {accion}
-    </div>
+      {ok && <Check className="h-4 w-4 shrink-0" strokeWidth={2.5} aria-hidden />}
+      <span className="min-w-0">{children}</span>
+    </p>
   )
 }
 
-function CeldaZ({ label, valor, icono: Icon }: { label: string; valor: string; icono?: typeof Landmark }) {
+/** Un monto grande en la barra de abajo («Contaste $ 152.500»). */
+function InfoMonto({ etiqueta, valor, extra }: { etiqueta: string; valor: number; extra?: string }) {
   return (
-    <div className="rounded-xl border border-line bg-canvas/70 p-3">
-      <p className="flex items-center gap-1.5 text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-ink-400">
-        {Icon && <Icon className="h-3 w-3" aria-hidden />}
-        {label}
+    <div className="min-w-0 leading-tight">
+      <p className="truncate text-[0.66rem] font-semibold uppercase tracking-[0.1em] text-ink-400">{etiqueta}</p>
+      <p className="flex min-w-0 items-baseline gap-1.5">
+        <span key={valor} className="ct-count tnum truncate text-lg font-bold text-ink-950">
+          {plata(valor)}
+        </span>
+        {extra && <span className="tnum hidden truncate text-xs text-ink-400 sm:inline">{extra}</span>}
       </p>
-      <p className="tnum mt-1.5 text-base font-bold text-ink-950">{valor}</p>
     </div>
   )
 }

@@ -268,6 +268,21 @@ h6 {
   }
 }
 
+/* Barras horizontales (comparar dos montos): crecen desde la izquierda. */
+.ct-grow-x {
+  transform-origin: left;
+  animation: ct-grow-x 0.8s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  animation-delay: var(--ct-delay, 120ms);
+}
+@keyframes ct-grow-x {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
 /* Skeleton con barrido (shimmer) monocromático. */
 .ct-skeleton {
   position: relative;
@@ -493,6 +508,7 @@ h6 {
   .ct-stagger-fade,
   .ct-count,
   .ct-bar,
+  .ct-grow-x,
   .ct-dropdown,
   .ct-slot-pop,
   .ct-step-fwd,

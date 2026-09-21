@@ -29,8 +29,27 @@ def _dict_medios(valor=0.0):
     return {medio: valor for medio in MedioPago.values}
 
 
+# Topes de la lista de tareas antes de cerrar: es un repaso corto, no un manual.
+MAX_TAREAS_CIERRE = 10
+MAX_LARGO_TAREA = 120
+
+
 class ConfiguracionCaja(ModeloBase):
     """Preferencias del modulo (singleton): cada funcion pro se prende o apaga."""
+
+    class ModoConteo(models.TextChoices):
+        """Como se cuenta el efectivo al cerrar."""
+
+        BILLETES = 'billetes', 'Billete por billete'
+        TOTAL = 'total', 'Escribiendo el total'
+        ELEGIR = 'elegir', 'Que elija quien cierra'
+
+    class ModoFondo(models.TextChoices):
+        """Cuanta plata queda en el cajon para el proximo turno."""
+
+        PREGUNTAR = 'preguntar', 'Preguntar cada vez'
+        FIJO = 'fijo', 'Siempre el mismo monto'
+        TODO = 'todo', 'Dejar toda la plata en la caja'
 
     cierre_ciego = models.BooleanField(
         'cierre ciego', default=True,
@@ -61,6 +80,26 @@ class ConfiguracionCaja(ModeloBase):
     por_sucursal = models.BooleanField(
         'caja por sucursal', default=False,
         help_text='Cada sucursal cierra su propia caja (con sus dos cajas fiscales).',
+    )
+    # --- Como es el cierre (cada paso del asistente se puede ajustar) ---
+    modo_conteo = models.CharField(
+        'como se cuenta el efectivo', max_length=10,
+        choices=ModoConteo.choices, default=ModoConteo.BILLETES,
+        help_text='Billete por billete con la grilla, escribiendo el total, o que elija quien cierra.',
+    )
+    controlar_otros_medios = models.BooleanField(
+        'revisar transferencias y tarjetas', default=True,
+        help_text='Al cerrar se pregunta si lo anotado coincide con el banco y el posnet. '
+                  'Apagado, se toma lo que anoto el sistema.',
+    )
+    modo_fondo = models.CharField(
+        'plata que queda para el proximo turno', max_length=10,
+        choices=ModoFondo.choices, default=ModoFondo.PREGUNTAR,
+        help_text='Preguntar cuanto se deja, dejar siempre el fondo sugerido, o dejar todo.',
+    )
+    tareas_cierre = models.JSONField(
+        'tareas antes de cerrar', default=list, blank=True,
+        help_text='Lo que quien cierra tiene que tildar antes de contar la plata.',
     )
 
     class Meta:
@@ -274,6 +313,14 @@ class CierreCaja(ModeloBase):
     nota_diferencia = models.CharField('nota de la diferencia', max_length=500, blank=True)
 
     cierre_ciego = models.BooleanField('arqueo en modo ciego', default=False)
+    # False = transferencias y tarjetas no se revisaron: se tomo lo que anoto
+    # el sistema (la configuracion lo tenia apagado al cerrar).
+    otros_medios_controlados = models.BooleanField(
+        'transferencias y tarjetas revisadas', default=True,
+    )
+    tareas_confirmadas = models.JSONField(
+        'tareas tildadas antes de cerrar', default=list, blank=True,
+    )
     fondo_siguiente = models.DecimalField(
         'fondo que queda ($)', max_digits=12, decimal_places=2, default=0,
     )
@@ -622,12 +669,34 @@ def eliminar_movimiento(movimiento, *, usuario=None):
     movimiento.delete(usuario=usuario)
 
 
+def limpiar_tareas(tareas):
+    """Los textos de una lista de tareas, sin espacios de mas, vacios ni repetidos.
+
+    Dos tareas que solo cambian en mayusculas o espacios son la misma: queda la
+    primera, en el orden en que llegaron.
+    """
+    limpias, vistas = [], set()
+    for tarea in tareas or []:
+        texto = ' '.join(str(tarea).split())
+        clave = texto.casefold()
+        if texto and clave not in vistas:
+            vistas.add(clave)
+            limpias.append(texto)
+    return limpias
+
+
 def cerrar_caja(sesion, *, contado_por_medio, conteo_cierre=None, fondo_siguiente,
-                motivo_diferencia='', nota_diferencia='', usuario=None):
+                motivo_diferencia='', nota_diferencia='', tareas_confirmadas=None,
+                usuario=None):
     """Cierra el turno: calcula la diferencia por medio y emite el comprobante Z.
 
     El fondo que queda no puede superar el efectivo contado (lo que se deja en
     el cajon es fisico); el excedente es el retiro final a boveda/deposito.
+
+    La configuracion manda sobre lo que llega: con el fondo fijo queda el fondo
+    sugerido, con «dejar todo» queda todo el efectivo, y si las transferencias y
+    tarjetas no se revisan al cerrar se toma lo que anoto el sistema (sin
+    diferencia). Asi una pantalla vieja no puede saltearse las reglas.
     """
     fondo_siguiente = Decimal(str(fondo_siguiente))
     if fondo_siguiente < 0:
@@ -638,18 +707,20 @@ def cerrar_caja(sesion, *, contado_por_medio, conteo_cierre=None, fondo_siguient
         if sesion.estado != SesionCaja.Estado.ABIERTA:
             raise ValidationError('El turno ya no esta abierto.')
 
+        config = ConfiguracionCaja.instancia()
         resumen = resumen_sesion(sesion)
+        esperado = resumen['esperado_por_medio']
         contado = {
             medio: Decimal(str(contado_por_medio.get(medio, 0) or 0))
             for medio in MedioPago.values
         }
-        diferencia = {
-            medio: contado[medio] - resumen['esperado_por_medio'][medio]
-            for medio in MedioPago.values
-        }
+        if not config.controlar_otros_medios:
+            for medio in MedioPago.values:
+                if medio != MedioPago.EFECTIVO:
+                    contado[medio] = esperado[medio]
+        diferencia = {medio: contado[medio] - esperado[medio] for medio in MedioPago.values}
         diferencia_total = sum(diferencia.values(), Decimal('0'))
 
-        config = ConfiguracionCaja.instancia()
         if (
             config.tolerancia_activa
             and abs(diferencia_total) > config.tolerancia_monto
@@ -661,7 +732,11 @@ def cerrar_caja(sesion, *, contado_por_medio, conteo_cierre=None, fondo_siguient
             )
 
         contado_efectivo = contado[MedioPago.EFECTIVO]
-        fondo_siguiente = min(fondo_siguiente, contado_efectivo)
+        if config.modo_fondo == ConfiguracionCaja.ModoFondo.FIJO:
+            fondo_siguiente = config.fondo_sugerido
+        elif config.modo_fondo == ConfiguracionCaja.ModoFondo.TODO:
+            fondo_siguiente = contado_efectivo
+        fondo_siguiente = max(Decimal('0'), min(fondo_siguiente, contado_efectivo))
 
         numero = (CierreCaja.todos.aggregate(models.Max('numero'))['numero__max'] or 0) + 1
         cierre = CierreCaja.objects.create(
@@ -674,7 +749,7 @@ def cerrar_caja(sesion, *, contado_por_medio, conteo_cierre=None, fondo_siguient
             ingresos=resumen['ingresos'],
             egresos=resumen['egresos'],
             retiros=resumen['retiros'],
-            esperado_por_medio={m: float(v) for m, v in resumen['esperado_por_medio'].items()},
+            esperado_por_medio={m: float(v) for m, v in esperado.items()},
             contado_por_medio={m: float(v) for m, v in contado.items()},
             conteo_cierre=conteo_cierre or None,
             diferencia_por_medio={m: float(v) for m, v in diferencia.items()},
@@ -682,6 +757,8 @@ def cerrar_caja(sesion, *, contado_por_medio, conteo_cierre=None, fondo_siguient
             motivo_diferencia=(motivo_diferencia or '').strip(),
             nota_diferencia=(nota_diferencia or '').strip(),
             cierre_ciego=config.cierre_ciego,
+            otros_medios_controlados=config.controlar_otros_medios,
+            tareas_confirmadas=limpiar_tareas(tareas_confirmadas),
             fondo_siguiente=fondo_siguiente,
             retiro_final=max(Decimal('0'), contado_efectivo - fondo_siguiente),
             creado_por=usuario,

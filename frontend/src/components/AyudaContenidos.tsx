@@ -671,32 +671,49 @@ export function AyudaCaja() {
         />
       </AyudaSeccion>
 
-      <AyudaSeccion titulo="Cerrar la caja (3 pasos)">
+      <AyudaSeccion titulo="Cerrar la caja, paso a paso">
+        <p>
+          Tocá <b>«Cerrar caja»</b> y seguí las pantallas: una sola cosa por vez, con un
+          <b> «¿Qué hago acá?»</b> en cada una. Arriba ves en qué paso estás y cuántos faltan; abajo
+          siempre tenés el botón para seguir (y «Volver» si te equivocaste).
+        </p>
         <AyudaPasos
           pasos={[
-            <><b>Revisar:</b> el checklist confirma que no quede nada afuera (si hubo tarjetas, te pide el <b>cierre de lote</b> de la terminal).</>,
-            <><b>Contar:</b> el efectivo con la grilla de billetes (+ «Sueltos» para monedas) y los otros medios contra el ticket de lote y los extractos.</>,
-            <><b>Confirmar:</b> ves la diferencia por medio (sobrante / faltante), definís cuánto queda de <b>fondo para el próximo turno</b> — el sistema calcula cuánto retirar — y se emite el <b>Z</b>.</>,
+            <><b>Antes de empezar:</b> tildás las tareas del local y, si hubo tarjetas, el <b>cierre de lote del posnet</b> (la maquinita imprime un ticket con el total de tarjetas). Si no hay nada para tildar, este paso no aparece.</>,
+            <><b>Contar efectivo:</b> tocás cada billete una vez por cada uno que tenés (o escribís el total, según cómo esté configurado). Las monedas van juntas en «Monedas y sueltos».</>,
+            <><b>Otros cobros:</b> para cada transferencia o tarjeta te pregunta <b>«¿Es lo mismo que ves?»</b>. Si es igual, tocás «Sí»; si no, escribís lo que ves en el banco o en el ticket.</>,
+            <><b>¿Cuadra?:</b> la respuesta grande — cuadra, falta o sobra — y la cuenta explicada renglón por renglón. Si no cuadra, primero te ofrece <b>volver a contar</b>.</>,
+            <><b>Para mañana:</b> elegís cuánta plata queda en el cajón para dar vuelto; el resto se guarda aparte.</>,
+            <><b>Cerrar:</b> ves todo el resumen en palabras (con «Cambiar» al lado de cada parte) y tocás <b>«Cerrar la caja»</b>. Se guarda el comprobante <b>Z</b> y te dice qué hacer con la plata.</>,
           ]}
         />
         <AyudaEjemplo titulo="la caja no cuadra">
           <p>
-            Esperado <span className="tnum">$ 153.500</span>, contado <span className="tnum">$ 152.500</span> →
-            el paso 3 muestra <b>«Faltante $ 1.000»</b>. Si está dentro de la tolerancia, confirmás
-            y listo; si la supera, tenés que recontar o dejar <b>motivo y nota</b>, que quedan en el
+            Tendría que haber <span className="tnum">$ 153.500</span> y contaste <span className="tnum">$ 152.500</span> →
+            el paso «¿Cuadra?» muestra <b>«Falta plata: $ 1.000»</b>. Primero volvé a contar (casi
+            siempre es un billete que se pasó). Si igual falta y la diferencia es chica, tocás «Vi la
+            diferencia»; si es grande, elegís qué pasó y lo contás con tus palabras. Todo queda en el
             comprobante para siempre.
           </p>
         </AyudaEjemplo>
       </AyudaSeccion>
 
-      <AyudaSeccion titulo="Funciones que podés prender y apagar (Configurar)">
+      <AyudaSeccion titulo="Configurar (solo administradores)">
+        <p>
+          En <b>«Configurar»</b> la pestaña <b>«Cierre de caja»</b> está ordenada igual que el cierre:
+          arriba ves qué pasos va a ver quien cierra, y abajo las opciones de cada paso, todas con su
+          explicación. Los cambios se guardan solos.
+        </p>
         <AyudaCampos
           campos={[
-            ['Cierre ciego', 'Quien cuenta no ve el «esperado» del efectivo hasta confirmar. Evita conteos acomodados y muestra las diferencias reales.'],
-            ['Tolerancia', 'Si la diferencia supera el monto configurado, el cierre exige motivo + nota (patrón Toast/Fudo).'],
-            ['Retiros a bóveda', 'Habilita el movimiento de retiro parcial durante el turno.'],
-            ['Multi-caja', 'Varias cajas nombradas (Mostrador, Service…), cada una con su turno y su arqueo.'],
-            ['Billetes de la grilla', 'Qué denominaciones muestra el arqueo; lo que no está en la grilla va por «Sueltos».'],
+            ['Tareas antes de cerrar', 'Una lista propia del local («Cerrar la persiana», «Guardar los celulares»…) que hay que tildar antes de contar. Quedan en el comprobante.'],
+            ['Pedir el cierre del posnet', 'Si hubo ventas con tarjeta, pide confirmar el cierre de lote antes de contar.'],
+            ['Cómo se cuenta', 'Billete por billete (recomendado), escribiendo el total, o que elija quien cierra.'],
+            ['Esconder cuánto tendría que haber', 'Quien cuenta no ve el número esperado hasta terminar: así cuenta de verdad (antes se llamaba «cierre ciego»).'],
+            ['Revisar transferencias y tarjetas', 'Apagado, ese paso no aparece y se toma lo que anotó el sistema.'],
+            ['Cuándo explicar una diferencia', 'Solo si es grande (más de un monto), siempre, o nunca.'],
+            ['Plata para mañana', 'Preguntar cada vez, dejar siempre el mismo monto, o dejar toda la plata en la caja.'],
+            ['Cajas y sucursales', 'Retiros durante el día, varias cajas, caja por sucursal y la lista de cajas con su tipo.'],
           ]}
         />
       </AyudaSeccion>
@@ -705,8 +722,10 @@ export function AyudaCaja() {
         <p>
           El botón <b>«Práctica»</b> (el del matraz) abre una <b>caja de mentira</b> con una guía de
           4 pasos que se tilda sola: abrir, vender, mover plata y cerrar con arqueo. Todo lo de ese
-          modo es de juguete — <b>no toca el stock, no se guarda nada</b> y desaparece al salir. Es
-          la forma ideal de enseñarle la caja a alguien nuevo antes de operar en serio.
+          modo es de juguete — <b>no toca el stock, no se guarda nada</b> y desaparece al salir. El
+          cierre de práctica sigue <b>la misma configuración</b> que el real (tareas, forma de contar,
+          plata para mañana), así se ensaya exactamente lo que después se hace. Es la forma ideal de
+          enseñarle la caja a alguien nuevo antes de operar en serio.
         </p>
       </AyudaSeccion>
 

@@ -4,6 +4,8 @@ import type {
   CierreCaja,
   ConteoBilletes,
   MedioPagoCaja,
+  ModoConteoCaja,
+  ModoFondoCaja,
   MovimientoCaja,
   SesionCaja,
   SucursalCaja,
@@ -47,6 +49,10 @@ interface ConfigDTO {
   fondo_sugerido: number
   denominaciones: number[]
   por_sucursal: boolean
+  modo_conteo: ModoConteoCaja
+  controlar_otros_medios: boolean
+  modo_fondo: ModoFondoCaja
+  tareas_cierre: string[]
 }
 
 interface CajaDTO {
@@ -124,12 +130,17 @@ interface CierreDTO {
   motivo_diferencia: string
   nota_diferencia: string
   cierre_ciego: boolean
+  otros_medios_controlados?: boolean
+  tareas_confirmadas?: string[]
   fondo_siguiente: number
   retiro_final: number
   movimientos: MovimientoDTO[]
 }
 
 // ===== Mapeos DTO → tipos de la UI ==========================================
+
+const MODOS_CONTEO: ModoConteoCaja[] = ['billetes', 'total', 'elegir']
+const MODOS_FONDO: ModoFondoCaja[] = ['preguntar', 'fijo', 'todo']
 
 function mapConfig(dto: ConfigDTO): CajaConfig {
   return {
@@ -142,6 +153,12 @@ function mapConfig(dto: ConfigDTO): CajaConfig {
     fondoSugerido: Number(dto.fondo_sugerido),
     denominaciones: dto.denominaciones.map(Number),
     porSucursal: Boolean(dto.por_sucursal),
+    // Con un backend que todavía no los manda (el deploy a medio camino), el
+    // cierre funciona como siempre: billetes, revisar todo y preguntar el fondo.
+    modoConteo: MODOS_CONTEO.includes(dto.modo_conteo) ? dto.modo_conteo : 'billetes',
+    controlarOtrosMedios: dto.controlar_otros_medios ?? true,
+    modoFondo: MODOS_FONDO.includes(dto.modo_fondo) ? dto.modo_fondo : 'preguntar',
+    tareasCierre: Array.isArray(dto.tareas_cierre) ? dto.tareas_cierre.map(String) : [],
   }
 }
 
@@ -226,6 +243,8 @@ function mapCierre(dto: CierreDTO): CierreCaja {
     motivoDiferencia: dto.motivo_diferencia || undefined,
     notaDiferencia: dto.nota_diferencia || undefined,
     cierreCiego: dto.cierre_ciego,
+    otrosMediosControlados: dto.otros_medios_controlados ?? true,
+    tareasConfirmadas: dto.tareas_confirmadas ?? [],
     fondoSiguiente: Number(dto.fondo_siguiente),
     retiroFinal: Number(dto.retiro_final),
     movimientos: dto.movimientos.map(mapMovimiento),
@@ -248,6 +267,10 @@ export async function guardarConfigCaja(input: Partial<CajaConfig>): Promise<Caj
   if (input.exigirLote !== undefined) body.exigir_lote = input.exigirLote
   if (input.fondoSugerido !== undefined) body.fondo_sugerido = input.fondoSugerido
   if (input.denominaciones !== undefined) body.denominaciones = input.denominaciones
+  if (input.modoConteo !== undefined) body.modo_conteo = input.modoConteo
+  if (input.controlarOtrosMedios !== undefined) body.controlar_otros_medios = input.controlarOtrosMedios
+  if (input.modoFondo !== undefined) body.modo_fondo = input.modoFondo
+  if (input.tareasCierre !== undefined) body.tareas_cierre = input.tareasCierre
   return mapConfig(await api.patch<ConfigDTO>('/caja/config/', body, token()))
 }
 
@@ -450,6 +473,8 @@ export interface CerrarCajaInput {
   fondoSiguiente: number
   motivoDiferencia?: string
   notaDiferencia?: string
+  /** Lo que se tildó antes de contar: queda escrito en el comprobante. */
+  tareasConfirmadas?: string[]
   /** Lo determina el backend; queda por compatibilidad de firma. */
   usuario: string
 }
@@ -464,6 +489,7 @@ export async function cerrarCaja(input: CerrarCajaInput): Promise<CierreCaja> {
       fondo_siguiente: input.fondoSiguiente,
       motivo_diferencia: input.motivoDiferencia ?? '',
       nota_diferencia: input.notaDiferencia ?? '',
+      tareas_confirmadas: input.tareasConfirmadas ?? [],
     },
     token(),
   )

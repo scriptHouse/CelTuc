@@ -41,6 +41,15 @@ export function money0(value: number): string {
   return ARS0.format(value || 0)
 }
 
+/**
+ * Pesos con centavos solo si los hay: $ 69.500 · $ 1.500,50. Es como se dice
+ * la plata en voz alta, y entra mejor en pantallas chicas (el cierre de caja).
+ */
+export function plata(value: number): string {
+  const v = value || 0
+  return Number.isInteger(Math.round(v * 100) / 100) ? ARS0.format(v) : ARS.format(v)
+}
+
 /** Dinero compacto: $ 1,2 M — ideal para tarjetas de métricas. */
 export function moneyCompact(value: number): string {
   return ARS_COMPACT.format(value || 0)

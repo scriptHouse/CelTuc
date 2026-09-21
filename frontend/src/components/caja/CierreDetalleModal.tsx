@@ -62,7 +62,7 @@ export function CierreDetalleModal({
       <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-4">
         <div>
           <h2 className="text-lg font-semibold text-ink-950">
-            Comprobante <span className="tnum">{zNum(cierre.numero)}</span>
+            Comprobante <span className="tnum whitespace-nowrap">{zNum(cierre.numero)}</span>
           </h2>
           <p className="text-xs text-ink-400">
             Cierre inmutable · {cierre.cajaNombre}
@@ -167,9 +167,23 @@ export function CierreDetalleModal({
             <Linea l="Fondo que queda" r={money(cierre.fondoSiguiente)} />
           </Seccion>
 
+          {cierre.tareasConfirmadas.length > 0 && (
+            <Seccion titulo="Tareas antes de cerrar">
+              {cierre.tareasConfirmadas.map((t) => (
+                <p key={t} className="flex items-baseline gap-1.5 text-ink-600">
+                  <span aria-hidden className="font-bold text-ink-900">✓</span>
+                  {t}
+                </p>
+              ))}
+            </Seccion>
+          )}
+
           <div className="mt-3 border-t border-dashed border-line-strong pt-3 text-center text-[0.66rem] text-ink-400">
             {cierre.cierreCiego && <p>Arqueo en modo ciego (sin ver el esperado)</p>}
-            {mediosConDif.some((m) => m.value !== 'efectivo') && (
+            {!cierre.otrosMediosControlados && (
+              <p>Transferencias y tarjetas sin revisar: se tomó lo registrado</p>
+            )}
+            {cierre.otrosMediosControlados && mediosConDif.some((m) => m.value !== 'efectivo') && (
               <p>Tarjetas conciliadas contra cierre de lote</p>
             )}
             <p className="mt-1.5 tracking-[0.28em] text-ink-300">· · · ✂ · · ·</p>

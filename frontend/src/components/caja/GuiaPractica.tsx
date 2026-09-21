@@ -83,7 +83,7 @@ export function GuiaPractica({
       {
         id: 'cerrar',
         titulo: 'Cerrá y emití tu primer Z',
-        descripcion: 'Contá los billetes con la grilla, definí cuánto queda de fondo y mirá el comprobante.',
+        descripcion: 'Contá la plata tocando cada billete, mirá si cuadra, elegí cuánto queda para mañana y cerrá.',
         icono: Lock,
         hecho: cierres.length > 0,
         accion: 'Cerrar caja',

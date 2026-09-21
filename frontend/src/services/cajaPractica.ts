@@ -39,7 +39,42 @@ interface SandboxDB {
   proximoTurno: number
 }
 
-function seed(): SandboxDB {
+/**
+ * Lo que el ensayo copia de la configuración real: así se practica el cierre
+ * TAL CUAL lo va a ver quien cierra (sus tareas, cómo se cuenta, el fondo…).
+ * El cierre ciego no se copia a propósito, ni las cajas ni las sucursales.
+ */
+type ConfigCopiada = Pick<
+  CajaConfig,
+  | 'toleranciaActiva'
+  | 'toleranciaMonto'
+  | 'retirosHabilitados'
+  | 'exigirLote'
+  | 'fondoSugerido'
+  | 'denominaciones'
+  | 'modoConteo'
+  | 'controlarOtrosMedios'
+  | 'modoFondo'
+  | 'tareasCierre'
+>
+
+function copiable(real?: CajaConfig | null): Partial<ConfigCopiada> {
+  if (!real) return {}
+  return {
+    toleranciaActiva: real.toleranciaActiva,
+    toleranciaMonto: real.toleranciaMonto,
+    retirosHabilitados: real.retirosHabilitados,
+    exigirLote: real.exigirLote,
+    fondoSugerido: real.fondoSugerido,
+    denominaciones: [...real.denominaciones],
+    modoConteo: real.modoConteo,
+    controlarOtrosMedios: real.controlarOtrosMedios,
+    modoFondo: real.modoFondo,
+    tareasCierre: [...real.tareasCierre],
+  }
+}
+
+function seed(real?: CajaConfig | null): SandboxDB {
   return {
     // El esperado queda visible (sin cierre ciego): en el ensayo conviene VER
     // cómo se mueve el número para entender el arqueo.
@@ -53,6 +88,11 @@ function seed(): SandboxDB {
       fondoSugerido: 10000,
       denominaciones: [20000, 10000, 2000, 1000, 500, 200, 100],
       porSucursal: false,
+      modoConteo: 'billetes',
+      controlarOtrosMedios: true,
+      modoFondo: 'preguntar',
+      tareasCierre: [],
+      ...copiable(real),
     },
     caja: {
       id: 'practica',
@@ -73,16 +113,23 @@ function seed(): SandboxDB {
 
 let _db = seed()
 
-/** Vuelve el sandbox a cero (se llama al entrar y al salir del modo práctica). */
-export function resetPractica(): void {
-  _db = seed()
+/**
+ * Vuelve el sandbox a cero (se llama al entrar y al salir del modo práctica).
+ * Con la configuración real, el ensayo del cierre sigue sus mismos pasos.
+ */
+export function resetPractica(real?: CajaConfig | null): void {
+  _db = seed(real)
 }
 
 // ===== Config / cajas =========================================================
 
 export async function obtenerConfigCaja(): Promise<CajaConfig> {
   await wait()
-  return { ..._db.config, denominaciones: [..._db.config.denominaciones] }
+  return {
+    ..._db.config,
+    denominaciones: [..._db.config.denominaciones],
+    tareasCierre: [..._db.config.tareasCierre],
+  }
 }
 
 export async function listarCajas(): Promise<CajaRegistradora[]> {
@@ -174,16 +221,38 @@ export async function cerrarCaja(input: CerrarCajaInput): Promise<CierreCaja> {
   const sesion = _db.sesion
   if (!sesion || sesion.id !== input.sesionId) throw new Error('El turno ya no está abierto.')
 
+  // Las mismas reglas que `cerrar_caja` del backend.
+  const config = _db.config
   const resumen = calcularResumenSesion(sesion, _db.movimientos)
+  const contadoPorMedio = mediosEnCero()
   const diferenciaPorMedio = mediosEnCero()
   let diferenciaTotal = 0
   for (const m of MEDIOS_PAGO_CAJA) {
-    const d = (input.contadoPorMedio[m.value] ?? 0) - resumen.esperadoPorMedio[m.value]
+    const revisado = m.value === 'efectivo' || config.controlarOtrosMedios
+    contadoPorMedio[m.value] = revisado
+      ? (input.contadoPorMedio[m.value] ?? 0)
+      : resumen.esperadoPorMedio[m.value]
+    // En centavos, como el asistente: 0,1 + 0,2 no deja una diferencia fantasma.
+    const d = Math.round((contadoPorMedio[m.value] - resumen.esperadoPorMedio[m.value]) * 100) / 100
     diferenciaPorMedio[m.value] = d
     diferenciaTotal += d
   }
-  const contadoEfectivo = input.contadoPorMedio.efectivo ?? 0
-  const fondoSiguiente = Math.min(Math.max(0, input.fondoSiguiente), contadoEfectivo)
+  diferenciaTotal = Math.round(diferenciaTotal * 100) / 100
+  if (
+    config.toleranciaActiva &&
+    Math.abs(diferenciaTotal) > config.toleranciaMonto &&
+    !(input.motivoDiferencia?.trim() && input.notaDiferencia?.trim())
+  ) {
+    throw new Error('La diferencia supera lo permitido: elegí un motivo y contá qué pasó.')
+  }
+  const contadoEfectivo = contadoPorMedio.efectivo
+  const pedido =
+    config.modoFondo === 'fijo'
+      ? config.fondoSugerido
+      : config.modoFondo === 'todo'
+        ? contadoEfectivo
+        : input.fondoSiguiente
+  const fondoSiguiente = Math.min(Math.max(0, pedido), contadoEfectivo)
 
   const cierre: CierreCaja = {
     id: uid('cie'),
@@ -203,13 +272,15 @@ export async function cerrarCaja(input: CerrarCajaInput): Promise<CierreCaja> {
     egresos: resumen.egresos,
     retiros: resumen.retiros,
     esperadoPorMedio: resumen.esperadoPorMedio,
-    contadoPorMedio: { ...input.contadoPorMedio },
+    contadoPorMedio,
     conteoCierre: input.conteoCierre,
     diferenciaPorMedio,
     diferenciaTotal,
     motivoDiferencia: input.motivoDiferencia?.trim() || undefined,
     notaDiferencia: input.notaDiferencia?.trim() || undefined,
-    cierreCiego: _db.config.cierreCiego,
+    cierreCiego: config.cierreCiego,
+    otrosMediosControlados: config.controlarOtrosMedios,
+    tareasConfirmadas: [...(input.tareasConfirmadas ?? [])],
     fondoSiguiente,
     retiroFinal: Math.max(0, contadoEfectivo - fondoSiguiente),
     movimientos: _db.movimientos.map((m) => ({ ...m })),

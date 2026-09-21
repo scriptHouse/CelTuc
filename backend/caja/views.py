@@ -285,6 +285,7 @@ class CerrarCajaView(_BaseCaja, APIView):
                 fondo_siguiente=datos['fondo_siguiente'],
                 motivo_diferencia=datos.get('motivo_diferencia', ''),
                 nota_diferencia=datos.get('nota_diferencia', ''),
+                tareas_confirmadas=datos.get('tareas_confirmadas'),
                 usuario=request.user,
             )
         except ValidationError as e:

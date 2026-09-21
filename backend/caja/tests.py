@@ -172,6 +172,109 @@ class CierreTests(TestCase):
         self.assertEqual(resumen_sesion(siguiente)['esperado_por_medio']['efectivo'], Decimal('10000'))
 
 
+class CierreConfigurableTests(TestCase):
+    """Cada paso del cierre se ajusta desde la configuracion, y el backend la respeta.
+
+    Mismo turno que `CierreTests`: esperado 30000 en efectivo (10000 de fondo +
+    20000 de ventas) y 15000 por transferencia.
+    """
+
+    def setUp(self):
+        self.caja = Caja.objects.create(nombre='Principal test')
+        self.sesion = abrir_caja(self.caja, fondo_inicial=10000)
+        registrar_movimiento(
+            self.sesion, tipo=MovimientoCaja.Tipo.VENTA, medio='efectivo',
+            monto=20000, motivo='Venta',
+        )
+        registrar_movimiento(
+            self.sesion, tipo=MovimientoCaja.Tipo.VENTA, medio='transferencia',
+            monto=15000, motivo='Venta',
+        )
+        self.config = ConfiguracionCaja.instancia()
+
+    def _configurar(self, **campos):
+        for campo, valor in campos.items():
+            setattr(self.config, campo, valor)
+        self.config.save()
+
+    def test_arranca_como_siempre(self):
+        """Los valores de fabrica dejan el cierre exactamente como era."""
+        self.assertEqual(self.config.modo_conteo, ConfiguracionCaja.ModoConteo.BILLETES)
+        self.assertEqual(self.config.modo_fondo, ConfiguracionCaja.ModoFondo.PREGUNTAR)
+        self.assertTrue(self.config.controlar_otros_medios)
+        self.assertEqual(self.config.tareas_cierre, [])
+
+    def test_fondo_fijo_deja_siempre_el_fondo_sugerido(self):
+        self._configurar(modo_fondo=ConfiguracionCaja.ModoFondo.FIJO, fondo_sugerido=Decimal('5000'))
+        cierre = cerrar_caja(
+            self.sesion,
+            contado_por_medio=_contado(efectivo=30000, transferencia=15000),
+            fondo_siguiente=20000,  # lo que diga la pantalla no manda
+        )
+        self.assertEqual(cierre.fondo_siguiente, Decimal('5000'))
+        self.assertEqual(cierre.retiro_final, Decimal('25000'))
+
+    def test_fondo_fijo_no_supera_lo_contado(self):
+        self._configurar(modo_fondo=ConfiguracionCaja.ModoFondo.FIJO, fondo_sugerido=Decimal('50000'))
+        cierre = cerrar_caja(
+            self.sesion,
+            contado_por_medio=_contado(efectivo=30000, transferencia=15000),
+            fondo_siguiente=0,
+        )
+        self.assertEqual(cierre.fondo_siguiente, Decimal('30000'))
+        self.assertEqual(cierre.retiro_final, Decimal('0'))
+
+    def test_dejar_todo_no_retira_nada(self):
+        self._configurar(modo_fondo=ConfiguracionCaja.ModoFondo.TODO)
+        cierre = cerrar_caja(
+            self.sesion,
+            contado_por_medio=_contado(efectivo=29000, transferencia=15000),
+            fondo_siguiente=10000,
+        )
+        self.assertEqual(cierre.fondo_siguiente, Decimal('29000'))
+        self.assertEqual(cierre.retiro_final, Decimal('0'))
+
+    def test_sin_revisar_otros_medios_se_toma_lo_registrado(self):
+        self._configurar(controlar_otros_medios=False)
+        cierre = cerrar_caja(
+            self.sesion,
+            # La transferencia no se revisa: aunque llegue en 0, cuenta lo anotado.
+            contado_por_medio=_contado(efectivo=30000),
+            fondo_siguiente=10000,
+        )
+        self.assertFalse(cierre.otros_medios_controlados)
+        self.assertEqual(cierre.contado_por_medio['transferencia'], 15000.0)
+        self.assertEqual(cierre.diferencia_por_medio['transferencia'], 0.0)
+        self.assertEqual(cierre.diferencia_total, Decimal('0'))
+
+    def test_revisando_otros_medios_su_diferencia_cuenta(self):
+        cierre = cerrar_caja(
+            self.sesion,
+            contado_por_medio=_contado(efectivo=30000, transferencia=14000),
+            fondo_siguiente=10000,
+        )
+        self.assertTrue(cierre.otros_medios_controlados)
+        self.assertEqual(cierre.diferencia_por_medio['transferencia'], -1000.0)
+        self.assertEqual(cierre.diferencia_total, Decimal('-1000'))
+
+    def test_las_tareas_tildadas_quedan_en_el_cierre(self):
+        cierre = cerrar_caja(
+            self.sesion,
+            contado_por_medio=_contado(efectivo=30000, transferencia=15000),
+            fondo_siguiente=10000,
+            tareas_confirmadas=['  Apagar   el aire ', 'apagar el aire', '', 'Cierre de lote del posnet'],
+        )
+        self.assertEqual(cierre.tareas_confirmadas, ['Apagar el aire', 'Cierre de lote del posnet'])
+
+    def test_sin_tareas_queda_la_lista_vacia(self):
+        cierre = cerrar_caja(
+            self.sesion,
+            contado_por_medio=_contado(efectivo=30000, transferencia=15000),
+            fondo_siguiente=10000,
+        )
+        self.assertEqual(cierre.tareas_confirmadas, [])
+
+
 class VentaEnCajaTests(TestCase):
     """La integracion clave: la venta de mostrador entra sola al arqueo.
 
@@ -365,6 +468,76 @@ class ApiCajaTests(TestCase):
         r = admin.patch('/api/caja/config/', {'cierre_ciego': False}, format='json')
         self.assertEqual(r.status_code, 200)
         self.assertFalse(r.data['cierre_ciego'])
+
+    def test_config_del_cierre_por_api(self):
+        admin = APIClient()
+        admin.force_authenticate(self.admin)
+        r = admin.get('/api/caja/config/')
+        self.assertEqual(r.data['modo_conteo'], 'billetes')
+        self.assertEqual(r.data['modo_fondo'], 'preguntar')
+        self.assertTrue(r.data['controlar_otros_medios'])
+        self.assertEqual(r.data['tareas_cierre'], [])
+
+        r = admin.patch('/api/caja/config/', {
+            'modo_conteo': 'elegir',
+            'modo_fondo': 'fijo',
+            'controlar_otros_medios': False,
+            'tareas_cierre': ['  Guardar los celulares ', 'guardar los celulares', '', 'Apagar las luces'],
+        }, format='json')
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data['modo_conteo'], 'elegir')
+        self.assertEqual(r.data['modo_fondo'], 'fijo')
+        self.assertFalse(r.data['controlar_otros_medios'])
+        # Sin espacios de mas, vacios ni repetidos.
+        self.assertEqual(r.data['tareas_cierre'], ['Guardar los celulares', 'Apagar las luces'])
+
+        # El cajero lee la configuracion (la necesita para cerrar) pero no la cambia.
+        self.assertEqual(self.cliente.get('/api/caja/config/').data['modo_fondo'], 'fijo')
+        r = self.cliente.patch('/api/caja/config/', {'modo_fondo': 'todo'}, format='json')
+        self.assertEqual(r.status_code, 403)
+
+    def test_config_del_cierre_rechaza_valores_invalidos(self):
+        admin = APIClient()
+        admin.force_authenticate(self.admin)
+        casos = [
+            {'modo_conteo': 'a_ojo'},
+            {'modo_fondo': 'regalar'},
+            {'tareas_cierre': [f'Tarea {i}' for i in range(11)]},
+            {'tareas_cierre': ['x' * 121]},
+            {'fondo_sugerido': -1},
+            {'tolerancia_monto': -500},
+        ]
+        for datos in casos:
+            with self.subTest(datos=datos):
+                r = admin.patch('/api/caja/config/', datos, format='json')
+                self.assertEqual(r.status_code, 400)
+        # Nada de lo rechazado quedo guardado.
+        config = ConfiguracionCaja.instancia()
+        self.assertEqual(config.modo_conteo, 'billetes')
+        self.assertEqual(config.tareas_cierre, [])
+
+    def test_el_cierre_por_api_guarda_las_tareas_y_el_control(self):
+        r = self.cliente.post('/api/caja/abrir/', {
+            'caja': self.caja.pk, 'fondo_inicial': 5000,
+        }, format='json')
+        sesion_id = r.data['id']
+        r = self.cliente.post('/api/caja/cerrar/', {
+            'sesion': sesion_id,
+            'contado_por_medio': _contado(efectivo=5000),
+            'fondo_siguiente': 5000,
+            'tareas_confirmadas': ['Cierre de lote del posnet', 'Apagar las luces'],
+        }, format='json')
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data['tareas_confirmadas'], ['Cierre de lote del posnet', 'Apagar las luces'])
+        self.assertTrue(r.data['otros_medios_controlados'])
+
+        # Sin tareas (pantallas viejas) el cierre funciona igual.
+        r = self.cliente.post('/api/caja/abrir/', {'caja': self.caja.pk, 'fondo_inicial': 0}, format='json')
+        r = self.cliente.post('/api/caja/cerrar/', {
+            'sesion': r.data['id'], 'contado_por_medio': _contado(), 'fondo_siguiente': 0,
+        }, format='json')
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data['tareas_confirmadas'], [])
 
     def test_sin_permiso_403(self):
         pelado = Usuario.objects.create_user(

@@ -4,7 +4,17 @@ from rest_framework import serializers
 
 from inventario.models import Sucursal
 
-from .models import Caja, CierreCaja, ConfiguracionCaja, MedioPago, MovimientoCaja, SesionCaja
+from .models import (
+    MAX_LARGO_TAREA,
+    MAX_TAREAS_CIERRE,
+    Caja,
+    CierreCaja,
+    ConfiguracionCaja,
+    MedioPago,
+    MovimientoCaja,
+    SesionCaja,
+    limpiar_tareas,
+)
 
 _CERO = Decimal('0')
 
@@ -16,14 +26,19 @@ def _decimal(**kwargs):
 
 
 class ConfiguracionCajaSerializer(serializers.ModelSerializer):
-    tolerancia_monto = _decimal()
-    fondo_sugerido = _decimal()
+    tolerancia_monto = _decimal(min_value=_CERO)
+    fondo_sugerido = _decimal(min_value=_CERO)
+    tareas_cierre = serializers.ListField(
+        child=serializers.CharField(allow_blank=True, trim_whitespace=True),
+        required=False,
+    )
 
     class Meta:
         model = ConfiguracionCaja
         fields = (
             'cierre_ciego', 'tolerancia_activa', 'tolerancia_monto', 'retiros_habilitados',
             'multi_caja', 'exigir_lote', 'fondo_sugerido', 'denominaciones', 'por_sucursal',
+            'modo_conteo', 'controlar_otros_medios', 'modo_fondo', 'tareas_cierre',
             'actualizado',
         )
         # `por_sucursal` no se escribe por aca: cambiar de modo valida turnos y
@@ -35,6 +50,19 @@ class ConfiguracionCajaSerializer(serializers.ModelSerializer):
         if not limpias:
             raise serializers.ValidationError('Deja al menos una denominacion activa.')
         return limpias
+
+    def validate_tareas_cierre(self, value):
+        tareas = limpiar_tareas(value)
+        if len(tareas) > MAX_TAREAS_CIERRE:
+            raise serializers.ValidationError(
+                f'Como mucho {MAX_TAREAS_CIERRE} tareas: el repaso tiene que ser corto.'
+            )
+        largas = [t for t in tareas if len(t) > MAX_LARGO_TAREA]
+        if largas:
+            raise serializers.ValidationError(
+                f'Cada tarea puede tener hasta {MAX_LARGO_TAREA} letras: «{largas[0][:40]}…» es mas larga.'
+            )
+        return tareas
 
 
 class CajaSerializer(serializers.ModelSerializer):
@@ -191,7 +219,8 @@ class CierreCajaSerializer(serializers.ModelSerializer):
             'ventas_por_medio', 'operaciones_por_medio', 'ingresos', 'egresos', 'retiros',
             'esperado_por_medio', 'contado_por_medio', 'conteo_cierre',
             'diferencia_por_medio', 'diferencia_total', 'motivo_diferencia', 'nota_diferencia',
-            'cierre_ciego', 'fondo_siguiente', 'retiro_final', 'movimientos',
+            'cierre_ciego', 'otros_medios_controlados', 'tareas_confirmadas',
+            'fondo_siguiente', 'retiro_final', 'movimientos',
         )
 
     def get_abierta_por(self, obj):
@@ -245,3 +274,9 @@ class CerrarCajaSerializer(serializers.Serializer):
     fondo_siguiente = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=_CERO)
     motivo_diferencia = serializers.CharField(required=False, allow_blank=True, max_length=120)
     nota_diferencia = serializers.CharField(required=False, allow_blank=True, max_length=500)
+    # Lo que quien cierra tildo antes de contar (las tareas de la configuracion
+    # y el cierre del posnet): queda escrito en el comprobante.
+    tareas_confirmadas = serializers.ListField(
+        child=serializers.CharField(max_length=200, allow_blank=True),
+        required=False, max_length=MAX_TAREAS_CIERRE + 5,
+    )

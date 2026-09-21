@@ -60,8 +60,9 @@ import {
 } from '@/components/exportar/ExportarTablaModal'
 
 /**
- * Caja: turnos con fondo declarado, movimientos con motivo, arqueo guiado en
- * 3 pasos y comprobantes Z inmutables, todo contra el backend real. Incluye un
+ * Caja: turnos con fondo declarado, movimientos con motivo, cierre guiado paso
+ * a paso (ver `CierreWizard`) y comprobantes Z inmutables, todo contra el
+ * backend real. Incluye un
  * MODO PRÁCTICA (patrón "test mode" de Stripe): mismo módulo, servicio sandbox
  * en memoria — nada se crea ni se guarda, ideal para aprender el ciclo.
  */
@@ -366,7 +367,9 @@ export function CajaPage() {
   const [exportarAbierto, setExportarAbierto] = useState(false)
 
   function entrarPractica() {
-    resetPractica()
+    // El ensayo copia cómo está configurado el cierre real (tareas, forma de
+    // contar, fondo…): se practica lo mismo que después se hace de verdad.
+    resetPractica(config)
     queryClient.removeQueries({ queryKey: ['caja-practica'] })
     // El id se fija en el mismo render: así ninguna query del sandbox sale con
     // el id de una caja real (ni al revés, al salir).
@@ -524,7 +527,7 @@ export function CajaPage() {
         subtitle={
           practica
             ? 'Caja de mentira para aprender el ciclo completo: nada de esto se guarda.'
-            : 'Turnos con fondo declarado, movimientos con motivo y arqueo con comprobante Z.'
+            : 'Abrí la caja, anotá lo que entra y sale, y al final cerrala contando la plata.'
         }
         className="ct-rise"
         actions={
@@ -533,13 +536,18 @@ export function CajaPage() {
               <AyudaCaja />
             </AyudaInfo>
             {!practica && (
-              <Button variant="outline" onClick={entrarPractica} title="Ensayá sin tocar los datos reales">
+              <Button
+                variant="outline"
+                onClick={entrarPractica}
+                title="Ensayá sin tocar los datos reales"
+                aria-label="Modo práctica"
+              >
                 <FlaskConical className="h-4 w-4" />
                 <span className="hidden sm:inline">Práctica</span>
               </Button>
             )}
             {admin && !practica && (
-              <Button variant="outline" onClick={() => setConfigAbierta(true)}>
+              <Button variant="outline" onClick={() => setConfigAbierta(true)} aria-label="Configurar la caja">
                 <SlidersHorizontal className="h-4 w-4" />
                 <span className="hidden sm:inline">Configurar</span>
               </Button>
