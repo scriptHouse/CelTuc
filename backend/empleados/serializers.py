@@ -1,9 +1,11 @@
-from django.core.validators import MinLengthValidator
+from django.db import transaction
 from django.db.models import Max
 from rest_framework import serializers
 
 from inventario.models import Sucursal
-from usuarios.models import Rol, Usuario, username_validator
+from usuarios import identidad
+from usuarios.gestion import MSG_NO_CAMBIAR_PROPIO_ROL, MSG_NO_PAUSARSE
+from usuarios.models import Rol, Usuario
 
 from .models import Empleado
 
@@ -23,14 +25,16 @@ class SucursalSerializer(serializers.ModelSerializer):
     def validate_nombre(self, value):
         value = value.strip()
         if not value:
-            raise serializers.ValidationError('El nombre es obligatorio.')
-        # `todos` incluye los borrados lógicos: el nombre sigue "ocupado" mientras
-        # exista la fila, así no chocamos con la constraint única al validar.
-        qs = Sucursal.todos.filter(nombre__iexact=value)
+            raise serializers.ValidationError('Falta el nombre de la sucursal (por ejemplo «Solar YB»).')
+        # Solo las vivas: la constraint única de la base es parcial (`borrado=False`),
+        # así que el nombre de una sucursal eliminada se puede volver a usar.
+        qs = Sucursal.objects.filter(nombre__iexact=value)
         if self.instance:
             qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():
-            raise serializers.ValidationError('Ya existe una sucursal con ese nombre.')
+            raise serializers.ValidationError(
+                f'Ya hay una sucursal que se llama «{value}». Elegí otro nombre para no confundirlas.'
+            )
         return value
 
     def create(self, validated_data):
@@ -54,10 +58,15 @@ class UsuarioBreveSerializer(serializers.ModelSerializer):
 
     rol = serializers.SerializerMethodField()
     en_linea = serializers.BooleanField(read_only=True)
+    # Para decir en la tarjeta si entra como administrador (ve todo) o por su rol.
+    es_administrador = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Usuario
-        fields = ('id', 'username', 'email', 'is_active', 'rol', 'last_login', 'ultima_actividad', 'en_linea')
+        fields = (
+            'id', 'username', 'email', 'is_active', 'rol', 'last_login', 'ultima_actividad', 'en_linea',
+            'es_administrador', 'is_staff', 'is_superuser',
+        )
 
     def get_rol(self, obj):
         if not obj.rol_id:
@@ -81,6 +90,9 @@ class EmpleadoSerializer(serializers.ModelSerializer):
         )
 
 
+MSG_FALTA_NOMBRE = 'Falta el nombre de la persona (por ejemplo «Lucas»).'
+
+
 class EmpleadoWriteSerializer(serializers.ModelSerializer):
     """Alta/edición de los datos del empleado (sin tocar la cuenta de login)."""
 
@@ -92,25 +104,33 @@ class EmpleadoWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Empleado
         fields = ('nombre', 'apellido', 'sucursal')
+        extra_kwargs = {
+            'nombre': {'error_messages': {
+                'blank': MSG_FALTA_NOMBRE, 'required': MSG_FALTA_NOMBRE, 'null': MSG_FALTA_NOMBRE,
+            }},
+        }
 
     def validate_nombre(self, value):
         value = value.strip()
         if not value:
-            raise serializers.ValidationError('El nombre es obligatorio.')
+            raise serializers.ValidationError(MSG_FALTA_NOMBRE)
         return value
 
 
 class AccesoSerializer(serializers.Serializer):
-    """Crea o actualiza la cuenta de login de un empleado.
+    """Crea o actualiza la cuenta de login de un empleado (su «llave»).
 
     Siempre genera usuarios REGULARES (is_staff=False, is_superuser=False): así
     quedan diferenciados del admin del sistema, que es el único superusuario.
+    Reglas y mensajes de usuario/email/contraseña: `usuarios/identidad.py`.
+
+    Contexto: `empleado` (puede ser uno todavía sin guardar, cuando se crea la
+    persona y su acceso en el mismo pedido) y `actor` (quien hace el cambio,
+    para no dejarlo cambiarse el rol ni pausarse a sí mismo).
     """
 
-    username = serializers.CharField(
-        max_length=30, validators=[MinLengthValidator(3), username_validator],
-    )
-    email = serializers.EmailField()
+    username = serializers.CharField(error_messages=identidad.ERRORES_USERNAME)
+    email = serializers.EmailField(error_messages=identidad.ERRORES_EMAIL)
     # Obligatoria al crear el acceso; opcional al editar (solo cambia si se manda).
     password = serializers.CharField(
         write_only=True, required=False, allow_blank=True,
@@ -121,47 +141,58 @@ class AccesoSerializer(serializers.Serializer):
     rol_id = serializers.PrimaryKeyRelatedField(
         queryset=Rol.objects.all(), required=False, allow_null=True,
     )
+    # Pausar / reactivar la llave sin borrarla. Si no viene: una cuenta nueva
+    # nace activa y una existente queda como estaba.
+    is_active = serializers.BooleanField(required=False)
 
     @property
     def empleado(self):
         return self.context['empleado']
 
-    def _otras_cuentas(self):
-        """Usuarios distintos del ya vinculado a este empleado (para unicidad)."""
-        # `todos` incluye cuentas borradas logicamente, para no chocar con la
-        # constraint unica de username/email al validar.
-        qs = Usuario.todos.all()
-        actual = self.empleado.usuario
-        return qs.exclude(pk=actual.pk) if actual else qs
+    def _cuenta_actual_id(self):
+        return self.empleado.usuario_id
 
     def validate_username(self, value):
-        value = value.strip().lower()
-        if self._otras_cuentas().filter(username__iexact=value).exists():
-            raise serializers.ValidationError('Ese nombre de usuario ya está en uso.')
-        return value
+        return identidad.validar_username(value, excluir=self._cuenta_actual_id())
 
     def validate_email(self, value):
-        value = value.strip().lower()
-        if self._otras_cuentas().filter(email__iexact=value).exists():
-            raise serializers.ValidationError('Ese email ya está en uso.')
-        return value
+        return identidad.validar_email(value, excluir=self._cuenta_actual_id())
+
+    def validate_password(self, value):
+        # Vacía = no se cambia (si la cuenta ya existe); si viene, con el mínimo.
+        return identidad.validar_password(value) if value else value
 
     def validate(self, attrs):
+        es_nuevo = self._cuenta_actual_id() is None
         # Si el empleado todavía no tiene cuenta, la contraseña es obligatoria.
-        if self.empleado.usuario is None and not attrs.get('password'):
-            raise serializers.ValidationError(
-                {'password': 'La contraseña es obligatoria para crear el acceso.'}
-            )
+        if es_nuevo and not attrs.get('password'):
+            raise serializers.ValidationError({'password': identidad.MSG_PASSWORD_VACIA})
+        # La propia cuenta: ni cambiarse el rol ni pausarse (igual que en Usuarios).
+        actor = self.context.get('actor')
+        if actor is not None and not es_nuevo and self._cuenta_actual_id() == actor.pk:
+            actual = self.empleado.usuario
+            if 'rol_id' in attrs:
+                nuevo = attrs['rol_id'].pk if attrs['rol_id'] else None
+                if nuevo != actual.rol_id:
+                    raise serializers.ValidationError({'rol_id': MSG_NO_CAMBIAR_PROPIO_ROL})
+            if attrs.get('is_active') is False:
+                raise serializers.ValidationError({'is_active': MSG_NO_PAUSARSE})
         return attrs
 
+    @transaction.atomic
     def save(self):
         empleado = self.empleado
         data = self.validated_data
         es_nuevo = empleado.usuario is None
         user = empleado.usuario or Usuario(is_staff=False, is_superuser=False)
+        # Si una cuenta ELIMINADA todavía tiene este usuario/email, lo suelta.
+        identidad.liberar_identificadores(data['username'], data['email'], excluir=user.pk)
         user.username = data['username']
         user.email = data['email']
-        user.is_active = True
+        if es_nuevo:
+            user.is_active = True
+        elif 'is_active' in data:
+            user.is_active = data['is_active']
         # Asignacion de rol: si viene `rol_id` se respeta (incluido null para
         # quitarlo); si es una cuenta nueva sin rol explicito, va el "Empleado".
         if 'rol_id' in data:

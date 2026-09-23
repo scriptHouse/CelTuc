@@ -5,14 +5,48 @@ de crear su Empleado en el mismo paso. Separado de la autenticación (login/me)
 para mantener esos archivos enfocados.
 """
 from django.core.exceptions import ObjectDoesNotExist
-from django.core.validators import MinLengthValidator
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Rol, Usuario, username_validator
+from . import identidad
+from .models import Rol, Usuario
 from .permissions import EsAdministrador
+
+
+# --- Mensajes de las guardas -------------------------------------------------
+# Dicen POR QUÉ no se puede y qué hacer, no solo que no se puede. Los usa
+# también la gestión de accesos desde Empleados (empleados/views.py).
+
+MSG_SOLO_SUPER_EDITA = (
+    'Esta cuenta es de un administrador. Solo el superadministrador (la cuenta principal '
+    'del sistema) puede cambiarla: pedíselo a quien la tenga.'
+)
+MSG_SOLO_SUPER_ELIMINA = (
+    'Esta cuenta es de un administrador. Solo el superadministrador (la cuenta principal '
+    'del sistema) puede eliminarla: pedíselo a quien la tenga.'
+)
+MSG_NO_PAUSARSE = (
+    'No podés pausar tu propia cuenta: te quedarías afuera del sistema. '
+    'Si de verdad hace falta, pedíselo a otro administrador.'
+)
+MSG_NO_QUITARSE_ADMIN = (
+    'No podés sacarte a vos mismo el permiso de administrador: te quedarías sin poder '
+    'manejar el sistema. Pedíselo a otro administrador.'
+)
+MSG_NO_CAMBIAR_PROPIO_ROL = (
+    'No podés cambiarte tu propio rol: podrías quedarte sin acceso por error. '
+    'Pedíselo a otro administrador.'
+)
+MSG_NO_ELIMINARSE = (
+    'No podés eliminar tu propia cuenta: te quedarías afuera del sistema. '
+    'Pedíselo a otro administrador.'
+)
+MSG_NO_ELIMINAR_SUPER = (
+    'Esta es la cuenta principal del sistema (superadministrador) y no se puede eliminar.'
+)
 
 
 # --- Serializers -------------------------------------------------------------
@@ -47,11 +81,14 @@ class UsuarioAdminSerializer(serializers.ModelSerializer):
             emp = obj.empleado
         except ObjectDoesNotExist:
             return None
+        suc = emp.sucursal
         return {
             'id': emp.id,
             'nombre': emp.nombre,
             'apellido': emp.apellido,
             'nombre_completo': emp.nombre_completo,
+            'sucursal': {'id': suc.id, 'nombre': suc.nombre} if suc else None,
+            'creado': emp.creado,
         }
 
 
@@ -64,12 +101,13 @@ class UsuarioCreateSerializer(serializers.Serializer):
     """Crea una cuenta y, opcionalmente, su Empleado en el mismo request.
 
     Nunca crea superusuarios: como mucho, una cuenta `is_staff` (administradora).
-    El único superusuario es el admin original.
+    El único superusuario es el admin original. Las reglas y los mensajes de
+    usuario/email/contraseña viven en `usuarios/identidad.py`.
     """
 
-    username = serializers.CharField(max_length=30, validators=[MinLengthValidator(3), username_validator])
-    email = serializers.EmailField()
-    password = serializers.CharField(write_only=True)
+    username = serializers.CharField(error_messages=identidad.ERRORES_USERNAME)
+    email = serializers.EmailField(error_messages=identidad.ERRORES_EMAIL)
+    password = serializers.CharField(write_only=True, error_messages=identidad.ERRORES_PASSWORD)
     is_staff = serializers.BooleanField(default=False)
     # Rol que define a que modulos entra la cuenta (opcional: sin rol = sin acceso).
     rol = serializers.PrimaryKeyRelatedField(
@@ -78,24 +116,19 @@ class UsuarioCreateSerializer(serializers.Serializer):
     empleado = _EmpleadoMiniSerializer(required=False, allow_null=True)
 
     def validate_username(self, value):
-        value = value.strip().lower()
-        if Usuario.todos.filter(username__iexact=value).exists():
-            raise serializers.ValidationError('Ese nombre de usuario ya está en uso.')
-        return value
+        return identidad.validar_username(value)
 
     def validate_email(self, value):
-        value = value.strip().lower()
-        if Usuario.todos.filter(email__iexact=value).exists():
-            raise serializers.ValidationError('Ese email ya está en uso.')
-        return value
+        return identidad.validar_email(value)
 
     def validate_password(self, value):
-        if not value:
-            raise serializers.ValidationError('La contraseña es obligatoria.')
-        return value
+        return identidad.validar_password(value)
 
+    @transaction.atomic
     def create(self, validated_data):
         empleado_data = validated_data.pop('empleado', None)
+        # Si una cuenta ELIMINADA todavía tiene este usuario/email, lo suelta.
+        identidad.liberar_identificadores(validated_data['username'], validated_data['email'])
         user = Usuario(
             username=validated_data['username'],
             email=validated_data['email'],
@@ -117,10 +150,8 @@ class UsuarioCreateSerializer(serializers.Serializer):
 
 
 class UsuarioUpdateSerializer(serializers.Serializer):
-    username = serializers.CharField(
-        max_length=30, validators=[MinLengthValidator(3), username_validator], required=False,
-    )
-    email = serializers.EmailField(required=False)
+    username = serializers.CharField(required=False, error_messages=identidad.ERRORES_USERNAME)
+    email = serializers.EmailField(required=False, error_messages=identidad.ERRORES_EMAIL)
     is_active = serializers.BooleanField(required=False)
     is_staff = serializers.BooleanField(required=False)
     rol = serializers.PrimaryKeyRelatedField(
@@ -129,18 +160,20 @@ class UsuarioUpdateSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     def validate_username(self, value):
-        value = value.strip().lower()
-        if Usuario.todos.filter(username__iexact=value).exclude(pk=self.instance.pk).exists():
-            raise serializers.ValidationError('Ese nombre de usuario ya está en uso.')
-        return value
+        return identidad.validar_username(value, excluir=self.instance.pk)
 
     def validate_email(self, value):
-        value = value.strip().lower()
-        if Usuario.todos.filter(email__iexact=value).exclude(pk=self.instance.pk).exists():
-            raise serializers.ValidationError('Ese email ya está en uso.')
-        return value
+        return identidad.validar_email(value, excluir=self.instance.pk)
 
+    def validate_password(self, value):
+        # Vacía = no se cambia; si viene, tiene que cumplir el mínimo.
+        return identidad.validar_password(value) if value else value
+
+    @transaction.atomic
     def update(self, instance, validated_data):
+        identidad.liberar_identificadores(
+            validated_data.get('username'), validated_data.get('email'), excluir=instance.pk,
+        )
         for field in ('username', 'email', 'is_active', 'is_staff'):
             if field in validated_data:
                 setattr(instance, field, validated_data[field])
@@ -159,7 +192,7 @@ class UsuarioListCreateView(APIView):
 
     def get(self, request):
         # `objects` ya excluye las cuentas borradas logicamente (ver UsuarioManager).
-        usuarios = Usuario.objects.select_related('empleado', 'rol').order_by('username')
+        usuarios = Usuario.objects.select_related('empleado', 'empleado__sucursal', 'rol').order_by('username')
         return Response(UsuarioAdminSerializer(usuarios, many=True).data)
 
     def post(self, request):
@@ -181,26 +214,26 @@ class UsuarioDetailView(APIView):
         # (a sí mismo sí puede, para cambiar sus propios datos).
         if user.es_administrador and user.pk != actor.pk and not actor.is_superuser:
             return Response(
-                {'detail': 'Solo un superadministrador puede editar a un administrador.'},
+                {'detail': MSG_SOLO_SUPER_EDITA},
                 status=status.HTTP_403_FORBIDDEN,
             )
         # Evitar que el admin se deje afuera a sí mismo.
         if user.pk == request.user.pk:
             if request.data.get('is_active') is False:
                 return Response(
-                    {'detail': 'No podés desactivar tu propia cuenta.'},
+                    {'detail': MSG_NO_PAUSARSE},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             if request.data.get('is_staff') is False:
                 return Response(
-                    {'detail': 'No podés quitarte tu propio acceso de administrador.'},
+                    {'detail': MSG_NO_QUITARSE_ADMIN},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             # Mismo espíritu que lo anterior: cambiarse el propio rol puede dejarlo
             # sin administración (si le viene del rol) o sin módulos, por accidente.
             if 'rol' in request.data:
                 return Response(
-                    {'detail': 'No podés cambiar tu propio rol.'},
+                    {'detail': MSG_NO_CAMBIAR_PROPIO_ROL},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
         serializer = UsuarioUpdateSerializer(user, data=request.data, partial=True)
@@ -212,20 +245,74 @@ class UsuarioDetailView(APIView):
         user = get_object_or_404(Usuario, pk=pk)
         if user.pk == request.user.pk:
             return Response(
-                {'detail': 'No podés eliminar tu propia cuenta.'},
+                {'detail': MSG_NO_ELIMINARSE},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         if user.is_superuser:
             return Response(
-                {'detail': 'No se puede eliminar a un superusuario.'},
+                {'detail': MSG_NO_ELIMINAR_SUPER},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         # Jerarquia: solo un superadministrador puede eliminar a un administrador.
         if user.es_administrador and not request.user.is_superuser:
             return Response(
-                {'detail': 'Solo un superadministrador puede eliminar a un administrador.'},
+                {'detail': MSG_SOLO_SUPER_ELIMINA},
                 status=status.HTTP_403_FORBIDDEN,
             )
         # El Empleado vinculado (si hay) sobrevive sin login (Empleado.usuario = SET_NULL).
         user.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class DisponibilidadView(APIView):
+    """¿Está libre este usuario / email? Para avisar MIENTRAS se escribe.
+
+    `GET /api/usuarios/disponibilidad/?username=lgomez&email=l@x.com&excluir=4`
+    (`excluir`: la cuenta que se está editando). Con `nombre`/`apellido` además
+    propone usuarios libres (`sugerencias`), para no tener que inventarlos.
+    Solo administradores: dice qué cuenta tiene cada dato.
+    """
+
+    permission_classes = [EsAdministrador]
+
+    def get(self, request):
+        params = request.query_params
+        excluir = params.get('excluir')
+        excluir = int(excluir) if excluir and excluir.isdigit() else None
+        resultado = {}
+
+        if 'username' in params:
+            valor = identidad.normalizar(params['username'])
+            problema = identidad.problema_username(valor)
+            usuario = None if problema else identidad.cuenta_que_usa('username', valor, excluir)
+            sugerencias = []
+            if usuario is not None:
+                sugerencias = identidad.sugerir_usernames(base=valor, excluir=excluir)
+                problema = identidad.mensaje_username_en_uso(valor, usuario, sugerencias)
+            resultado['username'] = {
+                'valor': valor,
+                'ok': problema is None,
+                'mensaje': problema,
+                'usado_por': identidad.resumen_cuenta(usuario) if usuario else None,
+                'sugerencias': sugerencias,
+            }
+
+        if 'email' in params:
+            valor = identidad.normalizar(params['email'])
+            problema = identidad.problema_email(valor)
+            usuario = None if problema else identidad.cuenta_que_usa('email', valor, excluir)
+            if usuario is not None:
+                problema = identidad.mensaje_email_en_uso(usuario)
+            resultado['email'] = {
+                'valor': valor,
+                'ok': problema is None,
+                'mensaje': problema,
+                'usado_por': identidad.resumen_cuenta(usuario) if usuario else None,
+            }
+
+        if 'nombre' in params or 'apellido' in params:
+            resultado['sugerencias'] = identidad.sugerir_usernames(
+                nombre=params.get('nombre', ''), apellido=params.get('apellido', ''), excluir=excluir,
+            )
+
+        return Response(resultado)

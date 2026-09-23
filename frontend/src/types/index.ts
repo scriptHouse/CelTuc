@@ -395,6 +395,10 @@ export interface UsuarioBreve {
   last_login?: string | null
   ultima_actividad?: string | null
   en_linea?: boolean
+  /** Entra como administrador (ve todo), por su rol o por el permiso «staff». */
+  es_administrador?: boolean
+  is_staff?: boolean
+  is_superuser?: boolean
 }
 
 export interface Empleado {
@@ -417,6 +421,8 @@ export interface EmpleadoBreve {
   nombre: string
   apellido: string
   nombre_completo: string
+  sucursal?: SucursalBreve | null
+  creado?: string
 }
 
 /** Cuenta de login, tal como la ve el panel de administración del front. */

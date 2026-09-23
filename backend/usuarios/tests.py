@@ -764,3 +764,133 @@ class ImpersonacionTests(TestCase):
         payload = decode_token(access, expected_type='access')
         self.assertNotIn('act', payload)
         self.assertNotIn('imp_exp', payload)
+
+
+class IdentidadCuentasTests(TestCase):
+    """Usuario/email/contraseña: que no se repitan, que el error diga con quién
+    choca, y que una cuenta eliminada no siga ocupando sus datos para siempre."""
+
+    def setUp(self):
+        cache.clear()
+        self.admin = Usuario.objects.create_superuser(
+            email='admin@celtuc.ar', username='admin', password='clave-segura-123',
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+
+    def _crear(self, **datos):
+        base = {'username': 'lgomez', 'email': 'lucas@celtuc.ar', 'password': 'clave-123'}
+        base.update(datos)
+        return self.client.post(reverse('usuarios_gestion:list'), base, format='json')
+
+    def test_email_y_usuario_de_una_cuenta_eliminada_se_pueden_reusar(self):
+        vieja = self._crear().data
+        self.assertEqual(
+            self.client.delete(reverse('usuarios_gestion:detail', args=[vieja['id']])).status_code, 204,
+        )
+        # Antes: 400 «ya está en uso» sin que se viera ninguna cuenta.
+        r = self._crear()
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertNotEqual(r.data['id'], vieja['id'])
+        # La eliminada soltó sus datos (sigue existiendo para la auditoría).
+        borrada = Usuario.todos.get(pk=vieja['id'])
+        self.assertTrue(borrada.borrado)
+        self.assertEqual(borrada.username, f"lgomez~{vieja['id']}")
+        self.assertEqual(borrada.email, f"lucas@celtuc.ar~borrada{vieja['id']}")
+
+    def test_el_email_repetido_dice_de_quien_es(self):
+        self._crear(empleado={'nombre': 'Lucas', 'apellido': 'Gómez'})
+        r = self._crear(username='otro')
+        self.assertEqual(r.status_code, 400)
+        mensaje = str(r.data['email'][0])
+        self.assertIn('@lgomez', mensaje)
+        self.assertIn('Lucas Gómez', mensaje)
+
+    def test_el_usuario_repetido_propone_otros_libres(self):
+        self._crear()
+        r = self._crear(email='otro@celtuc.ar')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('lgomez2', str(r.data['username'][0]))
+
+    def test_usuario_con_espacios_explica_como_escribirlo(self):
+        r = self._crear(username='Lucas Gómez')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('sin espacios', str(r.data['username'][0]))
+
+    def test_contrasena_corta_explica_el_minimo(self):
+        r = self._crear(password='12345')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('al menos 6', str(r.data['password'][0]))
+
+    def test_editar_sin_contrasena_no_la_cambia(self):
+        u = self._crear().data
+        r = self.client.patch(
+            reverse('usuarios_gestion:detail', args=[u['id']]), {'password': ''}, format='json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(Usuario.objects.get(pk=u['id']).check_password('clave-123'))
+
+    def test_disponibilidad_avisa_con_quien_choca(self):
+        self._crear(empleado={'nombre': 'Lucas', 'apellido': 'Gómez'})
+        r = self.client.get(
+            reverse('usuarios_gestion:disponibilidad'),
+            {'username': 'LGomez', 'email': 'lucas@celtuc.ar'},
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.data['username']['ok'])
+        self.assertEqual(r.data['username']['usado_por']['empleado'], 'Lucas Gómez')
+        self.assertFalse(r.data['email']['ok'])
+        # Editando esa misma cuenta, sus propios datos están «libres».
+        propia = Usuario.objects.get(username='lgomez')
+        r = self.client.get(
+            reverse('usuarios_gestion:disponibilidad'),
+            {'username': 'lgomez', 'email': 'lucas@celtuc.ar', 'excluir': propia.pk},
+        )
+        self.assertTrue(r.data['username']['ok'])
+        self.assertTrue(r.data['email']['ok'])
+
+    def test_disponibilidad_explica_el_formato(self):
+        r = self.client.get(
+            reverse('usuarios_gestion:disponibilidad'), {'username': 'ña', 'email': 'sin-arroba'},
+        )
+        self.assertFalse(r.data['username']['ok'])
+        self.assertIn('sin espacios', r.data['username']['mensaje'])
+        self.assertFalse(r.data['email']['ok'])
+        self.assertIn('@', r.data['email']['mensaje'])
+
+    def test_disponibilidad_sugiere_usuarios_a_partir_del_nombre(self):
+        r = self.client.get(
+            reverse('usuarios_gestion:disponibilidad'), {'nombre': 'Lucas', 'apellido': 'Gómez Pérez'},
+        )
+        self.assertEqual(r.data['sugerencias'][0], 'lgomez')
+        self._crear()
+        r = self.client.get(
+            reverse('usuarios_gestion:disponibilidad'), {'nombre': 'Lucas', 'apellido': 'Gómez'},
+        )
+        self.assertNotIn('lgomez', r.data['sugerencias'])
+        self.assertIn('lucas.gomez', r.data['sugerencias'])
+
+    def test_disponibilidad_es_solo_para_administradores(self):
+        regular = Usuario.objects.create_user(email='r@celtuc.ar', username='regular', password='x')
+        c = APIClient()
+        c.force_authenticate(regular)
+        self.assertEqual(c.get(reverse('usuarios_gestion:disponibilidad'), {'username': 'x'}).status_code, 403)
+
+    def test_las_guardas_explican_que_hacer(self):
+        r = self.client.patch(
+            reverse('usuarios_gestion:detail', args=[self.admin.id]), {'is_active': False}, format='json',
+        )
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('otro administrador', r.data['detail'])
+
+    def test_nombre_de_rol_eliminado_se_puede_reusar(self):
+        rol = self.client.post(reverse('roles:list'), {'nombre': 'Cajero', 'permisos': []}, format='json').data
+        self.client.delete(reverse('roles:detail', args=[rol['id']]))
+        r = self.client.post(reverse('roles:list'), {'nombre': 'cajero', 'permisos': []}, format='json')
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertTrue(Rol.todos.get(pk=rol['id']).nombre.startswith('Cajero (eliminado'))
+
+    def test_nombre_de_rol_repetido_explica_que_hacer(self):
+        r = self.client.post(reverse('roles:list'), {'nombre': 'empleado', 'permisos': []}, format='json')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('Ya hay un rol', str(r.data['nombre'][0]))

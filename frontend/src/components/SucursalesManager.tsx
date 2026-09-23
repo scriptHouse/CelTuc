@@ -20,8 +20,8 @@ import { useConfirm } from '@/components/ConfirmProvider'
 
 /**
  * Gestor de sucursales (locales del negocio): nombre, código postal y estado.
- * Solo administradores. Mismas piezas y estética que RolesManager: el Modal base
- * es bottom-sheet en móvil y tarjeta centrada en escritorio (100% responsive).
+ * Solo administradores. El Modal base es bottom-sheet en móvil y tarjeta
+ * centrada en escritorio (100% responsive).
  */
 export function SucursalesManager({ open, onClose }: { open: boolean; onClose: () => void }) {
   const queryClient = useQueryClient()

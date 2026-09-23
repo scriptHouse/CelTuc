@@ -1,90 +1,26 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { ReactNode } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { z } from 'zod'
-import {
-  AtSign,
-  Building2,
-  Download,
-  Eye,
-  EyeOff,
-  KeyRound,
-  Loader2,
-  Mail,
-  Pencil,
-  Plus,
-  ShieldCheck,
-  SlidersHorizontal,
-  Trash2,
-  UserPlus,
-  Users,
-} from 'lucide-react'
-import type { Empleado, Rol, Sucursal } from '@/types'
-import {
-  actualizarEmpleado,
-  type AccesoInput,
-  crearEmpleado,
-  definirAcceso,
-  type EmpleadoInput,
-  eliminarEmpleado,
-  listarEmpleados,
-  quitarAcceso,
-} from '@/services/empleados'
+import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
+import { Building2, Download, KeyRound, Plus, ShieldCheck, UserPlus, UserRoundX, Users } from 'lucide-react'
+import type { Empleado } from '@/types'
+import { listarEmpleados } from '@/services/empleados'
 import { listarRoles } from '@/services/roles'
 import { listarSucursales } from '@/services/sucursales'
 import { useAuth } from '@/store/auth'
 import { esAdmin } from '@/lib/permisos'
-import { ApiError } from '@/lib/api'
-import { fecha } from '@/lib/format'
-import { ctStagger } from '@/lib/utils'
+import { ctStagger, normalizarBusqueda } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatCard } from '@/components/ui/StatCard'
-import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
-import { Badge } from '@/components/ui/Badge'
-import { Presencia } from '@/components/ui/StatusBadge'
-import { Modal } from '@/components/ui/Modal'
-import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { RolesManager } from '@/components/RolesManager'
 import { SucursalesManager } from '@/components/SucursalesManager'
-import { useToast } from '@/components/ToastProvider'
-import { useConfirm } from '@/components/ConfirmProvider'
 import { ExportarTablaModal, type GestorExport } from '@/components/exportar/ExportarTablaModal'
-
-const schema = z
-  .object({
-    nombre: z.string().trim().min(1, 'Requerido'),
-    apellido: z.string().trim(),
-    /** Id de la sucursal como string (lo maneja el Select); '' = sin sucursal. */
-    sucursalId: z.string(),
-    tieneAcceso: z.boolean(),
-    username: z.string().trim(),
-    email: z.string().trim(),
-    password: z.string(),
-    /** Id del rol como string (lo maneja el Select); '' = sin rol. */
-    rolId: z.string(),
-  })
-  .superRefine((val, ctx) => {
-    if (!val.tieneAcceso) return
-    if (val.username.length < 3) {
-      ctx.addIssue({ path: ['username'], code: z.ZodIssueCode.custom, message: 'Mínimo 3 caracteres' })
-    } else if (!/^[a-zA-Z0-9._-]+$/.test(val.username)) {
-      ctx.addIssue({ path: ['username'], code: z.ZodIssueCode.custom, message: 'Solo letras, números y . _ -' })
-    }
-    if (!val.email) {
-      ctx.addIssue({ path: ['email'], code: z.ZodIssueCode.custom, message: 'Requerido para el acceso' })
-    }
-  })
-type FormData = z.infer<typeof schema>
-
-function iniciales(e: Empleado): string {
-  return `${e.nombre.charAt(0)}${e.apellido.charAt(0)}`.toUpperCase() || 'E'
-}
+import { AltaWizard, type ModoAlta } from '@/components/equipo/AltaWizard'
+import { ComoFunciona, GuiaEquipo } from '@/components/equipo/ComoFunciona'
+import { FichaIntegrante } from '@/components/equipo/FichaIntegrante'
+import { desdeEmpleado, estadoAcceso } from '@/components/equipo/integrante'
+import { BarraFiltros, SinResultados, TarjetaIntegrante } from '@/components/equipo/TarjetaIntegrante'
 
 /** Qué se puede exportar del equipo (botón «Exportar»). */
 const GESTOR_EXPORT_EMPLEADOS: GestorExport<Empleado> = {
@@ -109,7 +45,7 @@ const GESTOR_EXPORT_EMPLEADOS: GestorExport<Empleado> = {
       corto: 'Acceso',
       tipo: 'texto',
       peso: 10,
-      valor: (e) => (e.puede_loguear ? 'Sí' : 'No'),
+      valor: (e) => (e.puede_loguear ? 'Sí' : e.usuario ? 'Pausado' : 'No'),
     },
     { id: 'alta', label: 'Alta', tipo: 'fecha', peso: 12, valor: (e) => e.creado },
     {
@@ -128,10 +64,16 @@ const GESTOR_EXPORT_EMPLEADOS: GestorExport<Empleado> = {
   ],
 }
 
+type Filtro = 'todos' | 'con_acceso' | 'sin_acceso' | 'pausados'
+
+/**
+ * Empleados: las PERSONAS del equipo. Desde acá se suma gente (con un asistente
+ * paso a paso que también le da acceso, si hace falta) y cada tarjeta abre la
+ * ficha de la persona, donde se cambia todo lo demás. Quien no administra ve la
+ * lista sola, de lectura.
+ */
 export function EmpleadosPage() {
-  const queryClient = useQueryClient()
-  const toast = useToast()
-  const confirm = useConfirm()
+  const navigate = useNavigate()
   const usuario = useAuth((s) => s.usuario)
   const admin = esAdmin(usuario)
 
@@ -139,112 +81,68 @@ export function EmpleadosPage() {
     queryKey: ['empleados'],
     queryFn: listarEmpleados,
   })
+  // Roles y sucursales: solo los necesita (y puede leer) un administrador.
+  const { data: roles = [] } = useQuery({ queryKey: ['roles'], queryFn: listarRoles, enabled: admin })
+  const { data: sucursales = [] } = useQuery({ queryKey: ['sucursales'], queryFn: listarSucursales, enabled: admin })
 
-  // Los roles sólo los necesita (y puede leer) un administrador, para el selector
-  // del formulario y el editor de roles.
-  const { data: roles = [] } = useQuery({
-    queryKey: ['roles'],
-    queryFn: listarRoles,
-    enabled: admin,
-  })
-
-  // Sucursales para el selector del formulario (solo las necesita un admin).
-  const { data: sucursales = [] } = useQuery({
-    queryKey: ['sucursales'],
-    queryFn: listarSucursales,
-    enabled: admin,
-  })
-
-  const [modalOpen, setModalOpen] = useState(false)
-  const [rolesOpen, setRolesOpen] = useState(false)
+  const [busqueda, setBusqueda] = useState('')
+  const [filtro, setFiltro] = useState<Filtro>('todos')
   const [sucursalesOpen, setSucursalesOpen] = useState(false)
-  const [editando, setEditando] = useState<Empleado | null>(null)
   const [exportarAbierto, setExportarAbierto] = useState(false)
+  const [altaAbierta, setAltaAbierta] = useState(false)
+  const [modoAlta, setModoAlta] = useState<ModoAlta>({ tipo: 'empleado' })
+  const [fichaId, setFichaId] = useState<number | null>(null)
+  const [fichaAbierta, setFichaAbierta] = useState(false)
 
-  const invalidar = () => {
-    queryClient.invalidateQueries({ queryKey: ['empleados'] })
-    queryClient.invalidateQueries({ queryKey: ['dashboard'] })
-  }
+  const integrantes = useMemo(() => empleados.map(desdeEmpleado), [empleados])
 
-  const stats = useMemo(() => {
-    const conAcceso = empleados.filter((e) => e.puede_loguear).length
-    return { total: empleados.length, conAcceso }
-  }, [empleados])
-
-  const guardar = useMutation({
-    mutationFn: async (p: {
-      id?: number
-      input: EmpleadoInput
-      acceso: AccesoInput | null
-      yaTeniaAcceso: boolean
-    }) => {
-      let emp = p.id ? await actualizarEmpleado(p.id, p.input) : await crearEmpleado(p.input)
-      if (p.acceso) emp = await definirAcceso(emp.id, p.acceso)
-      else if (p.yaTeniaAcceso) emp = await quitarAcceso(emp.id)
-      return emp
-    },
-    onSuccess: () => {
-      invalidar()
-      toast.success('Empleado guardado')
-    },
-    onError: (e) => toast.error('No se pudo guardar', e instanceof ApiError ? e.message : undefined),
-  })
-
-  const borrar = useMutation({
-    mutationFn: (id: number) => eliminarEmpleado(id),
-    onSuccess: () => {
-      invalidar()
-      toast.success('Empleado eliminado')
-    },
-    onError: (e) => toast.error('No se pudo eliminar', e instanceof ApiError ? e.message : undefined),
-  })
-
-  function abrirNuevo() {
-    setEditando(null)
-    setModalOpen(true)
-  }
-  function abrirEditar(e: Empleado) {
-    setEditando(e)
-    setModalOpen(true)
-  }
-
-  async function handleEliminar(e: Empleado) {
-    const ok = await confirm({
-      title: `¿Eliminar a ${e.nombre_completo}?`,
-      description: e.usuario
-        ? 'También se eliminará su cuenta para iniciar sesión.'
-        : 'Esta acción no se puede deshacer.',
-      confirmLabel: 'Eliminar',
-      tone: 'danger',
+  const cuenta = useMemo(() => {
+    const c = { todos: integrantes.length, con_acceso: 0, sin_acceso: 0, pausados: 0 }
+    integrantes.forEach((i) => {
+      const e = estadoAcceso(i)
+      if (e === 'activo') c.con_acceso++
+      else if (e === 'pausado') c.pausados++
+      else c.sin_acceso++
     })
-    if (ok) borrar.mutate(e.id)
-  }
+    return c
+  }, [integrantes])
 
-  async function handleGuardar(values: FormData) {
-    const input: EmpleadoInput = {
-      nombre: values.nombre,
-      apellido: values.apellido,
-      sucursal: values.sucursalId ? Number(values.sucursalId) : null,
-    }
-    const acceso: AccesoInput | null = values.tieneAcceso
-      ? {
-          username: values.username,
-          email: values.email,
-          password: values.password || undefined,
-          rol_id: values.rolId ? Number(values.rolId) : null,
-        }
-      : null
-    try {
-      await guardar.mutateAsync({
-        id: editando?.id,
-        input,
-        acceso,
-        yaTeniaAcceso: Boolean(editando?.usuario),
-      })
-      setModalOpen(false)
-    } catch {
-      /* el error ya se notificó en la mutación; dejamos el modal abierto */
-    }
+  const visibles = useMemo(() => {
+    const termino = normalizarBusqueda(busqueda.trim())
+    return integrantes.filter((i) => {
+      const e = estadoAcceso(i)
+      if (filtro === 'con_acceso' && e !== 'activo') return false
+      if (filtro === 'sin_acceso' && e !== 'sin_acceso') return false
+      if (filtro === 'pausados' && e !== 'pausado') return false
+      if (!termino) return true
+      const texto = [i.empleado?.nombre_completo, i.empleado?.sucursal?.nombre, i.cuenta?.username, i.cuenta?.email, i.cuenta?.rol?.nombre]
+        .filter(Boolean)
+        .join(' ')
+      return normalizarBusqueda(texto).includes(termino)
+    })
+  }, [integrantes, filtro, busqueda])
+
+  const fichaEmpleado = fichaId !== null ? empleados.find((e) => e.id === fichaId) ?? null : null
+  const fichaIntegrante = fichaEmpleado ? desdeEmpleado(fichaEmpleado) : null
+
+  // Si la persona deja de estar (la sacaron del equipo), la ficha se cierra.
+  useEffect(() => {
+    if (fichaAbierta && fichaId !== null && !isLoading && !fichaEmpleado) setFichaAbierta(false)
+  }, [fichaAbierta, fichaId, fichaEmpleado, isLoading])
+
+  function nuevo() {
+    setModoAlta({ tipo: 'empleado' })
+    setAltaAbierta(true)
+  }
+  function darAcceso(empleadoId: number) {
+    const e = empleados.find((x) => x.id === empleadoId)
+    if (!e) return
+    setModoAlta({ tipo: 'acceso', empleado: e })
+    setAltaAbierta(true)
+  }
+  function abrirFicha(id: number) {
+    setFichaId(id)
+    setFichaAbierta(true)
   }
 
   return (
@@ -253,10 +151,15 @@ export function EmpleadosPage() {
         icon={Users}
         eyebrow="Equipo"
         title="Empleados"
-        subtitle="El equipo de CelTuc y quién puede iniciar sesión."
+        subtitle={
+          admin
+            ? 'Las personas del equipo. Tocá a alguien para ver y cambiar sus datos, su acceso y qué puede ver.'
+            : 'Las personas del equipo y su sucursal.'
+        }
         className="ct-rise"
         actions={
           <>
+            {admin && <GuiaEquipo />}
             <Button variant="outline" onClick={() => setExportarAbierto(true)} disabled={empleados.length === 0}>
               <Download className="h-4 w-4" />
               Exportar
@@ -267,11 +170,11 @@ export function EmpleadosPage() {
                   <Building2 className="h-4 w-4" />
                   Sucursales
                 </Button>
-                <Button variant="outline" onClick={() => setRolesOpen(true)}>
-                  <SlidersHorizontal className="h-4 w-4" />
-                  Roles
+                <Button variant="outline" onClick={() => navigate('/usuarios/roles', { state: { desde: '/empleados' } })}>
+                  <ShieldCheck className="h-4 w-4" />
+                  Roles y permisos
                 </Button>
-                <Button onClick={abrirNuevo}>
+                <Button onClick={nuevo} className="w-full sm:w-auto">
                   <Plus className="h-4 w-4" />
                   Nuevo empleado
                 </Button>
@@ -281,15 +184,26 @@ export function EmpleadosPage() {
         }
       />
 
-      <div className="mb-5 grid grid-cols-2 gap-3">
-        <StatCard className="ct-stagger-item" style={ctStagger(0)} label="Empleados" value={String(stats.total)} icon={Users} />
+      {admin && <ComoFunciona resaltar={1} />}
+
+      {/* En el celular los filtros de abajo ya muestran estas cantidades. */}
+      <div className="mb-5 hidden grid-cols-3 gap-3 sm:grid">
+        <StatCard className="ct-stagger-item" style={ctStagger(0)} label="En el equipo" value={String(cuenta.todos)} icon={Users} />
         <StatCard
           className="ct-stagger-item"
           style={ctStagger(1)}
-          label="Con acceso al sistema"
-          value={String(stats.conAcceso)}
-          hint="Pueden iniciar sesión"
-          icon={ShieldCheck}
+          label="Pueden entrar"
+          value={String(cuenta.con_acceso)}
+          hint="Tienen acceso"
+          icon={KeyRound}
+        />
+        <StatCard
+          className="ct-stagger-item"
+          style={ctStagger(2)}
+          label="Sin acceso"
+          value={String(cuenta.sin_acceso + cuenta.pausados)}
+          hint={cuenta.pausados ? `${cuenta.pausados} pausado${cuenta.pausados === 1 ? '' : 's'}` : 'No entran al sistema'}
+          icon={UserRoundX}
         />
       </div>
 
@@ -298,11 +212,15 @@ export function EmpleadosPage() {
       ) : empleados.length === 0 ? (
         <EmptyState
           icon={UserPlus}
-          title="Sin empleados"
-          description={admin ? 'Sumá al primer integrante del equipo.' : 'Todavía no hay empleados cargados.'}
+          title="Todavía no hay nadie en el equipo"
+          description={
+            admin
+              ? 'Sumá a la primera persona: un asistente te guía paso a paso y, si va a usar el sistema, le da su acceso.'
+              : 'Todavía no hay empleados cargados.'
+          }
           action={
             admin ? (
-              <Button onClick={abrirNuevo}>
+              <Button onClick={nuevo}>
                 <Plus className="h-4 w-4" />
                 Nuevo empleado
               </Button>
@@ -310,95 +228,63 @@ export function EmpleadosPage() {
           }
         />
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {empleados.map((e, i) => (
-            <Card key={e.id} className="ct-stagger-item flex flex-col p-4" style={ctStagger(i)}>
-              <div className="flex items-start gap-3">
-                <span className="relative grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-ink-100 text-sm font-bold text-ink-900">
-                  {iniciales(e)}
-                  {e.usuario?.en_linea && (
-                    <span
-                      aria-hidden
-                      title="En línea"
-                      className="absolute -bottom-0.5 -right-0.5 grid place-items-center"
-                    >
-                      <span className="absolute h-3 w-3 animate-ping rounded-full bg-ink-900/40" />
-                      <span className="relative h-3 w-3 rounded-full border-2 border-surface bg-ink-900" />
-                    </span>
-                  )}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-semibold text-ink-900">{e.nombre_completo}</p>
-                  {e.usuario ? (
-                    <p className="flex items-center gap-1.5 truncate text-sm text-ink-500">
-                      <AtSign className="h-3.5 w-3.5 shrink-0" />
-                      <span className="truncate">{e.usuario.username}</span>
-                    </p>
-                  ) : (
-                    <p className="truncate text-sm text-ink-400">Sin acceso al sistema</p>
-                  )}
-                </div>
-                {e.usuario?.rol && (
-                  <Badge tone={e.usuario.rol.es_admin ? 'solid' : 'soft'}>
-                    <ShieldCheck className="h-3 w-3" />
-                    {e.usuario.rol.nombre}
-                  </Badge>
-                )}
-                {!e.usuario?.rol && e.puede_loguear && (
-                  <Badge tone="soft">
-                    <ShieldCheck className="h-3 w-3" />
-                    Acceso
-                  </Badge>
-                )}
-              </div>
-
-              {e.sucursal && (
-                <p className="mt-3 flex items-center gap-1.5 truncate text-xs text-ink-500">
-                  <Building2 className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">{e.sucursal.nombre}</span>
-                </p>
-              )}
-
-              {e.usuario?.email && (
-                <p className="mt-2 flex items-center gap-1.5 truncate text-xs text-ink-400">
-                  <Mail className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">{e.usuario.email}</span>
-                </p>
-              )}
-
-              {e.usuario && (
-                <div className="mt-2.5">
-                  <Presencia enLinea={e.usuario.en_linea} ultimaActividad={e.usuario.ultima_actividad} />
-                </div>
-              )}
-
-              <div className="mt-3 flex items-center justify-between border-t border-line pt-3">
-                <span className="tnum text-xs text-ink-400">Alta: {fecha(e.creado)}</span>
-                {admin && (
-                  <div className="flex items-center gap-2">
-                    <IconBtn label="Editar" onClick={() => abrirEditar(e)}>
-                      <Pencil className="h-4 w-4" />
-                    </IconBtn>
-                    <IconBtn label="Eliminar" onClick={() => handleEliminar(e)}>
-                      <Trash2 className="h-4 w-4" />
-                    </IconBtn>
-                  </div>
-                )}
-              </div>
-            </Card>
-          ))}
-        </div>
+        <>
+          <BarraFiltros<Filtro>
+            busqueda={busqueda}
+            onBusqueda={setBusqueda}
+            placeholder="Buscar por nombre o usuario"
+            filtro={filtro}
+            onFiltro={setFiltro}
+            filtros={[
+              { id: 'todos', label: 'Todos', cantidad: cuenta.todos },
+              { id: 'con_acceso', label: 'Pueden entrar', cantidad: cuenta.con_acceso },
+              { id: 'sin_acceso', label: 'Sin acceso', cantidad: cuenta.sin_acceso },
+              { id: 'pausados', label: 'Pausados', cantidad: cuenta.pausados, oculto: cuenta.pausados === 0 },
+            ]}
+          />
+          {visibles.length === 0 ? (
+            <SinResultados>
+              {busqueda ? `Nadie coincide con «${busqueda}».` : 'No hay nadie en este grupo.'}
+            </SinResultados>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {visibles.map((i, n) => (
+                <TarjetaIntegrante
+                  key={i.clave}
+                  integrante={i}
+                  roles={roles}
+                  yoId={usuario?.id}
+                  onAbrir={admin ? () => abrirFicha(i.empleado!.id) : undefined}
+                  onDarAcceso={admin ? () => darAcceso(i.empleado!.id) : undefined}
+                  className="ct-stagger-item"
+                  style={ctStagger(n)}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
 
-      <EmpleadoFormModal
-        open={modalOpen}
-        empleado={editando}
-        roles={roles}
-        sucursales={sucursales}
-        saving={guardar.isPending}
-        onClose={() => setModalOpen(false)}
-        onSubmit={handleGuardar}
-      />
-
-      <RolesManager open={rolesOpen} onClose={() => setRolesOpen(false)} />
+      {admin && (
+        <>
+          <AltaWizard
+            abierto={altaAbierta}
+            modo={modoAlta}
+            empleados={empleados}
+            roles={roles}
+            sucursales={sucursales}
+            onCerrar={() => setAltaAbierta(false)}
+          />
+          <FichaIntegrante
+            integrante={fichaIntegrante}
+            abierto={fichaAbierta && fichaIntegrante !== null}
+            onCerrar={() => setFichaAbierta(false)}
+            roles={roles}
+            sucursales={sucursales}
+            onDarAcceso={darAcceso}
+          />
+        </>
+      )}
       <SucursalesManager open={sucursalesOpen} onClose={() => setSucursalesOpen(false)} />
       <ExportarTablaModal
         abierto={exportarAbierto}
@@ -406,262 +292,6 @@ export function EmpleadosPage() {
         gestor={GESTOR_EXPORT_EMPLEADOS}
         filasVista={empleados}
       />
-    </div>
-  )
-}
-
-// ===== Modal de alta/edición =====
-
-function EmpleadoFormModal({
-  open,
-  empleado,
-  roles,
-  sucursales,
-  saving,
-  onClose,
-  onSubmit,
-}: {
-  open: boolean
-  empleado: Empleado | null
-  roles: Rol[]
-  sucursales: Sucursal[]
-  saving: boolean
-  onClose: () => void
-  onSubmit: (values: FormData) => Promise<void>
-}) {
-  const yaTieneAcceso = Boolean(empleado?.usuario)
-  const [showPassword, setShowPassword] = useState(false)
-
-  // Opciones del selector: "Sin sucursal" + las activas (y la actual, aunque esté
-  // inactiva, para no perder la asignación al editar).
-  const sucursalOptions = useMemo(() => {
-    const actual = empleado?.sucursal?.id ? String(empleado.sucursal.id) : ''
-    return [
-      { value: '', label: 'Sin sucursal' },
-      ...sucursales
-        .filter((s) => s.activa || String(s.id) === actual)
-        .map((s) => ({ value: String(s.id), label: s.codigo_postal ? `${s.nombre} · CP ${s.codigo_postal}` : s.nombre })),
-    ]
-  }, [sucursales, empleado])
-
-  // Rol "Empleado" del sistema: valor por defecto al crear un acceso nuevo.
-  const rolPorDefecto = useMemo(
-    () => roles.find((r) => r.nombre.toLowerCase() === 'empleado') ?? roles.find((r) => !r.es_admin) ?? roles[0],
-    [roles],
-  )
-
-  const {
-    register,
-    handleSubmit,
-    reset,
-    watch,
-    setValue,
-    setError,
-    formState: { errors },
-  } = useForm<FormData>({
-    resolver: zodResolver(schema),
-    defaultValues: {
-      nombre: '', apellido: '', sucursalId: '', tieneAcceso: false, username: '', email: '', password: '', rolId: '',
-    },
-  })
-
-  useEffect(() => {
-    if (!open) return
-    setShowPassword(false)
-    reset({
-      nombre: empleado?.nombre ?? '',
-      apellido: empleado?.apellido ?? '',
-      sucursalId: empleado?.sucursal?.id ? String(empleado.sucursal.id) : '',
-      tieneAcceso: Boolean(empleado?.usuario),
-      username: empleado?.usuario?.username ?? '',
-      email: empleado?.usuario?.email ?? '',
-      password: '',
-      rolId: empleado?.usuario?.rol?.id
-        ? String(empleado.usuario.rol.id)
-        : rolPorDefecto
-          ? String(rolPorDefecto.id)
-          : '',
-    })
-  }, [open, empleado, reset, rolPorDefecto])
-
-  const tieneAcceso = watch('tieneAcceso')
-  const rolId = watch('rolId')
-  const sucursalId = watch('sucursalId')
-
-  const internalSubmit = (values: FormData) => {
-    // La contraseña solo es obligatoria al CREAR un acceso nuevo (al editar uno
-    // existente, vacío = no cambiarla).
-    if (values.tieneAcceso && !yaTieneAcceso && !values.password) {
-      setError('password', { message: 'Requerida para crear el acceso' })
-      return
-    }
-    return onSubmit(values)
-  }
-
-  return (
-    <Modal open={open} onClose={onClose} size="lg">
-      <div className="border-b border-line px-5 py-4">
-        <h2 className="text-lg font-semibold text-ink-950">
-          {empleado ? 'Editar empleado' : 'Nuevo empleado'}
-        </h2>
-      </div>
-      <form onSubmit={handleSubmit(internalSubmit)} className="space-y-4 overflow-y-auto px-5 py-5" noValidate>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Campo label="Nombre" error={errors.nombre?.message}>
-            <Input placeholder="Lucas" autoFocus {...register('nombre')} />
-          </Campo>
-          <Campo label="Apellido (opcional)" error={errors.apellido?.message}>
-            <Input placeholder="Gómez" {...register('apellido')} />
-          </Campo>
-        </div>
-
-        <div>
-          <Select
-            label="Sucursal (opcional)"
-            placeholder="Sin sucursal"
-            value={sucursalId}
-            onChange={(v) => setValue('sucursalId', v)}
-            options={sucursalOptions}
-          />
-          <p className="mt-1.5 text-xs text-ink-400">
-            El local al que pertenece. Se preselecciona sola en los documentos.
-          </p>
-        </div>
-
-        {/* Acceso al sistema */}
-        <div className="rounded-2xl border border-line bg-canvas/40 p-4">
-          <label className="flex cursor-pointer items-start gap-3">
-            <input
-              type="checkbox"
-              checked={tieneAcceso}
-              onChange={(ev) => setValue('tieneAcceso', ev.target.checked, { shouldValidate: true })}
-              className="mt-0.5 h-4 w-4 rounded border-line-strong accent-ink-950"
-            />
-            <span>
-              <span className="flex items-center gap-1.5 text-sm font-medium text-ink-900">
-                <KeyRound className="h-4 w-4" /> Puede iniciar sesión
-              </span>
-              <span className="mt-0.5 block text-xs text-ink-400">
-                Crea una cuenta para que este empleado entre al sistema (con email o usuario).
-              </span>
-            </span>
-          </label>
-
-          {tieneAcceso && (
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <div className="sm:col-span-2">
-                <Select
-                  label="Rol"
-                  placeholder="Elegí un rol"
-                  value={rolId}
-                  onChange={(v) => setValue('rolId', v)}
-                  options={roles.map((r) => ({
-                    value: String(r.id),
-                    label: r.es_admin ? `${r.nombre} · acceso total` : r.nombre,
-                  }))}
-                />
-                <p className="mt-1.5 text-xs text-ink-400">
-                  Define a qué módulos entra este empleado. Configurá los roles con el botón “Roles”.
-                </p>
-              </div>
-              <Campo label="Nombre de usuario" error={errors.username?.message}>
-                <div className="relative">
-                  <AtSign className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
-                  <Input
-                    placeholder="lgomez"
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    className="pl-10 text-base sm:text-sm"
-                    {...register('username')}
-                  />
-                </div>
-              </Campo>
-              <Campo label="Email" error={errors.email?.message}>
-                <div className="relative">
-                  <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
-                  <Input
-                    type="email"
-                    placeholder="lucas@celtuc.com"
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    className="pl-10 text-base sm:text-sm"
-                    {...register('email')}
-                  />
-                </div>
-              </Campo>
-              <Campo
-                label={yaTieneAcceso ? 'Nueva contraseña (opcional)' : 'Contraseña'}
-                error={errors.password?.message}
-              >
-                <div className="relative sm:col-span-2">
-                  <KeyRound className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
-                  <Input
-                    type={showPassword ? 'text' : 'password'}
-                    autoComplete="new-password"
-                    placeholder={yaTieneAcceso ? 'Dejar vacío para no cambiarla' : '••••••••'}
-                    className="pl-10 pr-11 text-base sm:text-sm"
-                    {...register('password')}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
-                    className="absolute right-1.5 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg text-ink-400 transition-colors hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </Campo>
-            </div>
-          )}
-        </div>
-
-        <div className="flex flex-col-reverse gap-2.5 pt-2 sm:flex-row sm:justify-end">
-          <Button type="button" variant="outline" onClick={onClose}>
-            Cancelar
-          </Button>
-          <Button type="submit" disabled={saving}>
-            {saving ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Guardando…
-              </>
-            ) : empleado ? (
-              'Guardar cambios'
-            ) : (
-              'Agregar empleado'
-            )}
-          </Button>
-        </div>
-      </form>
-    </Modal>
-  )
-}
-
-// ===== Subcomponentes =====
-
-function IconBtn({ children, label, onClick }: { children: ReactNode; label: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={label}
-      title={label}
-      className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-ink-400 transition-colors hover:bg-ink-100 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
-    >
-      {children}
-    </button>
-  )
-}
-
-function Campo({ label, error, children }: { label: string; error?: string; children: ReactNode }) {
-  return (
-    <div>
-      <label className="mb-1.5 block text-xs font-medium text-ink-500">{label}</label>
-      {children}
-      {error && <p className="mt-1 text-xs text-ink-700">{error}</p>}
     </div>
   )
 }
@@ -678,7 +308,7 @@ function GridSkeleton() {
               <Skeleton className="h-3 w-1/2" />
             </div>
           </div>
-          <Skeleton className="mt-4 h-9 w-full" />
+          <Skeleton className="mt-4 h-14 w-full" />
         </div>
       ))}
     </div>

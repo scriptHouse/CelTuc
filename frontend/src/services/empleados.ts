@@ -9,13 +9,6 @@ import { useAuth } from '@/store/auth'
 
 const token = () => useAuth.getState().access
 
-export interface EmpleadoInput {
-  nombre: string
-  apellido?: string
-  /** Id de la sucursal (local) del empleado; null para desvincularla. */
-  sucursal?: number | null
-}
-
 /** Datos para crear/actualizar la cuenta de login de un empleado. */
 export interface AccesoInput {
   username: string
@@ -24,6 +17,20 @@ export interface AccesoInput {
   password?: string
   /** Rol que define a qué módulos entra el empleado. */
   rol_id?: number | null
+  /** Pausar (false) o reactivar (true) el acceso sin borrarlo. Omitido = no cambia. */
+  is_active?: boolean
+}
+
+export interface EmpleadoInput {
+  nombre: string
+  apellido?: string
+  /** Id de la sucursal (local) del empleado; null para desvincularla. */
+  sucursal?: number | null
+  /**
+   * El acceso al sistema, en el MISMO pedido (se guarda todo junto o nada):
+   * objeto = dar o editar el acceso, null = quitarlo, omitido = no se toca.
+   */
+  acceso?: AccesoInput | null
 }
 
 export function listarEmpleados(): Promise<Empleado[]> {
@@ -34,7 +41,7 @@ export function crearEmpleado(input: EmpleadoInput): Promise<Empleado> {
   return api.post<Empleado>('/empleados/', input, token())
 }
 
-export function actualizarEmpleado(id: number, input: EmpleadoInput): Promise<Empleado> {
+export function actualizarEmpleado(id: number, input: Partial<EmpleadoInput>): Promise<Empleado> {
   return api.patch<Empleado>(`/empleados/${id}/`, input, token())
 }
 

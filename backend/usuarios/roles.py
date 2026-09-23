@@ -4,6 +4,7 @@ Endpoints para listar el catalogo de permisos y para crear/editar/eliminar roles
 con su conjunto de permisos. La asignacion de un rol a una cuenta se hace al dar
 acceso a un empleado (ver empleados/serializers.py).
 """
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers, status
 from rest_framework.response import Response
@@ -11,6 +12,43 @@ from rest_framework.views import APIView
 
 from .models import Permiso, Rol, Usuario
 from .permissions import EsAdministrador
+
+
+# --- Mensajes -----------------------------------------------------------------
+# Dicen por qué no se puede y qué hacer.
+
+MSG_ROL_SIN_NOMBRE = 'El rol necesita un nombre, por ejemplo «Vendedor» o «Cajero».'
+MSG_ROL_ADMIN_CREAR = (
+    'Solo el superadministrador (la cuenta principal del sistema) puede crear roles de '
+    'administrador, porque abren todo el sistema.'
+)
+MSG_ROL_ADMIN_EDITAR = (
+    'Los roles de administrador abren todo el sistema: solo el superadministrador '
+    '(la cuenta principal) puede cambiarlos.'
+)
+MSG_ROL_ADMIN_ELIMINAR = (
+    'Los roles de administrador abren todo el sistema: solo el superadministrador '
+    '(la cuenta principal) puede eliminarlos.'
+)
+MSG_ROL_SISTEMA = (
+    '«Administrador» y «Empleado» son los roles básicos del sistema y no se pueden eliminar. '
+    'Sí podés cambiar qué pantallas abre «Empleado», o crear un rol nuevo.'
+)
+
+
+def liberar_nombre_de_rol(nombre, excluir=None):
+    """Renombra los roles ELIMINADOS que todavía tienen este nombre.
+
+    El borrado es lógico y la columna es única: sin esto, el nombre de un rol
+    eliminado quedaba «ocupado» para siempre. Con `update()`: no es una edición
+    de nadie (la auditoría ya registró el borrado).
+    """
+    ocupantes = Rol.todos.filter(borrado=True, nombre__iexact=nombre)
+    if excluir:
+        ocupantes = ocupantes.exclude(pk=excluir)
+    for pk, suyo in ocupantes.values_list('pk', 'nombre'):
+        sufijo = f' (eliminado {pk})'
+        Rol.todos.filter(pk=pk).update(nombre=f'{suyo[:60 - len(sufijo)]}{sufijo}')
 
 
 # --- Serializers -------------------------------------------------------------
@@ -44,6 +82,15 @@ class RolSerializer(serializers.ModelSerializer):
             'id', 'es_sistema', 'cantidad_usuarios',
             'creado', 'creado_por', 'actualizado', 'actualizado_por',
         )
+        extra_kwargs = {
+            'nombre': {'error_messages': {
+                'blank': MSG_ROL_SIN_NOMBRE, 'required': MSG_ROL_SIN_NOMBRE,
+                'max_length': 'El nombre del rol es muy largo: puede tener hasta 60 letras.',
+            }},
+            'descripcion': {'error_messages': {
+                'max_length': 'La descripción es muy larga: puede tener hasta 200 letras.',
+            }},
+        }
 
     def get_cantidad_usuarios(self, obj):
         return obj.usuarios.count()
@@ -57,15 +104,28 @@ class RolSerializer(serializers.ModelSerializer):
     def validate_nombre(self, value):
         value = value.strip()
         if not value:
-            raise serializers.ValidationError('El nombre es obligatorio.')
-        # `todos` incluye los borrados logicamente: el nombre sigue "ocupado"
-        # mientras exista la fila, asi evitamos chocar con la constraint unica.
-        qs = Rol.todos.filter(nombre__iexact=value)
+            raise serializers.ValidationError(MSG_ROL_SIN_NOMBRE)
+        # Solo los vivos: el nombre de uno eliminado se libera al guardar.
+        qs = Rol.objects.filter(nombre__iexact=value)
         if self.instance:
             qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():
-            raise serializers.ValidationError('Ya existe un rol con ese nombre.')
+            raise serializers.ValidationError(
+                f'Ya hay un rol que se llama «{value}». Elegí otro nombre para no confundirlos '
+                f'(por ejemplo «{value} 2»), o editá ese rol en vez de crear uno nuevo.'
+            )
         return value
+
+    @transaction.atomic
+    def create(self, validated_data):
+        liberar_nombre_de_rol(validated_data['nombre'])
+        return super().create(validated_data)
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        if 'nombre' in validated_data:
+            liberar_nombre_de_rol(validated_data['nombre'], excluir=instance.pk)
+        return super().update(instance, validated_data)
 
     def validate(self, attrs):
         # Un rol del sistema no cambia su naturaleza de admin (evita dejar al
@@ -95,7 +155,7 @@ class RolListCreateView(APIView):
         # admin se fabrique un rol admin y escale permisos).
         if serializer.validated_data.get('es_admin') and not request.user.is_superuser:
             return Response(
-                {'detail': 'Solo un superadministrador puede crear roles de administrador.'},
+                {'detail': MSG_ROL_ADMIN_CREAR},
                 status=status.HTTP_403_FORBIDDEN,
             )
         # `creado_por`/`actualizado_por` dejan rastro de quien armo el rol (el
@@ -112,7 +172,7 @@ class RolDetailView(APIView):
         # Tocar un rol de administrador (o convertir uno en admin) es solo del superadmin.
         if (rol.es_admin or request.data.get('es_admin')) and not request.user.is_superuser:
             return Response(
-                {'detail': 'Solo un superadministrador puede modificar roles de administrador.'},
+                {'detail': MSG_ROL_ADMIN_EDITAR},
                 status=status.HTTP_403_FORBIDDEN,
             )
         serializer = RolSerializer(rol, data=request.data, partial=True)
@@ -124,12 +184,12 @@ class RolDetailView(APIView):
         rol = get_object_or_404(Rol, pk=pk)
         if rol.es_sistema:
             return Response(
-                {'detail': 'No se puede eliminar un rol del sistema.'},
+                {'detail': MSG_ROL_SISTEMA},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         if rol.es_admin and not request.user.is_superuser:
             return Response(
-                {'detail': 'Solo un superadministrador puede eliminar roles de administrador.'},
+                {'detail': MSG_ROL_ADMIN_ELIMINAR},
                 status=status.HTTP_403_FORBIDDEN,
             )
         # Las cuentas quedan sin rol (= sin acceso a modulos). Hay que hacerlo a

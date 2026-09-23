@@ -233,3 +233,116 @@ class EmpleadoAPITests(TestCase):
         u = Usuario.objects.get(username='ana')
         self.assertIsNotNone(u.rol)
         self.assertEqual(u.rol.nombre, 'Empleado')
+
+
+class AccesoEnUnPasoTests(TestCase):
+    """La persona y su llave (acceso) se guardan juntas, y un acceso quitado no
+    deja su email/usuario «ocupados»."""
+
+    def setUp(self):
+        self.admin = Usuario.objects.create_superuser(
+            email='admin@celtuc.ar', username='admin', password='clave-segura-123',
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+        self.acceso = {'username': 'ana', 'email': 'ana@celtuc.ar', 'password': 'clave-123'}
+
+    def _crear(self, **extra):
+        datos = {'nombre': 'Ana', 'apellido': 'Paz'}
+        datos.update(extra)
+        return self.client.post(reverse('empleados:list'), datos, format='json')
+
+    def test_quitar_y_volver_a_dar_acceso_con_el_mismo_email(self):
+        # El caso real: se destilda «Puede iniciar sesión», se guarda, y después
+        # se lo vuelve a tildar con los mismos datos. Antes: «ya está en uso».
+        emp = self._crear(acceso=self.acceso).data
+        r = self.client.patch(reverse('empleados:detail', args=[emp['id']]), {'acceso': None}, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertIsNone(r.data['usuario'])
+        r = self.client.patch(
+            reverse('empleados:detail', args=[emp['id']]), {'acceso': self.acceso}, format='json',
+        )
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data['usuario']['email'], 'ana@celtuc.ar')
+
+    def test_lo_mismo_con_los_endpoints_de_acceso(self):
+        emp = self._crear().data
+        url = reverse('empleados:acceso', args=[emp['id']])
+        self.client.put(url, self.acceso, format='json')
+        self.client.delete(url)
+        self.assertEqual(self.client.put(url, self.acceso, format='json').status_code, 200)
+
+    def test_crear_persona_y_acceso_en_un_solo_pedido(self):
+        r = self._crear(acceso=self.acceso)
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data['usuario']['username'], 'ana')
+        self.assertEqual(r.data['usuario']['rol']['nombre'], 'Empleado')
+
+    def test_si_el_acceso_falla_no_queda_el_empleado_a_medias(self):
+        Usuario.objects.create_user(email='ana@celtuc.ar', username='otra', password='x')
+        antes = Empleado.objects.count()
+        r = self._crear(acceso=self.acceso)
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('email', r.data['acceso'])
+        self.assertIn('@otra', str(r.data['acceso']['email'][0]))
+        # Antes quedaba creado sin acceso y, al reintentar, se duplicaba.
+        self.assertEqual(Empleado.objects.count(), antes)
+
+    def test_se_informan_juntos_los_errores_de_la_persona_y_del_acceso(self):
+        r = self._crear(nombre='', acceso={'username': 'a', 'email': 'x', 'password': '1'})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('nombre', r.data)
+        self.assertEqual(set(r.data['acceso']), {'username', 'email', 'password'})
+
+    def test_editar_el_acceso_no_reactiva_una_cuenta_pausada(self):
+        emp = self._crear(acceso=self.acceso).data
+        Usuario.objects.filter(username='ana').update(is_active=False)
+        r = self.client.patch(
+            reverse('empleados:detail', args=[emp['id']]),
+            {'nombre': 'Ana María', 'acceso': {'username': 'ana', 'email': 'ana@celtuc.ar'}},
+            format='json',
+        )
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertFalse(Usuario.objects.get(username='ana').is_active)
+        # Y se puede pausar/reactivar a propósito.
+        self.client.patch(
+            reverse('empleados:detail', args=[emp['id']]),
+            {'acceso': {'username': 'ana', 'email': 'ana@celtuc.ar', 'is_active': True}},
+            format='json',
+        )
+        self.assertTrue(Usuario.objects.get(username='ana').is_active)
+
+    def test_nadie_se_deja_afuera_a_si_mismo(self):
+        yo = Usuario.objects.create_user(
+            email='yo@celtuc.ar', username='yomismo', password='x', rol=Rol.objects.get(nombre='Administrador'),
+        )
+        mio = Empleado.objects.create(nombre='Yo', usuario=yo)
+        c = APIClient()
+        c.force_authenticate(yo)
+        url = reverse('empleados:detail', args=[mio.pk])
+        # Ni quitarse la llave...
+        self.assertEqual(c.patch(url, {'acceso': None}, format='json').status_code, 400)
+        # ...ni cambiarse el rol...
+        r = c.patch(
+            url,
+            {'acceso': {'username': 'yomismo', 'email': 'yo@celtuc.ar', 'rol_id': Rol.objects.get(nombre='Empleado').pk}},
+            format='json',
+        )
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('rol_id', r.data['acceso'])
+        # ...ni pausarse...
+        r = c.patch(url, {'acceso': {'username': 'yomismo', 'email': 'yo@celtuc.ar', 'is_active': False}}, format='json')
+        self.assertEqual(r.status_code, 400)
+        # ...ni sacarse del equipo.
+        self.assertEqual(c.delete(url).status_code, 400)
+        yo.refresh_from_db()
+        self.assertTrue(yo.is_active)
+        # Sus propios datos sí los puede cambiar.
+        r = c.patch(url, {'acceso': {'username': 'yomismo', 'email': 'yo2@celtuc.ar'}}, format='json')
+        self.assertEqual(r.status_code, 200, r.data)
+
+    def test_nombre_de_sucursal_eliminada_se_puede_reusar(self):
+        suc = self.client.post(reverse('empleados:sucursales'), {'nombre': 'Norte'}, format='json').data
+        self.client.delete(reverse('empleados:sucursal', args=[suc['id']]))
+        r = self.client.post(reverse('empleados:sucursales'), {'nombre': 'Norte'}, format='json')
+        self.assertEqual(r.status_code, 201, r.data)
