@@ -1,27 +1,24 @@
-import { useEffect, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, DollarSign, Loader2, RefreshCw, TrendingUp } from 'lucide-react'
-import {
-  actualizarConfiguracion,
-  obtenerConfiguracion,
-  obtenerDolarBlue,
-} from '@/services/preciosService'
-import { ApiError } from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
+import { AlertTriangle, DollarSign, RefreshCw, TrendingUp } from 'lucide-react'
+import { obtenerConfiguracion, obtenerDolarBlue } from '@/services/preciosService'
 import { money0, tiempoRelativo } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { useToast } from '@/components/ToastProvider'
+import { ChipModoDolar, ReglaDolarEditor } from '@/components/dolar/ReglaDolarEditor'
+
+/** Cada cuánto se vuelve a mirar el blue mientras el dólar está en automático. */
+const INTERVALO_AUTOMATICO = 5 * 60_000
 
 /**
  * Gestor de dólar: muestra lado a lado el DÓLAR DEL NEGOCIO (el configurado,
  * con el que se calculan todas las listas) y el DÓLAR BLUE de DolarAPI como
  * referencia de mercado, con la diferencia entre ambos.
  *
- * El del negocio se edita acá mismo (y recalcula Service + Productos al
- * guardar). El blue es SOLO LECTURA: nunca pisa el configurado — el margen
- * cambiario es una decisión comercial.
+ * El del negocio se define acá mismo, de dos maneras (`ReglaDolarEditor`):
+ * a mano, o en automático siguiendo al blue con un ajuste. En los dos casos
+ * cambia el mismo valor, y recalcula Service + Productos al guardar. En
+ * automático, el gestor abierto vuelve a mirar el blue cada tanto: así el
+ * dólar se mantiene al día mientras alguien usa el sistema.
  *
  * Con `soloDolarNegocio` se muestra ÚNICAMENTE el dólar vigente del negocio
  * (sin el blue de DolarAPI ni la comparación): es lo que ven los empleados en
@@ -34,14 +31,16 @@ export function GestorDolar({
   soloLectura?: boolean
   soloDolarNegocio?: boolean
 }) {
-  const queryClient = useQueryClient()
-  const toast = useToast()
-
   const { data: config, isError: errorConfig } = useQuery({
     queryKey: ['service-config'],
     queryFn: obtenerConfiguracion,
     retry: false,
+    // En automático el valor puede moverse solo: se vuelve a leer cada tanto
+    // (también en el modo restringido, que no consulta el blue).
+    refetchInterval: (query) =>
+      query.state.data?.dolar_modo === 'automatico' ? INTERVALO_AUTOMATICO : false,
   })
+  const automatico = config?.dolar_modo === 'automatico'
   const {
     data: blue,
     isLoading: cargandoBlue,
@@ -54,31 +53,9 @@ export function GestorDolar({
     staleTime: 120_000, // el backend ya cachea 2 min
     retry: 1,
     enabled: !soloDolarNegocio, // el modo restringido ni consulta DolarAPI
-  })
-
-  const [valor, setValor] = useState('')
-  useEffect(() => {
-    if (config) setValor(String(Number(config.dolar)))
-  }, [config])
-
-  const sucio = config !== undefined && valor.trim() !== String(Number(config.dolar))
-
-  const guardar = useMutation({
-    mutationFn: () => {
-      const dolar = Number(valor.trim().replace(',', '.'))
-      if (!Number.isFinite(dolar) || dolar <= 0) {
-        throw new ApiError(0, 'Poné un dólar válido (ej: 1550).', null)
-      }
-      return actualizarConfiguracion({ dolar })
-    },
-    onSuccess: () => {
-      toast.success('Dólar del negocio actualizado', 'Service y Productos quedaron recalculados.')
-      queryClient.invalidateQueries({ queryKey: ['service-config'] })
-      queryClient.invalidateQueries({ queryKey: ['service-secciones'] })
-      queryClient.invalidateQueries({ queryKey: ['productos-config'] })
-      queryClient.invalidateQueries({ queryKey: ['productos-items'] })
-    },
-    onError: (e) => toast.error('No se pudo guardar', e instanceof ApiError ? e.message : undefined),
+    // Es esta consulta la que, del lado del servidor, recalcula el dólar
+    // automático con cada cotización nueva.
+    refetchInterval: automatico ? INTERVALO_AUTOMATICO : false,
   })
 
   // Sin permiso para leer la configuración (ej: cuenta sin acceso a Service),
@@ -98,42 +75,33 @@ export function GestorDolar({
 
       <div className={cn('grid', !soloDolarNegocio && 'sm:grid-cols-2')}>
         {/* ===== Dólar del negocio (editable) ===== */}
-        <div className="p-4">
+        <div className="min-w-0 p-4">
           <p className="mb-1 flex items-center gap-1.5 text-[0.68rem] font-semibold uppercase tracking-[0.1em] text-ink-400">
             <DollarSign className="h-3.5 w-3.5" aria-hidden />
             Dólar del negocio
           </p>
           {config ? (
             <>
-              <p className="tnum text-2xl font-bold tracking-tight text-ink-950">
-                {money0(Number(config.dolar))}
-              </p>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <p className="tnum text-2xl font-bold tracking-tight text-ink-950">
+                  {money0(Number(config.dolar))}
+                </p>
+                <ChipModoDolar config={config} detalle={!soloDolarNegocio} />
+              </div>
               <p className="mt-0.5 text-[0.7rem] leading-snug text-ink-400">
-                Con este se calculan TODAS las listas (Service y Productos).
+                {automatico ? (
+                  <>
+                    Sigue al dólar blue
+                    {config.dolar_calculado_en && (
+                      <> · revisado {tiempoRelativo(config.dolar_calculado_en)}</>
+                    )}
+                    . Con este se calculan TODAS las listas (Service y Productos).
+                  </>
+                ) : (
+                  <>Con este se calculan TODAS las listas (Service y Productos).</>
+                )}
               </p>
-              {!soloLectura && (
-                <div className="mt-2.5 flex items-center gap-2">
-                  <div className="relative w-28">
-                    <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-ink-400">
-                      $
-                    </span>
-                    <Input
-                      value={valor}
-                      onChange={(e) => setValor(e.target.value)}
-                      inputMode="decimal"
-                      aria-label="Nuevo dólar del negocio"
-                      className="tnum h-10 pl-6 pr-2 text-sm"
-                    />
-                  </div>
-                  <Button
-                    size="sm"
-                    onClick={() => guardar.mutate()}
-                    disabled={!sucio || guardar.isPending}
-                  >
-                    {guardar.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Guardar'}
-                  </Button>
-                </div>
-              )}
+              {!soloLectura && <ReglaDolarEditor config={config} blue={blue} />}
             </>
           ) : (
             <Skeleton className="h-20 w-full" />

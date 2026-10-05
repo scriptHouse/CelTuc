@@ -7,6 +7,7 @@ from .models import (
     ConfiguracionService,
     CotizacionDolarBlue,
     Dispositivo,
+    HistorialDolar,
     ItemService,
     PrecioItemService,
     SeccionService,
@@ -21,12 +22,34 @@ _AUDITORIA = (
 
 @admin.register(ConfiguracionService)
 class ConfiguracionServiceAdmin(ModeloBaseAdminMixin, ModelAdmin):
-    list_display = ('dolar', 'descuento_cash_pct', 'redondeo_ars', 'actualizado')
-    readonly_fields = _AUDITORIA
+    list_display = ('dolar', 'dolar_modo', 'descuento_cash_pct', 'redondeo_ars', 'actualizado')
+    readonly_fields = _AUDITORIA + ('dolar_calculado_en',)
 
     def has_add_permission(self, request):
         # Fila unica: se crea sola via obtener(); no tiene sentido agregar mas.
         return not ConfiguracionService.todos.exists()
+
+
+@admin.register(HistorialDolar)
+class HistorialDolarAdmin(ModelAdmin):
+    """Bitacora de solo lectura: cada valor del dolar con su vigencia."""
+
+    list_display = (
+        'valor', 'vigente_desde', 'vigente_hasta', 'origen', 'usuario_username',
+        'blue_venta', 'nota',
+    )
+    list_filter = ('origen',)
+    search_fields = ('usuario_username', 'nota')
+    readonly_fields = tuple(campo.name for campo in HistorialDolar._meta.concrete_fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(CotizacionDolarBlue)

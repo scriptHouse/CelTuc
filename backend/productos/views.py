@@ -54,6 +54,15 @@ class ProductoListCreateView(_BaseProductos, AuditoriaMixin, generics.ListCreate
     queryset = _productos_queryset().all()
     serializer_class = ProductoSerializer
 
+    def get(self, request, *args, **kwargs):
+        # Los precios en pesos salen del dolar del negocio: si esta en modo
+        # automatico, se revisa el blue antes de listar (barato si ya se reviso
+        # hace un momento; nada en modo manual).
+        from precios_service.dolar import asegurar_dolar_al_dia
+
+        asegurar_dolar_al_dia()
+        return super().get(request, *args, **kwargs)
+
 
 class ProductoDetailView(_BaseProductos, AuditoriaMixin, generics.RetrieveUpdateDestroyAPIView):
     queryset = _productos_queryset().all()

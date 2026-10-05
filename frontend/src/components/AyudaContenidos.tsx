@@ -364,21 +364,39 @@ export function AyudaDolar() {
         />
       </AyudaSeccion>
 
-      <AyudaSeccion titulo="Cómo actualizar el dólar del negocio (solo admins)">
-        <AyudaPasos
-          pasos={[
-            <>Mirá la referencia: si el blue se movió y tu margen quedó corto, es momento de actualizar.</>,
-            <>Escribí el valor nuevo en el campo (ej: <b>1600</b>) y tocá <b>Guardar</b>.</>,
-            <>Listo: <b>todas</b> las listas (Service y Productos) quedan recalculadas al instante. Los precios que alguna vez se pisaron a mano no se tocan.</>,
+      <AyudaSeccion titulo="Dos maneras de definirlo (solo admins)">
+        <AyudaCampos
+          campos={[
+            [<><b>Manual</b></>, <>Escribís el valor (ej: <b>1600</b>), opcionalmente un motivo, y tocás <b>Guardar</b>. Queda fijo hasta que lo cambies.</>],
+            [<><b>Automático</b></>, <>El dólar <b>sigue al blue</b> con tu ajuste: elegís la referencia (venta, compra o promedio), si sumás o restás, <b>pesos fijos o un porcentaje</b> (ej: blue venta + $25, o + 2 %) y a qué múltiplo redondear ($1, $5, $10…). Abajo ves en vivo cuánto quedaría antes de guardar.</>],
+            [<>Afinar</>, <>«No actualizar si el cambio es menor a $X»: para que una oscilación chica del blue no mueva toda la lista.</>],
+            [<>Volver a manual</>, <>Elegí la tarjeta <b>Manual</b>, poné el valor y guardá: deja de seguir al blue y queda fijo.</>],
           ]}
         />
-        <AyudaEjemplo titulo="el blue subió de $1.510 a $1.600">
+        <AyudaEjemplo titulo="blue venta $1.555, regla «+ $25, redondear a $5»">
           <p className="tnum">
-            Tu dólar está en $ 1.550 → quedaste <b>por debajo</b> del mercado. Lo subís a
-            $ 1.650 (para recuperar el margen) → la batería que costaba $ 155.000 pasa a
-            $ 165.000 automáticamente, en las dos listas.
+            1.555 + 25 = 1.580 → el dólar del negocio queda en <b>$ 1.580</b>. Si mañana el blue
+            pasa a $1.570, el dólar se mueve solo a $ 1.595 y todas las listas se recalculan.
           </p>
         </AyudaEjemplo>
+      </AyudaSeccion>
+
+      <AyudaSeccion titulo="Cuándo se actualiza el automático">
+        <p>
+          Cada vez que alguien usa el sistema: al abrir el Panel o la página Dólar, al listar
+          Productos o Service, y cada 5 minutos mientras el gestor está abierto. Si de noche nadie
+          entra, no cambia hasta la primera apertura de la mañana, y en ese momento ya está al
+          día antes de mostrar un precio. Si DolarAPI no responde, el dólar <b>queda como
+          estaba</b>: nunca se pone en cero ni se inventa un valor.
+        </p>
+      </AyudaSeccion>
+
+      <AyudaSeccion titulo="Historial">
+        <p>
+          En la página Dólar, debajo del gestor, está <b>cada valor que tuvo el dólar</b>: desde
+          qué día y hora rigió, hasta cuándo, cuánto duró, si lo fijó una persona (y quién) o lo
+          calculó la regla (con el blue que usó), y el motivo si se anotó. Se filtra por fechas.
+        </p>
       </AyudaSeccion>
 
       <AyudaTip>

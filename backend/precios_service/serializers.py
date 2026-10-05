@@ -7,10 +7,12 @@ from .importacion import CAMPOS as CAMPOS_IMPORTACION
 from .models import (
     ConfiguracionService,
     Dispositivo,
+    HistorialDolar,
     ItemService,
     PrecioItemService,
     SeccionService,
     VarianteSeccion,
+    registrar_cambio_dolar,
     resolver_precios,
 )
 
@@ -22,20 +24,124 @@ def _campo_precio(**extra):
     )
 
 
+# Los campos que definen la regla del dolar automatico. Cambiar cualquiera
+# recalcula el dolar al instante (si el modo es automatico).
+CAMPOS_REGLA_DOLAR = (
+    'dolar_modo', 'dolar_referencia', 'dolar_ajuste_tipo', 'dolar_ajuste_valor',
+    'dolar_redondeo', 'dolar_cambio_minimo',
+)
+
+
 class ConfiguracionServiceSerializer(serializers.ModelSerializer):
-    """Parametros globales. Cambiar el dolar recalcula toda la lista derivada."""
+    """Parametros globales. Cambiar el dolar recalcula toda la lista derivada.
+
+    El dolar se escribe SIEMPRE por `registrar_cambio_dolar`, asi cada valor
+    queda en el historial. En modo automatico no se acepta un `dolar` suelto:
+    el valor lo calcula la regla (para fijarlo a mano hay que pasar a manual,
+    y el front lo hace en la misma peticion: `dolar_modo` + `dolar`).
+    """
 
     dolar = serializers.DecimalField(
-        max_digits=10, decimal_places=2, min_value=0, coerce_to_string=False,
+        max_digits=10, decimal_places=2, min_value=0, coerce_to_string=False, required=False,
     )
     descuento_cash_pct = serializers.DecimalField(
         max_digits=5, decimal_places=2, min_value=0, max_value=100, coerce_to_string=False,
+        required=False,
+    )
+    dolar_ajuste_valor = serializers.DecimalField(
+        max_digits=10, decimal_places=2, coerce_to_string=False, required=False,
+    )
+    dolar_redondeo = serializers.DecimalField(
+        max_digits=8, decimal_places=2, min_value=0, coerce_to_string=False, required=False,
+    )
+    dolar_cambio_minimo = serializers.DecimalField(
+        max_digits=10, decimal_places=2, min_value=0, coerce_to_string=False, required=False,
+    )
+    # La regla en una frase («blue venta + $25»), para los chips de la UI.
+    dolar_regla = serializers.CharField(source='regla_descripcion', read_only=True)
+    # Motivo opcional al fijar el dolar a mano: queda en el historial.
+    dolar_nota = serializers.CharField(
+        write_only=True, required=False, allow_blank=True, max_length=200,
     )
 
     class Meta:
         model = ConfiguracionService
-        fields = ('dolar', 'descuento_cash_pct', 'redondeo_ars', 'actualizado')
-        read_only_fields = ('actualizado',)
+        fields = (
+            'dolar', 'dolar_modo', 'dolar_referencia', 'dolar_ajuste_tipo',
+            'dolar_ajuste_valor', 'dolar_redondeo', 'dolar_cambio_minimo',
+            'dolar_calculado_en', 'dolar_regla', 'dolar_nota',
+            'descuento_cash_pct', 'redondeo_ars', 'actualizado',
+        )
+        read_only_fields = ('actualizado', 'dolar_calculado_en')
+
+    def validate(self, data):
+        modo_actual = self.instance.dolar_modo if self.instance else ConfiguracionService.Modo.MANUAL
+        modo = data.get('dolar_modo', modo_actual)
+        if modo == ConfiguracionService.Modo.AUTOMATICO and 'dolar' in data:
+            raise serializers.ValidationError({'dolar': (
+                'En modo automático el dólar lo calcula la regla a partir del blue. '
+                'Para fijarlo a mano, pasá el modo a manual.'
+            )})
+        if 'dolar' in data and data['dolar'] <= 0:
+            raise serializers.ValidationError({'dolar': 'El dólar tiene que ser mayor a 0.'})
+        return data
+
+    def update(self, instance, validated_data):
+        from . import dolar as modulo_dolar  # tardio: dolar.py importa models
+
+        nuevo_dolar = validated_data.pop('dolar', None)
+        nota = validated_data.pop('dolar_nota', '')
+        usuario = validated_data.get('actualizado_por')
+        cambia_regla = any(
+            campo in validated_data and getattr(instance, campo) != validated_data[campo]
+            for campo in CAMPOS_REGLA_DOLAR
+        )
+        instance = super().update(instance, validated_data)
+
+        if nuevo_dolar is not None and not instance.es_automatico:
+            # Se anota tambien el blue que habia a la vista (sin pegarle a la
+            # API: lo ultimo conocido alcanza para dejar contexto).
+            registrar_cambio_dolar(
+                instance, nuevo_dolar, origen=HistorialDolar.Origen.MANUAL,
+                usuario=usuario, blue=modulo_dolar.blue_conocido(), nota=nota,
+            )
+        if instance.es_automatico and cambia_regla:
+            # Recien activado o con la regla cambiada: se aplica ya, con el
+            # blue vigente, para que la respuesta traiga el dolar nuevo.
+            modulo_dolar.aplicar_si_corresponde(modulo_dolar.obtener_blue(), instance)
+        return instance
+
+
+class HistorialDolarSerializer(serializers.ModelSerializer):
+    """Una fila del historial: el valor, su vigencia y de donde salio."""
+
+    valor = serializers.DecimalField(max_digits=10, decimal_places=2, coerce_to_string=False)
+    valor_anterior = serializers.DecimalField(
+        max_digits=10, decimal_places=2, coerce_to_string=False, allow_null=True,
+    )
+    blue_compra = serializers.DecimalField(
+        max_digits=10, decimal_places=2, coerce_to_string=False, allow_null=True,
+    )
+    blue_venta = serializers.DecimalField(
+        max_digits=10, decimal_places=2, coerce_to_string=False, allow_null=True,
+    )
+    ajuste_valor = serializers.DecimalField(
+        max_digits=10, decimal_places=2, coerce_to_string=False, allow_null=True,
+    )
+    redondeo = serializers.DecimalField(
+        max_digits=8, decimal_places=2, coerce_to_string=False, allow_null=True,
+    )
+    usuario = serializers.CharField(source='usuario_username', read_only=True)
+    regla = serializers.CharField(source='regla_descripcion', read_only=True)
+    vigente = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = HistorialDolar
+        fields = (
+            'id', 'valor', 'valor_anterior', 'vigente_desde', 'vigente_hasta', 'vigente',
+            'origen', 'usuario', 'blue_compra', 'blue_venta', 'blue_fecha',
+            'referencia', 'ajuste_tipo', 'ajuste_valor', 'redondeo', 'regla', 'nota',
+        )
 
 
 class DispositivoSerializer(serializers.ModelSerializer):

@@ -27,15 +27,41 @@ Estructura (todo dato, nada hardcodeado):
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 import math
 
+from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
-from django.db import models
+from django.db import models, transaction
+from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from comun.models import ModeloBase
 
 
 class ConfiguracionService(ModeloBase):
-    """Parametros globales que derivan los precios (fila unica, pk=1)."""
+    """Parametros globales que derivan los precios (fila unica, pk=1).
+
+    El dolar es EL valor del negocio: lo leen Service, Productos, los dos
+    importadores y los presupuestos. Puede fijarse a mano (modo manual, como
+    siempre) o seguir al blue de DolarAPI con un ajuste (modo automatico): en
+    los dos casos lo que cambia es este mismo campo `dolar`, asi que todo lo
+    que lo consume no se entera de como se obtuvo. Cada valor que estuvo
+    vigente queda en `HistorialDolar` (desde, hasta, origen y quien).
+    """
+
+    class Modo(models.TextChoices):
+        MANUAL = 'manual', 'Manual (lo fija una persona)'
+        AUTOMATICO = 'automatico', 'Automatico (sigue al dolar blue)'
+
+    class Referencia(models.TextChoices):
+        """Que cotizacion del blue se toma como base del calculo."""
+
+        VENTA = 'venta', 'Blue venta'
+        COMPRA = 'compra', 'Blue compra'
+        PROMEDIO = 'promedio', 'Promedio compra/venta'
+
+    class AjusteTipo(models.TextChoices):
+        MONTO = 'monto', 'Pesos fijos'
+        PORCENTAJE = 'porcentaje', 'Porcentaje'
 
     dolar = models.DecimalField(
         'dolar service',
@@ -44,6 +70,36 @@ class ConfiguracionService(ModeloBase):
         default=Decimal('1550'),
         validators=[MinValueValidator(0)],
         help_text='Cotizacion usada para pasar la lista USD a pesos.',
+    )
+    # --- Como se obtiene el dolar (modo automatico) ---
+    dolar_modo = models.CharField(
+        'como se define el dolar', max_length=12, choices=Modo.choices, default=Modo.MANUAL,
+    )
+    dolar_referencia = models.CharField(
+        'referencia del blue', max_length=10, choices=Referencia.choices,
+        default=Referencia.VENTA,
+        help_text='Sobre que cotizacion del blue se aplica el ajuste.',
+    )
+    dolar_ajuste_tipo = models.CharField(
+        'tipo de ajuste', max_length=10, choices=AjusteTipo.choices, default=AjusteTipo.MONTO,
+    )
+    dolar_ajuste_valor = models.DecimalField(
+        'ajuste', max_digits=10, decimal_places=2, default=Decimal('0'),
+        help_text='Con signo: +25 suma $25 (o 25 %); -10 resta. 0 = el blue tal cual.',
+    )
+    dolar_redondeo = models.DecimalField(
+        'redondeo del dolar', max_digits=8, decimal_places=2, default=Decimal('1'),
+        validators=[MinValueValidator(0)],
+        help_text='El resultado se redondea al multiplo mas cercano ($1, $5, $10...). 0 = sin redondear.',
+    )
+    dolar_cambio_minimo = models.DecimalField(
+        'cambio minimo', max_digits=10, decimal_places=2, default=Decimal('0'),
+        validators=[MinValueValidator(0)],
+        help_text='En automatico, no se actualiza si la diferencia con el vigente es menor a esto.',
+    )
+    dolar_calculado_en = models.DateTimeField(
+        'ultima revision automatica', null=True, blank=True,
+        help_text='Cuando se reviso el blue por ultima vez en modo automatico (cambie o no).',
     )
     descuento_cash_pct = models.DecimalField(
         'descuento cash (%)',
@@ -70,6 +126,25 @@ class ConfiguracionService(ModeloBase):
         """Devuelve la fila unica de configuracion (la crea si no existe)."""
         config, _ = cls.todos.get_or_create(pk=1)
         return config
+
+    @property
+    def es_automatico(self) -> bool:
+        return self.dolar_modo == self.Modo.AUTOMATICO
+
+    @property
+    def regla(self) -> dict:
+        """La regla del modo automatico, como diccionario plano (para el historial)."""
+        return {
+            'referencia': self.dolar_referencia,
+            'ajuste_tipo': self.dolar_ajuste_tipo,
+            'ajuste_valor': self.dolar_ajuste_valor,
+            'redondeo': self.dolar_redondeo,
+        }
+
+    @property
+    def regla_descripcion(self) -> str:
+        """La regla en una frase: «blue venta + $25, redondeado a $5»."""
+        return describir_regla(**self.regla)
 
     def __str__(self):
         return f'dolar {self.dolar} · cash -{self.descuento_cash_pct} % · redondeo {self.redondeo_ars}'
@@ -129,6 +204,235 @@ class CotizacionDolarBlue(ModeloBase):
 
     def __str__(self):
         return f'blue compra {self.compra} · venta {self.venta}'
+
+
+class HistorialDolar(models.Model):
+    """Cada valor que tuvo el dolar del negocio: desde cuando, hasta cuando y por que.
+
+    Es una bitacora de solo escritura (tabla plana, sin `ModeloBase`): no se
+    edita ni se borra. La fila con `vigente_hasta` vacio es la que rige hoy.
+    Se escribe tanto cuando una persona fija el dolar a mano como cuando el
+    modo automatico lo recalcula a partir del blue; en ese caso guarda ademas
+    la cotizacion que uso y la regla con la que la ajusto, asi el historial
+    explica cada numero.
+    """
+
+    class Origen(models.TextChoices):
+        MANUAL = 'manual', 'Fijado a mano'
+        AUTOMATICO = 'automatico', 'Calculado del blue'
+        INICIAL = 'inicial', 'Valor inicial (antes del historial)'
+
+    valor = models.DecimalField('dolar', max_digits=10, decimal_places=2)
+    valor_anterior = models.DecimalField(
+        'dolar anterior', max_digits=10, decimal_places=2, null=True, blank=True,
+    )
+    vigente_desde = models.DateTimeField('vigente desde', db_index=True)
+    vigente_hasta = models.DateTimeField('vigente hasta', null=True, blank=True)
+    origen = models.CharField('origen', max_length=12, choices=Origen.choices)
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='+',
+        verbose_name='usuario',
+    )
+    # Foto del nombre: el historial se lee igual si la cuenta se elimina.
+    usuario_username = models.CharField('usuario (foto)', max_length=150, blank=True)
+    # La cotizacion del blue que se uso (solo en automatico; informativa en manual).
+    blue_compra = models.DecimalField('blue compra', max_digits=10, decimal_places=2, null=True, blank=True)
+    blue_venta = models.DecimalField('blue venta', max_digits=10, decimal_places=2, null=True, blank=True)
+    blue_fecha = models.DateTimeField('fecha del blue', null=True, blank=True)
+    # La regla vigente al calcular (vacia en manual).
+    referencia = models.CharField(
+        'referencia', max_length=10, choices=ConfiguracionService.Referencia.choices, blank=True,
+    )
+    ajuste_tipo = models.CharField(
+        'tipo de ajuste', max_length=10, choices=ConfiguracionService.AjusteTipo.choices, blank=True,
+    )
+    ajuste_valor = models.DecimalField('ajuste', max_digits=10, decimal_places=2, null=True, blank=True)
+    redondeo = models.DecimalField('redondeo', max_digits=8, decimal_places=2, null=True, blank=True)
+    nota = models.CharField('nota', max_length=200, blank=True)
+
+    class Meta:
+        db_table = 'precios_service_dolar_historial'
+        verbose_name = 'historial del dolar'
+        verbose_name_plural = 'historial del dolar'
+        ordering = ('-vigente_desde', '-id')
+
+    def __str__(self):
+        return f'${self.valor} desde {self.vigente_desde:%d/%m/%Y %H:%M} ({self.get_origen_display()})'
+
+    @property
+    def vigente(self) -> bool:
+        return self.vigente_hasta is None
+
+    @property
+    def regla_descripcion(self) -> str:
+        if self.origen != self.Origen.AUTOMATICO or not self.referencia:
+            return ''
+        return describir_regla(
+            referencia=self.referencia,
+            ajuste_tipo=self.ajuste_tipo,
+            ajuste_valor=self.ajuste_valor or Decimal('0'),
+            redondeo=self.redondeo or Decimal('0'),
+        )
+
+
+# ===== Dolar automatico =====
+
+_CENTAVO = Decimal('0.01')
+
+
+def _plata(valor) -> str:
+    """Un numero como lo diria una persona: «1.580», «25,50»."""
+    valor = Decimal(valor).quantize(_CENTAVO)
+    entero, _, decimales = f'{valor:,.2f}'.partition('.')
+    entero = entero.replace(',', '.')
+    return entero if decimales == '00' else f'{entero},{decimales}'
+
+
+def describir_regla(*, referencia, ajuste_tipo, ajuste_valor, redondeo) -> str:
+    """La regla del automatico en una frase corta, la misma que muestra la UI."""
+    base = {
+        ConfiguracionService.Referencia.VENTA: 'blue venta',
+        ConfiguracionService.Referencia.COMPRA: 'blue compra',
+        ConfiguracionService.Referencia.PROMEDIO: 'promedio del blue',
+    }.get(referencia, 'blue venta')
+    ajuste = Decimal(ajuste_valor or 0)
+    if ajuste == 0:
+        frase = f'{base} tal cual'
+    else:
+        signo = '+' if ajuste > 0 else '−'
+        if ajuste_tipo == ConfiguracionService.AjusteTipo.PORCENTAJE:
+            frase = f'{base} {signo} {_plata(abs(ajuste))} %'
+        else:
+            frase = f'{base} {signo} ${_plata(abs(ajuste))}'
+    redondeo = Decimal(redondeo or 0)
+    if redondeo > 0 and redondeo != 1:
+        frase += f', redondeado a ${_plata(redondeo)}'
+    return frase
+
+
+def _referencia_del_blue(referencia, compra, venta):
+    """La cotizacion base segun la referencia elegida (None si falta el dato)."""
+    compra = None if compra is None else Decimal(str(compra))
+    venta = None if venta is None else Decimal(str(venta))
+    if referencia == ConfiguracionService.Referencia.COMPRA:
+        return compra
+    if referencia == ConfiguracionService.Referencia.PROMEDIO:
+        if compra is None or venta is None:
+            return venta if compra is None else compra
+        return (compra + venta) / 2
+    return venta
+
+
+def calcular_dolar_automatico(config, compra, venta):
+    """El dolar que resulta de aplicar la regla de `config` al blue.
+
+    Devuelve un Decimal con dos decimales, o None si el blue no trae la
+    cotizacion que la regla necesita. Es una funcion pura: no escribe nada.
+    """
+    base = _referencia_del_blue(config.dolar_referencia, compra, venta)
+    if base is None or base <= 0:
+        return None
+    ajuste = Decimal(config.dolar_ajuste_valor or 0)
+    if config.dolar_ajuste_tipo == ConfiguracionService.AjusteTipo.PORCENTAJE:
+        resultado = base * (Decimal('1') + ajuste / Decimal('100'))
+    else:
+        resultado = base + ajuste
+    redondeo = Decimal(config.dolar_redondeo or 0)
+    if redondeo > 0:
+        resultado = (resultado / redondeo).quantize(Decimal('1'), rounding=ROUND_HALF_UP) * redondeo
+    resultado = resultado.quantize(_CENTAVO, rounding=ROUND_HALF_UP)
+    if resultado <= 0:
+        return None
+    return resultado
+
+
+def registrar_cambio_dolar(config, nuevo, *, origen, usuario=None, blue=None, nota=''):
+    """Escribe el dolar nuevo en la configuracion y deja constancia en el historial.
+
+    Cierra la fila vigente (`vigente_hasta` = ahora), abre la nueva y guarda el
+    valor en `ConfiguracionService.dolar`, todo en una transaccion. Si el valor
+    es el mismo que ya rige, no toca nada y devuelve None: un historial sin
+    filas repetidas es el que se puede leer.
+
+    `blue` es un diccionario opcional con `compra`, `venta` y `fecha` (la
+    cotizacion que se uso, o la que habia a la vista al fijarlo a mano).
+    """
+    nuevo = Decimal(str(nuevo)).quantize(_CENTAVO, rounding=ROUND_HALF_UP)
+    if nuevo <= 0:
+        raise ValidationError('El dolar tiene que ser mayor a 0.')
+    anterior = Decimal(config.dolar).quantize(_CENTAVO) if config.dolar is not None else None
+    if anterior is not None and anterior == nuevo:
+        return None
+
+    ahora = timezone.now()
+    blue = blue or {}
+    automatico = origen == HistorialDolar.Origen.AUTOMATICO
+    with transaction.atomic():
+        HistorialDolar.objects.filter(vigente_hasta__isnull=True).update(vigente_hasta=ahora)
+        fila = HistorialDolar.objects.create(
+            valor=nuevo,
+            valor_anterior=anterior,
+            vigente_desde=ahora,
+            origen=origen,
+            usuario=usuario if getattr(usuario, 'pk', None) else None,
+            usuario_username=getattr(usuario, 'username', '') or '',
+            blue_compra=blue.get('compra'),
+            blue_venta=blue.get('venta'),
+            blue_fecha=blue.get('fecha'),
+            referencia=config.dolar_referencia if automatico else '',
+            ajuste_tipo=config.dolar_ajuste_tipo if automatico else '',
+            ajuste_valor=config.dolar_ajuste_valor if automatico else None,
+            redondeo=config.dolar_redondeo if automatico else None,
+            nota=(nota or '')[:200],
+        )
+        config.dolar = nuevo
+        campos = ['dolar']
+        if usuario is not None and getattr(usuario, 'pk', None):
+            config.actualizado_por = usuario
+            campos.append('actualizado_por')
+        # Un recalculo automatico no es una accion de la cuenta que lo disparo
+        # (puede ser cualquier empleado abriendo el Panel): la auditoria lo
+        # saltea y la constancia queda en el historial del dolar.
+        config._auditoria_omitir = automatico
+        try:
+            config.save(update_fields=campos)
+        finally:
+            config._auditoria_omitir = False
+    return fila
+
+
+def aplicar_dolar_automatico(config, blue, *, usuario=None):
+    """Recalcula el dolar con la regla de `config` y lo aplica si corresponde.
+
+    Solo actua en modo automatico y con un blue utilizable. Respeta el cambio
+    minimo configurado: una oscilacion chica del blue no mueve todos los
+    precios. Devuelve la fila de historial creada, o None si no cambio nada.
+    Siempre deja anotado `dolar_calculado_en` (se reviso, haya cambiado o no).
+    """
+    if not config.es_automatico or not blue:
+        return None
+    nuevo = calcular_dolar_automatico(config, blue.get('compra'), blue.get('venta'))
+    ahora = timezone.now()
+    config.dolar_calculado_en = ahora
+    # `update()` directo: es un dato de servicio, no un cambio que auditar.
+    ConfiguracionService.todos.filter(pk=config.pk).update(dolar_calculado_en=ahora)
+    if nuevo is None:
+        return None
+    actual = Decimal(config.dolar)
+    minimo = Decimal(config.dolar_cambio_minimo or 0)
+    if nuevo != actual and abs(nuevo - actual) < minimo:
+        return None
+    # El autor de un valor automatico es la regla, no la cuenta que paso por
+    # ahi: el historial lo deja sin usuario a proposito.
+    del usuario
+    return registrar_cambio_dolar(
+        config, nuevo, origen=HistorialDolar.Origen.AUTOMATICO, usuario=None,
+        blue=blue, nota='',
+    )
 
 
 class Dispositivo(ModeloBase):

@@ -40,9 +40,20 @@ class ConfiguracionProductosSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         dolar = validated_data.pop('dolar', None)
         if dolar is not None:
+            # Es EL dolar del negocio (el de Service): se escribe por la misma
+            # puerta que el gestor, asi queda en el historial y respeta el modo.
+            from precios_service.models import HistorialDolar, registrar_cambio_dolar
+
             compartida = ConfiguracionService.obtener()
-            compartida.dolar = dolar
-            compartida.save(update_fields=['dolar'])
+            if compartida.es_automatico:
+                raise serializers.ValidationError({'dolar': (
+                    'El dolar esta en modo automatico (sigue al blue). Para fijarlo a '
+                    'mano, pasalo a manual desde el gestor de dolar.'
+                )})
+            registrar_cambio_dolar(
+                compartida, dolar, origen=HistorialDolar.Origen.MANUAL,
+                usuario=validated_data.get('actualizado_por'),
+            )
         return super().update(instance, validated_data)
 
 

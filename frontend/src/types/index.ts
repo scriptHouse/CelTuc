@@ -529,14 +529,65 @@ export interface TipoServicio {
 
 // ===== Precios de service (lista de precios del taller) =====
 /** Parámetros globales: de acá se derivan los precios que no tienen override. */
+/** Cómo se define el dólar del negocio: lo fija una persona, o sigue al blue. */
+export type DolarModo = 'manual' | 'automatico'
+/** Qué cotización del blue se toma de base en el modo automático. */
+export type DolarReferencia = 'venta' | 'compra' | 'promedio'
+/** El ajuste sobre esa base: pesos fijos o un porcentaje (con signo). */
+export type DolarAjusteTipo = 'monto' | 'porcentaje'
+
 export interface ConfiguracionPreciosService {
-  /** Cotización para pasar la lista USD a pesos. */
+  /** Cotización para pasar la lista USD a pesos (ES el dólar del negocio). */
   dolar: number
+  /**
+   * Modo automático: `dolar` se recalcula solo a partir del blue de DolarAPI
+   * con la regla de abajo. En manual, la regla se guarda pero no actúa.
+   */
+  dolar_modo: DolarModo
+  dolar_referencia: DolarReferencia
+  dolar_ajuste_tipo: DolarAjusteTipo
+  /** Con signo: 25 suma $25 (o 25 %); -10 resta. 0 = el blue tal cual. */
+  dolar_ajuste_valor: number
+  /** Múltiplo al que se redondea el resultado ($1, $5, $10…). 0 = sin redondear. */
+  dolar_redondeo: number
+  /** En automático, no se actualiza si la diferencia con el vigente es menor. */
+  dolar_cambio_minimo: number
+  /** Última vez que el modo automático revisó el blue (cambie o no). ISO. */
+  dolar_calculado_en: string | null
+  /** La regla en una frase («blue venta + $25»), lista para mostrar. */
+  dolar_regla: string
   /** Descuento por pago cash (20 = 20 %). */
   descuento_cash_pct: number
   /** Los pesos se redondean PARA ARRIBA a este múltiplo. */
   redondeo_ars: number
   actualizado: string // ISO
+}
+
+/** De dónde salió un valor del historial del dólar. */
+export type OrigenDolar = 'manual' | 'automatico' | 'inicial'
+
+/** Un valor que tuvo el dólar del negocio: desde cuándo, hasta cuándo y por qué. */
+export interface HistorialDolarItem {
+  id: number
+  valor: number
+  valor_anterior: number | null
+  vigente_desde: string // ISO
+  /** null = es el que rige ahora. */
+  vigente_hasta: string | null
+  vigente: boolean
+  origen: OrigenDolar
+  /** Quién lo fijó (vacío en los automáticos: el autor es la regla). */
+  usuario: string
+  blue_compra: number | null
+  blue_venta: number | null
+  blue_fecha: string | null
+  referencia: DolarReferencia | ''
+  ajuste_tipo: DolarAjusteTipo | ''
+  ajuste_valor: number | null
+  redondeo: number | null
+  /** La regla con la que se calculó (solo automáticos). */
+  regla: string
+  nota: string
 }
 
 /** Calidad/columna de una sección (LCD, OLED, Apple Original...). */

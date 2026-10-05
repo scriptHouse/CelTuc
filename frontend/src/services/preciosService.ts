@@ -1,6 +1,10 @@
 import type {
   ConfiguracionPreciosService,
   DispositivoService,
+  DolarAjusteTipo,
+  DolarModo,
+  DolarReferencia,
+  HistorialDolarItem,
   ItemPrecioService,
   SeccionPreciosService,
 } from '@/types'
@@ -16,9 +20,45 @@ import { useAuth } from '@/store/auth'
 const token = () => useAuth.getState().access
 
 export interface ConfiguracionInput {
+  /**
+   * El dólar fijado a mano. Solo vale en modo manual: en automático el backend
+   * lo rechaza (lo calcula la regla). Para «fijar a mano» desde automático se
+   * mandan `dolar_modo: 'manual'` y `dolar` en la misma petición.
+   */
   dolar: number
+  /** Motivo opcional al fijar el dólar a mano: queda en el historial. */
+  dolar_nota: string
+  dolar_modo: DolarModo
+  dolar_referencia: DolarReferencia
+  dolar_ajuste_tipo: DolarAjusteTipo
+  dolar_ajuste_valor: number
+  dolar_redondeo: number
+  dolar_cambio_minimo: number
   descuento_cash_pct: number
   redondeo_ars: number
+}
+
+export interface HistorialDolarRespuesta {
+  /** Las más recientes primero. */
+  items: HistorialDolarItem[]
+  /** Cuántas hay en total con esos filtros (puede ser más que `items`). */
+  total: number
+}
+
+/**
+ * El historial del dólar del negocio: cada valor con su «vigente desde / hasta».
+ * `desde` y `hasta` son fechas yyyy-mm-dd (inclusive): trae lo que estuvo
+ * vigente en algún momento de ese rango.
+ */
+export function listarHistorialDolar(
+  params: { desde?: string; hasta?: string; limite?: number } = {},
+): Promise<HistorialDolarRespuesta> {
+  const query = new URLSearchParams()
+  if (params.desde) query.set('desde', params.desde)
+  if (params.hasta) query.set('hasta', params.hasta)
+  if (params.limite) query.set('limite', String(params.limite))
+  const sufijo = query.toString() ? `?${query.toString()}` : ''
+  return api.get<HistorialDolarRespuesta>(`/precios-service/dolar/historial/${sufijo}`, token())
 }
 
 /** Variante para crear/editar. Con `id` conserva la variante (y sus precios). */

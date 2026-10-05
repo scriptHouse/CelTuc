@@ -47,7 +47,12 @@ AUDITADOS = {
     'productos.Producto': {},
     'productos.CategoriaProducto': {},
     'productos.ConfiguracionProductos': {},
-    'precios_service.ConfiguracionService': {},
+    # El dolar cambia a mano (se audita) o lo recalcula el modo automatico
+    # desde el blue: eso no es una accion de la cuenta que lo disparo y queda
+    # registrado en el historial del dolar (`precios_service.HistorialDolar`).
+    'precios_service.ConfiguracionService': {
+        'omitir': lambda instancia: getattr(instancia, '_auditoria_omitir', False),
+    },
     'precios_service.Dispositivo': {},
     'precios_service.ItemService': {},
     'precios_service.PrecioItemService': {},

@@ -1,9 +1,10 @@
+import datetime
 import logging
 
-import requests
-from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
+from django.utils import timezone
+from django.utils.dateparse import parse_date
 from rest_framework import generics
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
@@ -12,12 +13,13 @@ from rest_framework.views import APIView
 from comun.mixins import AuditoriaMixin
 from usuarios.permissions import LecturaConPermisoEscrituraAdmin
 
+from . import dolar as modulo_dolar
 from .importacion import analizar as analizar_lista
 from .importacion import aplicar as aplicar_lista
 from .models import (
     ConfiguracionService,
-    CotizacionDolarBlue,
     Dispositivo,
+    HistorialDolar,
     ItemService,
     SeccionService,
 )
@@ -26,6 +28,7 @@ from .serializers import (
     AplicarListaServiceSerializer,
     ConfiguracionServiceSerializer,
     DispositivoSerializer,
+    HistorialDolarSerializer,
     ItemServiceSerializer,
     SeccionServiceSerializer,
 )
@@ -52,8 +55,27 @@ def _items_queryset():
     return ItemService.objects.select_related('seccion').prefetch_related('precios', 'dispositivos')
 
 
-class ConfiguracionServiceView(_BaseService, AuditoriaMixin, generics.RetrieveUpdateAPIView):
-    """Fila unica de parametros (dolar, descuento, redondeo)."""
+class _DolarAlDiaMixin:
+    """Antes de listar precios, revisa el dolar automatico (si esta activo).
+
+    Es lo que mantiene el dolar al dia «al usar el sistema»: en modo manual
+    no cuesta nada; en automatico, como mucho una consulta al blue por minuto.
+    """
+
+    def get(self, request, *args, **kwargs):
+        modulo_dolar.asegurar_dolar_al_dia()
+        return super().get(request, *args, **kwargs)
+
+
+class ConfiguracionServiceView(
+    _DolarAlDiaMixin, _BaseService, AuditoriaMixin, generics.RetrieveUpdateAPIView,
+):
+    """Fila unica de parametros (dolar, descuento, redondeo).
+
+    El PATCH del dolar pasa por el historial (ver el serializer): con `dolar`
+    en manual lo fija una persona; con `dolar_modo=automatico` y la regla, el
+    valor se calcula al instante y la respuesta ya lo trae.
+    """
 
     serializer_class = ConfiguracionServiceSerializer
     # La lee tambien el gestor de dolar (pagina Dolar y bloque del Panel).
@@ -63,7 +85,9 @@ class ConfiguracionServiceView(_BaseService, AuditoriaMixin, generics.RetrieveUp
         return ConfiguracionService.obtener()
 
 
-class SeccionListCreateView(_BaseService, AuditoriaMixin, generics.ListCreateAPIView):
+class SeccionListCreateView(
+    _DolarAlDiaMixin, _BaseService, AuditoriaMixin, generics.ListCreateAPIView,
+):
     queryset = SeccionService.objects.prefetch_related(
         'variantes',
         Prefetch('items', queryset=_items_queryset()),
@@ -80,7 +104,9 @@ class SeccionDetailView(_BaseService, AuditoriaMixin, generics.RetrieveUpdateDes
     serializer_class = SeccionServiceSerializer
 
 
-class ItemListCreateView(_BaseService, AuditoriaMixin, generics.ListCreateAPIView):
+class ItemListCreateView(
+    _DolarAlDiaMixin, _BaseService, AuditoriaMixin, generics.ListCreateAPIView,
+):
     queryset = _items_queryset().all()
     serializer_class = ItemServiceSerializer
 
@@ -98,56 +124,67 @@ class DolarBlueView(_BaseService, APIView):
     gestor. Cada cotizacion exitosa se GUARDA en `CotizacionDolarBlue`: si
     DolarAPI no responde se devuelve esa ultima guardada (con
     `desactualizado=True` para que la UI lo avise); el 503 queda solo para el
-    caso de que nunca se haya podido obtener ninguna. Es SOLO una referencia:
-    el dolar del negocio sigue siendo manual y se edita en el gestor.
+    caso de que nunca se haya podido obtener ninguna. (La mecanica vive en
+    `precios_service.dolar`.)
+
+    Con el dolar del negocio en modo automatico, cada cotizacion que pasa por
+    aca tambien lo recalcula: es la via por la que el gestor abierto mantiene
+    los precios al dia.
     """
 
-    URL = 'https://dolarapi.com/v1/dolares/blue'
-    CACHE_KEY = 'dolar_blue'
-    CACHE_SEGUNDOS = 120
+    URL = modulo_dolar.URL
+    CACHE_KEY = modulo_dolar.CACHE_KEY
+    CACHE_SEGUNDOS = modulo_dolar.CACHE_SEGUNDOS
 
     # Lo consultan los gestores de dolar (pagina Dolar, Panel, Service y Productos).
     permiso_requerido = ('ver_precios_service', 'ver_productos', 'ver_equipos', 'ver_dolar')
 
     def get(self, request):
-        datos = cache.get(self.CACHE_KEY)
-        if datos is not None:
-            return Response(datos)
-        try:
-            respuesta = requests.get(self.URL, timeout=6)
-            respuesta.raise_for_status()
-            cuerpo = respuesta.json()
-            datos = {
-                'compra': cuerpo.get('compra'),
-                'venta': cuerpo.get('venta'),
-                'fecha': cuerpo.get('fechaActualizacion'),
-                'desactualizado': False,
-                'guardado': None,
-            }
-        except (requests.RequestException, ValueError):
-            return self._ultima_guardada()
-        CotizacionDolarBlue.guardar(datos['compra'], datos['venta'], datos['fecha'])
-        cache.set(self.CACHE_KEY, datos, self.CACHE_SEGUNDOS)
-        return Response(datos)
-
-    def _ultima_guardada(self):
-        """Respaldo cuando DolarAPI no responde: la ultima cotizacion guardada.
-
-        No se cachea, asi la proxima consulta vuelve a intentar contra la API.
-        """
-        fila = CotizacionDolarBlue.ultima()
-        if fila is None:
+        datos = modulo_dolar.obtener_blue()
+        if datos is None:
             return Response(
                 {'detail': 'No se pudo consultar DolarAPI y todavía no hay ninguna '
                            'cotización guardada. Probá de nuevo en un rato.'},
                 status=503,
             )
+        modulo_dolar.aplicar_si_corresponde(datos)
+        return Response(datos)
+
+
+# Cuantas filas del historial del dolar devuelve una consulta, como mucho.
+MAX_HISTORIAL_DOLAR = 500
+
+
+class HistorialDolarView(_BaseService, APIView):
+    """GET /dolar/historial/: cada valor que tuvo el dolar, con su vigencia.
+
+    Filtros opcionales `desde` y `hasta` (fechas yyyy-mm-dd, inclusive): trae
+    las filas que estuvieron vigentes en algun momento de ese rango. `limite`
+    acota cuantas (las mas recientes primero). Lo lee quien puede ver el
+    gestor de dolar.
+    """
+
+    permiso_requerido = ('ver_precios_service', 'ver_dolar')
+
+    def get(self, request):
+        qs = HistorialDolar.objects.select_related('usuario')
+        desde = parse_date(request.query_params.get('desde') or '')
+        hasta = parse_date(request.query_params.get('hasta') or '')
+        zona = timezone.get_current_timezone()
+        if desde:
+            inicio = timezone.make_aware(datetime.datetime.combine(desde, datetime.time.min), zona)
+            qs = qs.filter(Q(vigente_hasta__isnull=True) | Q(vigente_hasta__gte=inicio))
+        if hasta:
+            fin = timezone.make_aware(datetime.datetime.combine(hasta, datetime.time.max), zona)
+            qs = qs.filter(vigente_desde__lte=fin)
+        try:
+            limite = min(int(request.query_params.get('limite', 100)), MAX_HISTORIAL_DOLAR)
+        except ValueError:
+            limite = 100
+        total = qs.count()
         return Response({
-            'compra': fila.compra,
-            'venta': fila.venta,
-            'fecha': fila.fecha.isoformat() if fila.fecha else None,
-            'desactualizado': True,
-            'guardado': fila.actualizado.isoformat() if fila.actualizado else None,
+            'items': HistorialDolarSerializer(qs[:max(limite, 1)], many=True).data,
+            'total': total,
         })
 
 

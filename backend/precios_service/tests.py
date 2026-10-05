@@ -101,7 +101,7 @@ class DolarBlueTests(TestCase):
         }
         return respuesta
 
-    @patch('precios_service.views.requests.get')
+    @patch('precios_service.dolar.requests.get')
     def test_devuelve_la_cotizacion_y_cachea(self, mock_get):
         mock_get.return_value = self._respuesta_ok()
         r = self.cliente.get(self.URL)
@@ -113,7 +113,7 @@ class DolarBlueTests(TestCase):
         self.cliente.get(self.URL)
         self.assertEqual(mock_get.call_count, 1)
 
-    @patch('precios_service.views.requests.get')
+    @patch('precios_service.dolar.requests.get')
     def test_guarda_la_cotizacion_en_base_de_datos(self, mock_get):
         mock_get.return_value = self._respuesta_ok()
         self.cliente.get(self.URL)
@@ -123,7 +123,7 @@ class DolarBlueTests(TestCase):
         self.assertEqual(fila.compra, Decimal('1500'))
         self.assertEqual(fila.fecha.isoformat(), '2026-07-04T12:00:00+00:00')
 
-    @patch('precios_service.views.requests.get')
+    @patch('precios_service.dolar.requests.get')
     def test_si_dolarapi_cae_devuelve_la_ultima_guardada(self, mock_get):
         # Primera consulta OK: queda guardada en la base.
         mock_get.return_value = self._respuesta_ok()
@@ -140,7 +140,7 @@ class DolarBlueTests(TestCase):
         # El respaldo NO se cachea: la proxima consulta reintenta contra la API.
         self.assertIsNone(cache.get('dolar_blue'))
 
-    @patch('precios_service.views.requests.get', side_effect=requests.ConnectionError)
+    @patch('precios_service.dolar.requests.get', side_effect=requests.ConnectionError)
     def test_si_no_responde_y_no_hay_guardada_503_legible(self, _mock):
         r = self.cliente.get(self.URL)
         self.assertEqual(r.status_code, 503)

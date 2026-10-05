@@ -5,11 +5,13 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { AyudaInfo } from '@/components/ui/AyudaInfo'
 import { AyudaDolar } from '@/components/AyudaContenidos'
 import { GestorDolar } from '@/components/GestorDolar'
+import { HistorialDolar } from '@/components/dolar/HistorialDolar'
 
 /**
  * Página del gestor de dólar: el dólar del negocio (el que calcula TODAS las
- * listas) y el blue de DolarAPI como referencia de mercado, lado a lado.
- * Editar es solo para administradores; el resto lo ve en modo lectura.
+ * listas) y el blue de DolarAPI como referencia de mercado, lado a lado, con
+ * el modo (manual o siguiendo al blue) y, debajo, el historial completo de
+ * valores. Editar es solo para administradores; el resto lo ve en modo lectura.
  */
 export function DolarPage() {
   const usuario = useAuth((s) => s.usuario)
@@ -33,6 +35,8 @@ export function DolarPage() {
       <div className="ct-rise">
         <GestorDolar soloLectura={!admin} />
       </div>
+
+      <HistorialDolar className="ct-rise mt-5" />
     </div>
   )
 }
