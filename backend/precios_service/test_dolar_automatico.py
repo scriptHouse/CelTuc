@@ -130,6 +130,18 @@ class HistorialDolarTests(TestCase):
         self.assertIsNone(registrar_cambio_dolar(self.config, Decimal('1550.00'), origen='manual'))
         self.assertEqual(_historial().count(), 0)
 
+    def test_una_instancia_vieja_no_duplica_lo_que_ya_esta_en_la_base(self):
+        # Dos peticiones leen la configuracion a la vez (las dos ven 1550) y
+        # las dos quieren registrar 1580: la segunda tiene que darse cuenta de
+        # que la base ya dice 1580 y no abrir otra fila.
+        otra = ConfiguracionService.obtener()
+        self.assertIsNotNone(registrar_cambio_dolar(self.config, 1580, origen='automatico'))
+        self.assertEqual(otra.dolar, Decimal('1550'))  # instancia vieja
+        self.assertIsNone(registrar_cambio_dolar(otra, 1580, origen='automatico'))
+        self.assertEqual(otra.dolar, Decimal('1580'))  # quedo al dia
+        self.assertEqual(_historial().count(), 1)
+        self.assertEqual(HistorialDolar.objects.filter(vigente_hasta__isnull=True).count(), 1)
+
     def test_aplicar_automatico_solo_en_ese_modo(self):
         blue = {'compra': 1500, 'venta': 1555, 'fecha': None}
         self.assertIsNone(aplicar_dolar_automatico(self.config, blue))
@@ -316,6 +328,61 @@ class DolarAutomaticoApiTests(TestCase):
 
     def test_historial_requiere_permiso(self):
         self.assertEqual(APIClient().get(self.HISTORIAL).status_code, 401)
+
+
+class DepuracionHistorialTests(TestCase):
+    """La migracion 0010 funde las filas que dejo la condicion de carrera."""
+
+    def _fila(self, valor, desde, hasta, origen='automatico', anterior=None):
+        return HistorialDolar.objects.create(
+            valor=Decimal(valor), valor_anterior=anterior, vigente_desde=desde,
+            vigente_hasta=hasta, origen=origen,
+        )
+
+    def _depurar(self):
+        from importlib import import_module
+
+        from django.apps import apps
+
+        migracion = import_module('precios_service.migrations.0010_depurar_historial_dolar')
+        migracion.depurar_historial(apps, None)
+        return list(HistorialDolar.objects.order_by('vigente_desde', 'id'))
+
+    def test_funde_duplicadas_y_deja_una_sola_vigente(self):
+        HistorialDolar.objects.all().delete()
+        t0 = timezone.now() - timedelta(days=3)
+        ms = timedelta(milliseconds=120)
+        # El caso real de produccion: un duplicado de duracion cero en el
+        # medio y dos filas «vigente ahora» con el mismo valor al final.
+        self._fila('1570', t0, t0 + timedelta(hours=2), anterior=Decimal('1580'))
+        self._fila('1575', t0 + timedelta(hours=2), t0 + timedelta(hours=2) + ms, anterior=Decimal('1570'))
+        self._fila('1575', t0 + timedelta(hours=2) + ms, t0 + timedelta(days=1), anterior=Decimal('1575'))
+        self._fila('1565', t0 + timedelta(days=1), None, anterior=Decimal('1575'))
+        self._fila('1565', t0 + timedelta(days=1) + ms, None, anterior=Decimal('1575'))
+
+        filas = self._depurar()
+        self.assertEqual([f.valor for f in filas], [Decimal('1570'), Decimal('1575'), Decimal('1565')])
+        self.assertEqual(filas[1].vigente_hasta, t0 + timedelta(days=1))
+        self.assertEqual(filas[1].valor_anterior, Decimal('1570'))
+        self.assertIsNone(filas[2].vigente_hasta)
+        self.assertEqual(filas[2].valor_anterior, Decimal('1575'))
+        self.assertEqual(HistorialDolar.objects.filter(vigente_hasta__isnull=True).count(), 1)
+        for anterior, siguiente in zip(filas, filas[1:]):
+            self.assertEqual(anterior.vigente_hasta, siguiente.vigente_desde)
+
+    def test_dos_cambios_reales_al_mismo_valor_no_se_tocan(self):
+        HistorialDolar.objects.all().delete()
+        t0 = timezone.now() - timedelta(days=3)
+        # 1550 -> 1600 -> 1550 con horas de diferencia: son cambios de verdad.
+        self._fila('1550', t0, t0 + timedelta(hours=1), origen='manual')
+        self._fila('1600', t0 + timedelta(hours=1), t0 + timedelta(hours=5), origen='manual')
+        self._fila('1550', t0 + timedelta(hours=5), None, origen='manual')
+        filas = self._depurar()
+        self.assertEqual(len(filas), 3)
+
+    def test_sin_filas_no_hace_nada(self):
+        HistorialDolar.objects.all().delete()
+        self.assertEqual(self._depurar(), [])
 
 
 class ReconstruccionHistorialTests(TestCase):

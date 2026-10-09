@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeftRight,
   ArrowRight,
   Boxes,
+  Calculator,
+  ChevronDown,
   ClipboardList,
   Download,
   Loader2,
@@ -13,6 +15,7 @@ import {
   PackagePlus,
   PackageSearch,
   Pencil,
+  Pin,
   Plus,
   Search,
   SlidersHorizontal,
@@ -22,8 +25,9 @@ import {
   Upload,
   X,
 } from 'lucide-react'
-import type { CategoriaCatalogo, ProductoCatalogo } from '@/types'
-import { listarCategorias, listarProductos } from '@/services/productos'
+import type { CategoriaCatalogo, ConfiguracionCatalogo, ProductoCatalogo } from '@/types'
+import { listarCategorias, listarProductos, obtenerConfiguracionCatalogo } from '@/services/productos'
+import { explicarConversion, resumenRegla } from '@/lib/precios'
 import { listarDispositivos } from '@/services/preciosService'
 import {
   actualizarSucursal,
@@ -134,6 +138,27 @@ export function InventarioPage() {
     queryKey: ['productos-categorias'],
     queryFn: listarCategorias,
   })
+  // Los parámetros con los que el catálogo pasa los dólares a pesos (dólar del
+  // negocio y redondeos): sirven para EXPLICAR cada precio al lado del número.
+  // Se vuelve a leer cada tanto porque el dólar puede moverse solo (modo
+  // automático) mientras esta pantalla sigue abierta.
+  const { data: configCatalogo } = useQuery({
+    queryKey: ['productos-config'],
+    queryFn: obtenerConfiguracionCatalogo,
+    retry: false,
+    refetchInterval: 5 * 60_000,
+  })
+  // Si el dólar cambió desde la última lectura, los precios de la lista ya
+  // están viejos: se recargan solos, sin que haya que salir y volver a entrar.
+  const dolarVisto = useRef<number | null>(null)
+  useEffect(() => {
+    const dolar = configCatalogo?.dolar != null ? Number(configCatalogo.dolar) : null
+    if (dolar === null) return
+    if (dolarVisto.current !== null && dolarVisto.current !== dolar) {
+      queryClient.invalidateQueries({ queryKey: ['productos-items'] })
+    }
+    dolarVisto.current = dolar
+  }, [configCatalogo?.dolar, queryClient])
 
   const cargando = cargandoSucursales || cargandoStock || cargandoProductos
 
@@ -498,6 +523,18 @@ export function InventarioPage() {
         <StatCard className="ct-stagger-item" style={ctStagger(3)} label="Bajo mínimo" value={num(stats.bajo)} hint="para reponer" icon={ClipboardList} />
       </div>
 
+      {/* Cómo se pasan los dólares a pesos: a la vista, para que el redondeo
+          no parezca «otro dólar». */}
+      {configCatalogo && (
+        <ReglaPreciosChip
+          config={configCatalogo}
+          ejemplo={visibles.find((p) => p.efectivo?.lista_usd != null && p.precio_lista_ars == null)}
+          categoriaPorId={categoriaPorId}
+          admin={admin}
+          onCatalogo={() => setCatalogo(true)}
+        />
+      )}
+
       {/* Controles */}
       <div className="ct-rise mb-2 flex flex-col gap-3 sm:flex-row sm:items-center">
         <div
@@ -628,6 +665,7 @@ export function InventarioPage() {
                     sel={sel}
                     activas={activas}
                     filaDe={filaDe}
+                    explicacion={explicarPrecios(p, configCatalogo, categoriaPorId.get(p.categoria))}
                     ocupado={pendiente}
                     onDelta={(sucursalId, delta) =>
                       ajustar.mutate({ producto: p.id, sucursal: sucursalId, delta })
@@ -667,6 +705,11 @@ export function InventarioPage() {
         abierto={detalle !== null}
         contexto={detalle}
         admin={admin}
+        explicacion={
+          detalle
+            ? explicarPrecios(detalle.producto, configCatalogo, categoriaPorId.get(detalle.producto.categoria))
+            : null
+        }
         onCerrar={() => setDetalle(null)}
         onListo={refrescarStock}
       />
@@ -771,6 +814,142 @@ export function InventarioPage() {
 
 // ===== Subcomponentes =====
 
+/** La cuenta de cada precio de un producto (USD × dólar → redondeo), paso a paso. */
+interface ExplicacionPrecios {
+  lista: string[]
+  cash: string[]
+}
+
+function explicarPrecios(
+  producto: ProductoCatalogo,
+  config: ConfiguracionCatalogo | undefined,
+  categoria: CategoriaCatalogo | undefined,
+): ExplicacionPrecios | null {
+  if (!config) return null
+  const dolar = Number(config.dolar)
+  // Igual que el backend: la categoría puede tener su propio redondeo de lista
+  // (Samsung/Apple a $1.000); el del contado es global.
+  const redondeoLista = Number(categoria?.redondeo_ars ?? config.redondeo_lista_ars)
+  return {
+    lista: explicarConversion({
+      etiqueta: 'Lista',
+      valorUsd: producto.efectivo?.lista_usd,
+      dolar,
+      redondeo: redondeoLista,
+      fijado: producto.precio_lista_ars != null,
+    }),
+    cash: explicarConversion({
+      etiqueta: 'Contado',
+      valorUsd: producto.efectivo?.cash_usd,
+      dolar,
+      redondeo: Number(config.redondeo_cash_ars),
+      fijado: producto.precio_cash_ars != null,
+    }),
+  }
+}
+
+/**
+ * La regla con la que el catálogo pasa los dólares a pesos, a la vista. Se
+ * pliega para mostrar la cuenta hecha sobre un producto real de la lista: es
+ * la respuesta a «¿por qué este precio no es USD × dólar exacto?».
+ */
+function ReglaPreciosChip({
+  config,
+  ejemplo,
+  categoriaPorId,
+  admin,
+  onCatalogo,
+}: {
+  config: ConfiguracionCatalogo
+  ejemplo: ProductoCatalogo | undefined
+  categoriaPorId: Map<number, CategoriaCatalogo>
+  admin: boolean
+  onCatalogo: () => void
+}) {
+  const [abierto, setAbierto] = useState(false)
+  const resumen = resumenRegla({
+    dolar: config.dolar,
+    redondeoLista: Number(config.redondeo_lista_ars),
+    redondeoCash: Number(config.redondeo_cash_ars),
+    descuento: config.descuento_cash_pct,
+  })
+  const cuenta = ejemplo ? explicarPrecios(ejemplo, config, categoriaPorId.get(ejemplo.categoria)) : null
+  const redondea = Number(config.redondeo_lista_ars) > 1 || Number(config.redondeo_cash_ars) > 1
+
+  return (
+    <div className="ct-rise mb-4 overflow-hidden rounded-2xl border border-line bg-surface">
+      <button
+        type="button"
+        onClick={() => setAbierto((v) => !v)}
+        aria-expanded={abierto}
+        className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-left transition-colors hover:bg-ink-50/60"
+      >
+        <span className="flex shrink-0 items-center gap-1.5 text-[0.68rem] font-semibold uppercase tracking-[0.1em] text-ink-400">
+          <Calculator className="h-3.5 w-3.5" aria-hidden />
+          Cómo se calculan los precios
+        </span>
+        <span className="tnum min-w-0 text-xs text-ink-700">{resumen}</span>
+        <ChevronDown
+          className={cn('ml-auto h-4 w-4 shrink-0 text-ink-400 transition-transform', abierto && 'rotate-180')}
+          aria-hidden
+        />
+      </button>
+      {abierto && (
+        <div className="space-y-2.5 border-t border-line px-4 py-3 text-xs leading-relaxed text-ink-600">
+          <p>
+            Cada precio en pesos sale del <b>precio de lista en dólares</b> multiplicado por el dólar
+            del negocio{redondea && (
+              <>
+                {' '}y <b>redondeado para arriba</b> al múltiplo configurado
+              </>
+            )}
+            . El contado parte de la lista en dólares menos el descuento de su categoría.
+            {redondea && (
+              <>
+                {' '}En los productos baratos el redondeo pesa más que el dólar: por eso un cambio
+                chico del dólar puede no mover el precio, y dividir pesos por dólares no da el dólar
+                exacto.
+              </>
+            )}
+          </p>
+          {ejemplo && cuenta && (cuenta.lista.length > 0 || cuenta.cash.length > 0) && (
+            <div className="rounded-xl bg-ink-50 px-3 py-2">
+              <p className="mb-0.5 font-medium text-ink-900">Ejemplo: {ejemplo.nombre}</p>
+              {cuenta.lista.length > 0 && (
+                <p className="tnum">
+                  <span className="text-ink-400">Lista:</span> {cuenta.lista.join(' → ')}
+                </p>
+              )}
+              {cuenta.cash.length > 0 && (
+                <p className="tnum">
+                  <span className="text-ink-400">Contado:</span> {cuenta.cash.join(' → ')}
+                </p>
+              )}
+            </div>
+          )}
+          <p className="text-ink-500">
+            {admin ? (
+              <>
+                Los redondeos se eligen en{' '}
+                <button
+                  type="button"
+                  onClick={onCatalogo}
+                  className="font-medium text-ink-900 underline underline-offset-2 hover:text-ink-700"
+                >
+                  Catálogo
+                </button>
+                : con «Exacto» los precios siguen al dólar sin redondear.
+              </>
+            ) : (
+              'Los redondeos los define un administrador en Catálogo.'
+            )}
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function PillSucursal({
   activa,
   onClick,
@@ -862,15 +1041,21 @@ function CeldaPrecio({
   label,
   valor,
   valorUsd,
+  detalle,
   destacado = false,
 }: {
   label: string
   valor: string | number | null | undefined
   valorUsd: string | number | null | undefined
+  /** La cuenta que llevó a este precio (USD × dólar → redondeo), para el tooltip. */
+  detalle?: string[]
   destacado?: boolean
 }) {
   const vacio = valor == null || valor === ''
   const vacioUsd = valorUsd == null || valorUsd === ''
+  const titulo = vacio
+    ? 'Sin precio cargado'
+    : [`${label}: ${money0(Number(valor))}`, ...(detalle ?? [])].join('\n')
   return (
     <div
       className={cn(
@@ -886,7 +1071,7 @@ function CeldaPrecio({
           'tnum block truncate text-xs md:text-[0.8125rem]',
           vacio ? 'text-ink-300' : destacado ? 'font-semibold text-ink-900' : 'text-ink-600',
         )}
-        title={vacio ? 'Sin precio cargado' : `${label}: ${money0(Number(valor))}`}
+        title={titulo}
       >
         {vacio ? '—' : money0(Number(valor))}
       </span>
@@ -908,6 +1093,7 @@ function FilaProducto({
   sel,
   activas,
   filaDe,
+  explicacion,
   ocupado,
   onDelta,
   onDetalle,
@@ -921,6 +1107,8 @@ function FilaProducto({
   sel: SeleccionSucursal
   activas: Sucursal[]
   filaDe: (productoId: number, sucursalId: number) => StockRow | undefined
+  /** La cuenta de cada precio, para el tooltip (null hasta tener la configuración). */
+  explicacion: ExplicacionPrecios | null
   ocupado: string | null
   onDelta: (sucursalId: number, delta: number) => void
   onDetalle: (sucursal: Sucursal) => void
@@ -937,14 +1125,39 @@ function FilaProducto({
   const cashUsd = producto.efectivo?.cash_usd
 
   const etiquetas = [producto.calidad, producto.marca, producto.nota].filter(Boolean).join(' · ')
+  // Un precio en pesos fijado a mano no sigue al dólar: se avisa en la fila,
+  // porque es la causa más común de «cambié el dólar y este no se movió».
+  const fijadoEnPesos = producto.precio_lista_ars != null || producto.precio_cash_ars != null
+  const badgeFijado = fijadoEnPesos && (
+    <Badge
+      tone="outline"
+      className="shrink-0"
+      title={
+        producto.precio_lista_ars != null && producto.precio_cash_ars != null
+          ? 'Lista y contado en pesos fijados a mano: no siguen al dólar (se liberan desde Precio)'
+          : producto.precio_lista_ars != null
+            ? 'Precio de lista en pesos fijado a mano: no sigue al dólar (se libera desde Precio)'
+            : 'Precio de contado en pesos fijado a mano: no sigue al dólar (se libera desde Precio)'
+      }
+    >
+      <Pin className="h-3 w-3" aria-hidden />
+      fijado en $
+    </Badge>
+  )
   // Contado y transferencia comparten precio (misma regla que la Venta rápida
   // de Caja). Cada uno tiene columna propia: en md+ alineadas bajo el
   // encabezado; abajo de md el nombre se lleva su renglón y los precios caen
   // debajo como celdas etiquetadas (solas en el celular, junto al stock en sm).
   const columnasPrecio = (
     <div className="flex w-full basis-full items-stretch gap-2 sm:w-auto sm:flex-1 md:w-auto md:flex-none md:shrink-0 md:basis-auto md:items-center md:gap-3">
-      <CeldaPrecio label="Lista" valor={lista} valorUsd={listaUsd} />
-      <CeldaPrecio label="Contado/transf." valor={cash} valorUsd={cashUsd} destacado />
+      <CeldaPrecio label="Lista" valor={lista} valorUsd={listaUsd} detalle={explicacion?.lista} />
+      <CeldaPrecio
+        label="Contado/transf."
+        valor={cash}
+        valorUsd={cashUsd}
+        detalle={explicacion?.cash}
+        destacado
+      />
     </div>
   )
 
@@ -974,6 +1187,7 @@ function FilaProducto({
                 a pedido
               </Badge>
             )}
+            {badgeFijado}
           </div>
           {etiquetas && <p className="truncate text-xs text-ink-400">{etiquetas}</p>}
         </div>
@@ -1052,6 +1266,7 @@ function FilaProducto({
               a pedido
             </Badge>
           )}
+          {badgeFijado}
           {sinDato && (
             <Badge
               tone="outline"
@@ -1199,12 +1414,15 @@ function DetalleStockModal({
   abierto,
   contexto,
   admin,
+  explicacion,
   onCerrar,
   onListo,
 }: {
   abierto: boolean
   contexto: { producto: ProductoCatalogo; sucursal: Sucursal } | null
   admin: boolean
+  /** La cuenta de los precios de este producto (USD × dólar → redondeo). */
+  explicacion: ExplicacionPrecios | null
   onCerrar: () => void
   onListo: (fila: StockRow) => void
 }) {
@@ -1295,6 +1513,24 @@ function DetalleStockModal({
       </div>
 
       <div className="max-h-[70vh] space-y-5 overflow-y-auto px-5 py-5">
+        {explicacion && (explicacion.lista.length > 0 || explicacion.cash.length > 0) && (
+          <div className="rounded-xl border border-line bg-canvas/40 px-3 py-2.5 text-xs text-ink-600">
+            <p className="mb-1 flex items-center gap-1.5 text-[0.62rem] font-semibold uppercase tracking-[0.1em] text-ink-400">
+              <Calculator className="h-3.5 w-3.5" aria-hidden />
+              Cómo se calcula el precio
+            </p>
+            {explicacion.lista.length > 0 && (
+              <p className="tnum">
+                <span className="text-ink-400">Lista:</span> {explicacion.lista.join(' → ')}
+              </p>
+            )}
+            {explicacion.cash.length > 0 && (
+              <p className="tnum">
+                <span className="text-ink-400">Contado:</span> {explicacion.cash.join(' → ')}
+              </p>
+            )}
+          </div>
+        )}
         {fila?.sin_dato && fila.cantidad === 0 && (
           <p className="rounded-xl border border-line bg-ink-50 px-3 py-2.5 text-xs text-ink-600">
             <b>(no informado)</b> — la planilla de esta sucursal no traía cantidad para este

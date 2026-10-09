@@ -435,6 +435,28 @@ export function AyudaInventario() {
         />
       </AyudaSeccion>
 
+      <AyudaSeccion titulo="Por qué un precio no es «USD × dólar» exacto">
+        <p>
+          Los pesos salen del precio de lista en dólares multiplicado por el dólar del negocio y
+          <b> redondeados para arriba</b> al múltiplo configurado en Catálogo (hoy, la lista a $100 y el
+          contado a $1.000). En los productos baratos ese redondeo pesa más que el dólar: por eso un
+          cambio chico del dólar puede no mover un precio, y dividir pesos por dólares no da el dólar
+          exacto. La tarjeta <b>Cómo se calculan los precios</b>, arriba de la lista, muestra la cuenta
+          hecha sobre un producto real; cada precio también la trae al pasar el mouse.
+        </p>
+        <AyudaEjemplo titulo="adaptador de USD 2,04 con dólar $1.565">
+          <p className="tnum">
+            2,04 × 1.565 = $ 3.192,60 → redondeado para arriba a $100 → <b>$ 3.200</b> (parece «dólar
+            1.569»). El contado: USD 1,63 × 1.565 = $ 2.550,95 → a $1.000 → <b>$ 3.000</b>. Con el
+            redondeo en «Exacto», quedarían $ 3.193 y $ 2.551.
+          </p>
+        </AyudaEjemplo>
+        <p>
+          Un producto con la etiqueta <b>fijado en $</b> tiene el precio en pesos cargado a mano: no
+          sigue al dólar hasta que se borre ese valor desde <b>Precio</b>.
+        </p>
+      </AyudaSeccion>
+
       <AyudaSeccion titulo="Cómo cargar mercadería que llegó">
         <AyudaPasos
           pasos={[

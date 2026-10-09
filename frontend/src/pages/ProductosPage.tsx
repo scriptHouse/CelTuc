@@ -454,9 +454,22 @@ export function ProductosPage() {
                     <span className="text-xs text-ink-400"> ({excepcionesCash})</span>
                   )}
                 </p>
+                <p className="tnum">
+                  Redondeo{' '}
+                  <b className="text-ink-950">
+                    {Number(config.redondeo_lista_ars) > 1
+                      ? `lista ↑ a $ ${num(Number(config.redondeo_lista_ars))}`
+                      : 'lista exacta'}
+                    {' · '}
+                    {Number(config.redondeo_cash_ars) > 1
+                      ? `contado ↑ a $ ${num(Number(config.redondeo_cash_ars))}`
+                      : 'contado exacto'}
+                  </b>
+                </p>
                 <p className="text-xs leading-relaxed text-ink-400">
                   Es el mismo dólar de Service: cambiarlo actualiza las dos listas
-                  {admin ? ' (desde Configurar).' : '.'}
+                  {admin ? ' (desde Configurar).' : '.'} Los pesos se redondean para arriba al
+                  múltiplo indicado.
                 </p>
               </div>
             ) : (

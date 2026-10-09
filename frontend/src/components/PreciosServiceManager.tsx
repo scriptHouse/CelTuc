@@ -26,6 +26,7 @@ import {
   type PrecioInput,
 } from '@/services/preciosService'
 import { ApiError } from '@/lib/api'
+import { explicarConversion, opcionesRedondeo } from '@/lib/precios'
 import { cn, coincideBusqueda } from '@/lib/utils'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
@@ -292,19 +293,26 @@ function ConfigEditor({
   onListo: () => void
 }) {
   const toast = useToast()
-  const [redondeo, setRedondeo] = useState(aTexto(config.redondeo_ars))
+  const actual = String(Math.trunc(Number(config.redondeo_ars)))
+  const [redondeo, setRedondeo] = useState(actual)
 
   useEffect(() => {
-    setRedondeo(aTexto(config.redondeo_ars))
+    setRedondeo(String(Math.trunc(Number(config.redondeo_ars))))
   }, [config])
 
-  const sucio = redondeo !== aTexto(config.redondeo_ars)
+  const sucio = redondeo !== actual
+
+  // La cuenta hecha sobre un trabajo chico (USD 10): ahí el redondeo al
+  // millar se nota más que el dólar, y conviene verlo antes de guardar.
+  const ejemplo = explicarConversion({
+    etiqueta: 'Lista', valorUsd: 10, dolar: Number(config.dolar), redondeo: Number(redondeo), fijado: false,
+  })
 
   const guardar = useMutation({
     mutationFn: () => {
-      const valor = aNumero(redondeo)
-      if (valor === null || valor < 1) {
-        throw new ApiError(0, 'Poné un redondeo válido (ej: 1000).', null)
+      const valor = Number(redondeo)
+      if (!(valor >= 1)) {
+        throw new ApiError(0, 'Elegí un redondeo.', null)
       }
       return actualizarConfiguracion({ redondeo_ars: Math.trunc(valor) })
     },
@@ -318,14 +326,31 @@ function ConfigEditor({
   return (
     <div className="rounded-2xl border border-line bg-canvas/40 p-4">
       <p className="mb-2.5 flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-ink-400">
-        <Settings2 className="h-3.5 w-3.5" /> Parámetros de la lista
+        <Settings2 className="h-3.5 w-3.5" /> Parámetros de la lista · redondeo de los pesos
       </p>
-      <div className="grid grid-cols-2 gap-2">
-        <CampoNumero etiqueta="Redondeo $" valor={redondeo} onChange={setRedondeo} />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="min-w-0">
+          <span className="mb-1 block text-[0.68rem] font-medium uppercase tracking-[0.06em] text-ink-400">
+            Precios en $ (lista y contado)
+          </span>
+          <Select
+            options={opcionesRedondeo(Math.trunc(Number(config.redondeo_ars)))}
+            value={redondeo}
+            onChange={setRedondeo}
+          />
+          {ejemplo.length > 0 && (
+            <p className="tnum mt-1 text-[0.7rem] leading-snug text-ink-400">
+              Ej. USD 10: {ejemplo.join(' → ')}
+            </p>
+          )}
+        </div>
       </div>
-      <div className="mt-2.5 flex items-center justify-between gap-3">
-        <p className="text-xs leading-relaxed text-ink-400">
-          El dólar se cambia arriba (compartido con Productos); el descuento cash, en su tarjeta.
+      <div className="mt-2.5 flex flex-wrap items-center justify-between gap-3">
+        <p className="min-w-0 flex-1 text-xs leading-relaxed text-ink-400">
+          La lista en pesos es USD × dólar del negocio, <b>redondeada para arriba</b> al múltiplo
+          elegido; el contado le resta el descuento y se redondea igual. Con «Exacto» siguen al
+          dólar tal cual. El dólar se cambia arriba (compartido con Productos); el descuento cash,
+          en su tarjeta.
         </p>
         <Button size="sm" onClick={() => guardar.mutate()} disabled={!sucio || guardar.isPending}>
           {guardar.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Guardar'}

@@ -364,14 +364,27 @@ def registrar_cambio_dolar(config, nuevo, *, origen, usuario=None, blue=None, no
     nuevo = Decimal(str(nuevo)).quantize(_CENTAVO, rounding=ROUND_HALF_UP)
     if nuevo <= 0:
         raise ValidationError('El dolar tiene que ser mayor a 0.')
-    anterior = Decimal(config.dolar).quantize(_CENTAVO) if config.dolar is not None else None
-    if anterior is not None and anterior == nuevo:
-        return None
 
-    ahora = timezone.now()
     blue = blue or {}
     automatico = origen == HistorialDolar.Origen.AUTOMATICO
     with transaction.atomic():
+        # Se bloquea la fila de configuracion y se compara contra lo que hay EN
+        # LA BASE, no contra la instancia que trajo quien llama: con varios
+        # workers, dos peticiones simultaneas calculaban el mismo dolar y las
+        # dos lo registraban (dos filas «vigente ahora»). Con el bloqueo, la
+        # segunda espera, ve el valor ya escrito y no hace nada.
+        en_base = (
+            ConfiguracionService.todos.select_for_update()
+            .filter(pk=config.pk)
+            .values_list('dolar', flat=True)
+            .first()
+        )
+        anterior = Decimal(en_base).quantize(_CENTAVO) if en_base is not None else None
+        if anterior is not None and anterior == nuevo:
+            config.dolar = nuevo  # la instancia se pone al dia con la base
+            return None
+
+        ahora = timezone.now()
         HistorialDolar.objects.filter(vigente_hasta__isnull=True).update(vigente_hasta=ahora)
         fila = HistorialDolar.objects.create(
             valor=nuevo,

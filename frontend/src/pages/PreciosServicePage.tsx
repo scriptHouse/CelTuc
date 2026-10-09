@@ -387,6 +387,7 @@ export function PreciosServicePage() {
                 </p>
                 <p className="text-xs leading-relaxed text-ink-400">
                   Los pesos salen del dólar y se redondean para arriba
+                  {Number(config.redondeo_ars) > 1 ? ` a $ ${num(Number(config.redondeo_ars))}` : ''}
                   {admin ? '; cambialo desde Configurar y toda la lista se actualiza.' : '.'}
                 </p>
               </div>
