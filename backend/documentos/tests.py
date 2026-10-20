@@ -152,20 +152,25 @@ class HistorialDocumentosTests(TestCase):
 
     # --- Visibilidad ------------------------------------------------------
 
-    def test_cada_empleado_ve_solo_lo_suyo_y_el_admin_ve_todo(self):
+    def test_empleados_y_admin_ven_lo_de_todo_el_equipo(self):
         self._registrar(self.empleado, cliente='Cliente del empleado')
         self._registrar(self.otro, cliente='Cliente del otro')
+        url = reverse('documentos:documento-list')
 
-        propio = self._client(self.empleado).get(reverse('documentos:documento-list'))
-        self.assertEqual(propio.data['total'], 1)
-        self.assertEqual(propio.data['resultados'][0]['cliente'], 'Cliente del empleado')
-        self.assertFalse(propio.data['puede_ver_todo'])
-        self.assertNotIn('usuarios', propio.data)
+        for cuenta in (self.empleado, self.otro, self.admin):
+            r = self._client(cuenta).get(url)
+            self.assertEqual(r.data['total'], 2)
+            self.assertEqual(
+                {d['cliente'] for d in r.data['resultados']},
+                {'Cliente del empleado', 'Cliente del otro'},
+            )
+            self.assertTrue(r.data['puede_ver_todo'])
+            self.assertEqual(set(r.data['usuarios']), {'empdocs', 'otrodocs'})
 
-        todo = self._client(self.admin).get(reverse('documentos:documento-list'))
-        self.assertEqual(todo.data['total'], 2)
-        self.assertTrue(todo.data['puede_ver_todo'])
-        self.assertEqual(set(todo.data['usuarios']), {'empdocs', 'otrodocs'})
+        # Un empleado tambien puede filtrar por autor.
+        r = self._client(self.empleado).get(url, {'usuario': 'otrodocs'})
+        self.assertEqual(r.data['total'], 1)
+        self.assertEqual(r.data['resultados'][0]['cliente'], 'Cliente del otro')
 
     def test_filtros_y_busqueda(self):
         self._registrar(self.admin, tipo='compraventa', cliente='Juan Perez')
@@ -203,10 +208,10 @@ class HistorialDocumentosTests(TestCase):
         r = self._client(self.empleado).get(url, {'descargar': '1'})
         self.assertIn('attachment', r['Content-Disposition'])
 
-    def test_un_empleado_no_baja_el_documento_de_otro(self):
+    def test_un_empleado_baja_el_documento_de_otro(self):
         doc_id = self._registrar(self.otro).data['id']
         url = reverse('documentos:documento-archivo', args=[doc_id])
-        self.assertEqual(self._client(self.empleado).get(url).status_code, 404)
+        self.assertEqual(self._client(self.empleado).get(url).status_code, 200)
         self.assertEqual(self._client(self.admin).get(url).status_code, 200)
 
     def test_sin_sesion_no_se_baja_nada(self):
@@ -540,14 +545,14 @@ class EnviarDocumentoPorEmailTests(TestCase):
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         )
 
-    def test_un_empleado_no_envia_el_documento_de_otro(self):
+    def test_un_empleado_envia_el_documento_de_otro(self):
         doc_id = self._documento(self.otro)
+        # Todos ven (y por lo tanto envian) el historial de todo el equipo.
         r = self._client(self.empleado).post(self._url(doc_id), {'email': 'd@x.com'}, format='json')
-        self.assertEqual(r.status_code, 404)
-        self.assertEqual(len(mail.outbox), 0)
-        # El admin ve (y por lo tanto envia) el de todo el equipo.
+        self.assertEqual(r.status_code, 200)
         r = self._client(self.admin).post(self._url(doc_id), {'email': 'd@x.com'}, format='json')
         self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(mail.outbox), 2)
 
     def test_sin_sesion_no_se_envia_nada(self):
         doc_id = self._documento(self.empleado)

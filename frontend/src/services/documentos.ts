@@ -7,7 +7,7 @@ import { useAuth } from '@/store/auth'
  * Cada exportación del módulo Documentos (PDF, Excel o ticket POS80) sube el
  * archivo tal cual se descargó, junto con los datos del formulario. Después:
  *
- * - Cada cuenta ve LOS SUYOS; los administradores ven los de todo el equipo.
+ * - Todas las cuentas ven los de todo el equipo (y pueden filtrar por autor).
  * - Eliminar es borrado lógico y solo para administradores.
  * - Los archivos no tienen URL pública: se bajan como blob por un endpoint
  *   autenticado, igual que los adjuntos de la cartelera.

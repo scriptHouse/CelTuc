@@ -46,8 +46,8 @@ import { ExportarTablaModal, type GestorExport } from '@/components/exportar/Exp
  * Historial de documentos generados: la pestaña "Archivo" del módulo.
  *
  * Cada renglón es una exportación real (con su archivo guardado en el
- * servidor). Un empleado ve las suyas; un administrador, las de todo el
- * equipo. Eliminar es borrado lógico y solo para administradores.
+ * servidor). Todos ven las de todo el equipo y pueden filtrar por autor.
+ * Eliminar es borrado lógico y solo para administradores.
  */
 
 const LIMITE = 30
@@ -319,7 +319,7 @@ export function HistorialDocumentos({ tipoInicial = '' }: { tipoInicial?: string
         <div
           className={cn(
             'grid gap-2.5 sm:grid-cols-2',
-            esAdmin ? 'lg:grid-cols-4' : 'lg:grid-cols-3',
+            primera?.puede_ver_todo ? 'lg:grid-cols-4' : 'lg:grid-cols-3',
           )}
         >
           <Select placeholder="Todos los documentos" value={tipo} onChange={setTipo} options={opcionesTipo} />
@@ -330,7 +330,7 @@ export function HistorialDocumentos({ tipoInicial = '' }: { tipoInicial?: string
             onChange={setSucursal}
             options={opcionesSucursal}
           />
-          {esAdmin && (
+          {primera?.puede_ver_todo && (
             <Select
               placeholder="Todo el equipo"
               value={usuario}
@@ -385,7 +385,7 @@ export function HistorialDocumentos({ tipoInicial = '' }: { tipoInicial?: string
           description={
             hayFiltros
               ? 'Ningún documento coincide con los filtros. Probá ampliar el rango de fechas.'
-              : 'Todavía no generaste ningún documento. Cada PDF, Excel o ticket que exportes queda guardado acá con su archivo.'
+              : 'Todavía no hay documentos generados. Cada PDF, Excel o ticket que se exporte queda guardado acá con su archivo.'
           }
         />
       ) : (

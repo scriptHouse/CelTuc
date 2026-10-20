@@ -104,11 +104,12 @@ class HistorialDocumentos(permissions.BasePermission):
 
 
 def _visibles_para(usuario):
-    """Documentos que esta cuenta puede ver: los suyos, o todos si es admin."""
-    qs = DocumentoGenerado.objects.select_related('creado_por', 'creado_por__empleado')
-    if not usuario.es_administrador:
-        qs = qs.filter(creado_por=usuario)
-    return qs
+    """Documentos que esta cuenta puede ver: los de todo el equipo.
+
+    Cualquier cuenta con acceso ve (y descarga y envia) lo que genero
+    cualquier companero; solo eliminar sigue siendo de administradores.
+    """
+    return DocumentoGenerado.objects.select_related('creado_por', 'creado_por__empleado')
 
 
 def _fecha_local(texto):
@@ -146,10 +147,8 @@ class DocumentoListCreateView(APIView):
         sucursal = (params.get('sucursal') or '').strip()
         if sucursal:
             qs = qs.filter(sucursal=sucursal)
-        # Filtrar por autor solo tiene sentido para el admin: el resto ya esta
-        # acotado a sus propios documentos por `_visibles_para`.
         autor = (params.get('usuario') or '').strip()
-        if autor and request.user.es_administrador:
+        if autor:
             qs = qs.filter(creado_por__username__iexact=autor)
         q = (params.get('q') or '').strip()
         if q:
@@ -180,16 +179,15 @@ class DocumentoListCreateView(APIView):
         # primera pagina: el "cargar mas" no vuelve a pagar esos conteos.
         if offset == 0:
             respuesta['resumen'] = self._resumen(request.user)
-            respuesta['puede_ver_todo'] = bool(request.user.es_administrador)
+            respuesta['puede_ver_todo'] = True
             base = _visibles_para(request.user)
             respuesta['sucursales'] = sorted(
                 s for s in base.values_list('sucursal', flat=True).distinct() if s
             )
-            if request.user.es_administrador:
-                respuesta['usuarios'] = sorted(
-                    u for u in base.exclude(creado_por=None)
-                    .values_list('creado_por__username', flat=True).distinct() if u
-                )
+            respuesta['usuarios'] = sorted(
+                u for u in base.exclude(creado_por=None)
+                .values_list('creado_por__username', flat=True).distinct() if u
+            )
         return Response(respuesta)
 
     @staticmethod
@@ -396,8 +394,8 @@ class EnviarDocumentoEmailView(APIView):
     """POST: manda por email el documento archivado, con su archivo adjunto.
 
     Mismo alcance que la descarga (`_visibles_para`): cada cuenta puede enviar
-    lo que puede ver, y un empleado no puede mandar el documento de otro. No
-    toca el historial ni el archivo: es la misma entrega, por otro canal.
+    lo que puede ver, que es el historial de todo el equipo. No toca el
+    historial ni el archivo: es la misma entrega, por otro canal.
 
     Nunca devuelve un 500 opaco: sin SMTP configurado avisa 503, si el archivo
     ya no esta 404, y cualquier otro fallo del correo 502 con el detalle.
