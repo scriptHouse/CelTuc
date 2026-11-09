@@ -77,6 +77,9 @@ SENTINEL="$ROOT/.last-deploy-sha"
 #                     (p. ej. validar el .env del servidor).
 #   BACKUP_EXTRA_CMD  al final del respaldo, con $BACKUP_DIR definido
 #                     (p. ej. tar de un volumen chico que no es la base).
+#   PREPARE_CMD       despues del build y de los tests, antes de recrear los
+#                     servicios, solo si se construyo algo (p. ej. generar
+#                     contenido con la imagen nueva). Si falla, no se toca nada.
 PRE_DEPLOY_CMD="${PRE_DEPLOY_CMD:-}"
 BACKUP_EXTRA_CMD="${BACKUP_EXTRA_CMD:-}"
 
@@ -225,7 +228,14 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 # de git (untracked) y `git reset --hard` no la toca.
 BACKUP_ROOT="$ROOT/.deploy-backups"
 BACKUP_DIR="$BACKUP_ROOT/$STAMP"
+# Los respaldos contienen credenciales del entorno: mascara restrictiva solo
+# durante el respaldo, para no cambiar permisos del checkout ni del build.
+UMASK_PREVIA="$(umask)"
+umask 077
 mkdir -p "$BACKUP_DIR"
+# La mascara no corrige respaldos existentes ni archivos sobrescritos.
+find "$BACKUP_ROOT" -type d -exec chmod 700 {} +
+find "$BACKUP_ROOT" -type f -exec chmod 600 {} +
 
 [[ -f .env ]] && cp .env "$BACKUP_DIR/environment.env" 2>/dev/null || true
 
@@ -233,27 +243,55 @@ if [[ ${#CONTAINER_OF[@]} -gt 0 ]]; then
   docker inspect "${CONTAINER_OF[@]}" > "$BACKUP_DIR/containers.json" 2>/dev/null || true
 fi
 
+# Listar primero distingue un primer deploy de un error del daemon.
+contenedores_previos="$(docker container ls -a --format '{{.Names}}')"
 for svc in "${BUILD_SERVICES[@]}"; do
-  image_ref="$(compose config --images "$svc" 2>/dev/null | head -n1)"
-  [[ -n "$image_ref" ]] || continue
-  if docker image inspect "$image_ref" >/dev/null 2>&1; then
-    rollback_tag="${image_ref%:*}:rollback-$STAMP"
-    docker image tag "$image_ref" "$rollback_tag"
-    ROLLBACK_TAG["$svc"]="$rollback_tag"
-    ROLLBACK_ORIGINAL["$svc"]="$image_ref"
-    echo "   $svc: $rollback_tag"
-  else
-    echo "   $svc: sin imagen previa (primer deploy), no hay nada que taggear"
+  nombre_contenedor="${CONTAINER_OF[$svc]:-}"
+  [[ -n "$nombre_contenedor" ]] || { echo "   $svc: falta CONTAINER_OF para preparar el rollback." >&2; exit 1; }
+  if ! grep -Fxq -- "$nombre_contenedor" <<< "$contenedores_previos"; then
+    echo "   $svc: sin contenedor previo (primer deploy), no hay rollback disponible"
+    continue
   fi
+  # El nombre sale del contenedor y no de `compose config --images <svc>`:
+  # ese comando tambien lista las dependencias del servicio en orden variable.
+  image_ref="$(docker container inspect --format='{{.Config.Image}}' "$nombre_contenedor")"
+  [[ -n "$image_ref" ]] || { echo "   $svc: no se pudo identificar la imagen del contenedor." >&2; exit 1; }
+  # latest puede haber cambiado en un build fallido; el contenedor conserva
+  # el ID inmutable de la imagen realmente instalada.
+  imagen_previa="$(docker container inspect --format='{{.Image}}' "$nombre_contenedor")"
+  [[ -n "$imagen_previa" ]] || { echo "   $svc: no se pudo identificar la imagen instalada." >&2; exit 1; }
+  rollback_tag="${image_ref%:*}:rollback-$STAMP"
+  docker image tag "$imagen_previa" "$rollback_tag"
+  ROLLBACK_TAG["$svc"]="$rollback_tag"
+  ROLLBACK_ORIGINAL["$svc"]="$image_ref"
+  echo "   $svc: $rollback_tag"
 done
 
+db_existe=""
 if [[ -n "$DB_NAME" ]]; then
-  if docker exec postgres pg_dump -U root -d "$DB_NAME" -Fc > "$BACKUP_DIR/database.dump" 2>/dev/null; then
-    echo "   dump de $DB_NAME -> $BACKUP_DIR/database.dump"
-  else
-    echo "   AVISO: no se pudo volcar $DB_NAME (contenedor 'postgres' ausente o primer deploy)"
-    rm -f "$BACKUP_DIR/database.dump"
+  # Si postgres no responde no se puede saber si la base existe: se corta
+  # (no se deploya a ciegas). Si responde y la base todavia no existe (p. ej.
+  # un backend que aun no se configuro), no hay nada que perder: se avisa y se sigue.
+  db_existe="$(docker exec postgres psql -U root -d postgres -Atc \
+    "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME'" 2>/dev/null)" || {
+    echo "   ERROR: no se pudo consultar el contenedor 'postgres'; no se sigue sin respaldo de $DB_NAME." >&2
+    exit 1
+  }
+  [[ "$db_existe" == "1" ]] || echo "   AVISO: la base $DB_NAME todavia no existe; no hay nada que respaldar."
+fi
+if [[ "$db_existe" == "1" ]]; then
+  if ! docker exec postgres pg_dump -U root -d "$DB_NAME" -Fc > "$BACKUP_DIR/database.dump.parcial" 2>/dev/null; then
+    rm -f "$BACKUP_DIR/database.dump.parcial"
+    echo "   ERROR: pg_dump fallo; no se sigue sin respaldo de $DB_NAME." >&2
+    exit 1
   fi
+  if [[ ! -s "$BACKUP_DIR/database.dump.parcial" ]]; then
+    rm -f "$BACKUP_DIR/database.dump.parcial"
+    echo "   ERROR: el dump de $DB_NAME quedo vacio; se cancela el deploy." >&2
+    exit 1
+  fi
+  mv "$BACKUP_DIR/database.dump.parcial" "$BACKUP_DIR/database.dump"
+  echo "   dump verificado de $DB_NAME -> $BACKUP_DIR/database.dump"
 fi
 if [[ -n "$BACKUP_EXTRA_CMD" ]]; then
   export BACKUP_DIR
@@ -262,6 +300,7 @@ if [[ -n "$BACKUP_EXTRA_CMD" ]]; then
     exit 1
   fi
 fi
+umask "$UMASK_PREVIA"
 phase_time "respaldo"
 
 # ----------------------------------------------------------------------
@@ -330,6 +369,18 @@ phase_time "decision"
 echo ""
 if [[ ${#SERVICES_TO_BUILD[@]} -gt 0 ]]; then
   echo ">> [3/6] Build secuencial..."
+  # Builder de baja prioridad (lo crea sh-build-builder.sh de scripthouse-infra):
+  # el build compite con los sitios del mismo host con peso de CPU 8 contra
+  # 100 y con tope de memoria. Si no esta corriendo se usa el builder interno
+  # de dockerd, como siempre: esto nunca bloquea un deploy.
+  if [[ "$(docker inspect -f '{{.State.Running}}' buildx_buildkit_sh-lowprio0 2>/dev/null)" == "true" ]]; then
+    docker buildx inspect sh-lowprio >/dev/null 2>&1 \
+      || docker buildx create --name sh-lowprio --driver docker-container --node sh-lowprio0 >/dev/null 2>&1 || true
+    if docker buildx inspect sh-lowprio >/dev/null 2>&1; then
+      export BUILDX_BUILDER=sh-lowprio
+    fi
+  fi
+  echo "   builder: ${BUILDX_BUILDER:-default (interno de dockerd)}"
   for svc in "${SERVICES_TO_BUILD[@]}"; do
     echo "   --- build: $svc ---"
     compose build "$svc"
@@ -360,6 +411,11 @@ fi
 # declarado que no este corriendo.
 # ----------------------------------------------------------------------
 echo ""
+if [[ -n "${PREPARE_CMD:-}" && ${#SERVICES_TO_BUILD[@]} -gt 0 ]]; then
+  echo ">> Preparando contenido antes de activar la nueva version..."
+  eval "$PREPARE_CMD"
+  phase_time "preparar contenido"
+fi
 echo ">> [5/6] Recreando servicios..."
 if [[ ${#SERVICES_TO_BUILD[@]} -gt 0 ]]; then
   IMAGES_REPLACED=1
@@ -455,7 +511,10 @@ if [[ "$RETAIN" -gt 0 ]]; then
 fi
 
 if [[ "$PRUNE_AFTER" -eq 1 ]]; then
-  docker image prune -f >/dev/null
+  # Best-effort: el deploy ya salio bien. Docker no permite dos prune a la
+  # vez ("a prune operation is already running") y con varios deploys
+  # seguidos en el mismo host chocaban: el deploy quedaba "failed" sin serlo.
+  docker image prune -f >/dev/null 2>&1 || echo "   AVISO: docker image prune no corrio (otro prune en curso); lo hace docker-prune.sh."
 fi
 phase_time "cierre"
 
